@@ -73,7 +73,6 @@ def analyze_chart_image(
                 line,
                 font=font,
                 fill=(255, 255, 255, 255),
-                direction="rtl" if any("\u0600" <= ch <= "\u06FF" for ch in line) else None,
             )
             y += int(font.size * 1.55) if hasattr(font, "size") else 38
 
