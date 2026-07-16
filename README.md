@@ -1,41 +1,12 @@
-# SaleeM
+# SaleeM — ChatGPT Analysis + Gemini Drawing
 
-برنامج أولي لتحليل صور شارت الذهب، مخصص مبدئيًا لـ **GOLD / M5**.
+## Railway variables
 
-## ما يعمل الآن
+- `OPENAI_API_KEY`: analyzes the uploaded chart.
+- `OPENAI_MODEL`: defaults to `gpt-4.1-mini`.
+- `GEMINI_API_KEY`: edits/annotates the chart image.
+- `GEMINI_IMAGE_MODEL`: defaults to `gemini-2.5-flash-image`.
 
-- رفع صورة من الهاتف.
-- التحقق من صحة الصورة.
-- إنشاء نتيجة مرئية تجريبية.
-- تحميل قواعد تداول أولية من `data/rules.json`.
-- واجهة عربية متجاوبة مع الآيفون.
-- جاهز للنشر على Render أو Railway أو أي خادم يدعم Python.
+ChatGPT returns structured trading-chart observations and drawing instructions. Gemini receives the original image plus those instructions and returns an annotated copy. If Gemini drawing fails, the textual ChatGPT analysis still appears and the original image is shown.
 
-## تشغيل محلي
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-
-ثم افتح:
-
-```text
-http://127.0.0.1:8000
-```
-
-## المرحلة التالية
-
-1. قص منطقة الشارت تلقائيًا.
-2. قراءة محور الأسعار.
-3. اكتشاف أجسام الشموع والظلال.
-4. تحويل البكسل إلى سعر.
-5. حساب الدعم والمقاومة.
-6. اكتشاف الكسر وإعادة الاختبار.
-7. ربط نموذج رؤية وذاكرة للحالات السابقة.
-
-## تنبيه
-
-النسخة الحالية تجريبية ولا تقدم توصيات تداول حقيقية.
+This application provides educational analysis, not guaranteed trading signals.
