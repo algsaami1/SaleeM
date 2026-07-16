@@ -35,6 +35,7 @@ async def home(request: Request):
         {
             "request": request,
             "result": None,
+            "error": None,
         },
     )
 
@@ -81,12 +82,19 @@ async def analyze(
             detail="الملف المرفوع ليس صورة صالحة.",
         ) from exc
 
-    result = analyze_chart_image(
-        image_path=upload_path,
-        symbol=symbol.strip().upper() or "GOLD",
-        timeframe=timeframe.strip().upper() or "M5",
-        result_dir=RESULT_DIR,
-    )
+    try:
+        result = analyze_chart_image(
+            image_path=upload_path,
+            symbol=symbol.strip().upper() or "GOLD",
+            timeframe=timeframe.strip().upper() or "M5",
+            result_dir=RESULT_DIR,
+        )
+    except Exception as exc:
+        return templates.TemplateResponse(
+            "index.html",
+            {"request": request, "result": None, "error": str(exc)},
+            status_code=500,
+        )
 
     return templates.TemplateResponse(
         "index.html",

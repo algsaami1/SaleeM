@@ -1,12 +1,21 @@
-# SaleeM — ChatGPT Analysis + Gemini Drawing
+# SaleeM — محلل شارت الذهب
 
-## Railway variables
+تطبيق FastAPI يرفع صورة شارت، يستخدم ChatGPT لإرجاع تحليل منظم، ثم يرسل تعليمات الرسم إلى Gemini لإنتاج نسخة مشروحة.
 
-- `OPENAI_API_KEY`: analyzes the uploaded chart.
-- `OPENAI_MODEL`: defaults to `gpt-4.1-mini`.
-- `GEMINI_API_KEY`: edits/annotates the chart image.
-- `GEMINI_IMAGE_MODEL`: defaults to `gemini-2.5-flash-image`.
+## متغيرات Railway المطلوبة
 
-ChatGPT returns structured trading-chart observations and drawing instructions. Gemini receives the original image plus those instructions and returns an annotated copy. If Gemini drawing fails, the textual ChatGPT analysis still appears and the original image is shown.
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
 
-This application provides educational analysis, not guaranteed trading signals.
+## متغيرات اختيارية
+
+- `OPENAI_MODEL` والقيمة الافتراضية `gpt-4.1-mini`
+- `GEMINI_IMAGE_MODEL` والقيمة الافتراضية `gemini-2.5-flash-image`
+
+## التشغيل
+
+Railway سيبني التطبيق من `Dockerfile` ويشغله تلقائيًا. رابط فحص الصحة:
+
+`/health`
+
+التطبيق تعليمي، ولا يضمن نتائج التداول.

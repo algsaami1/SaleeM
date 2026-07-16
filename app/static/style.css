@@ -130,3 +130,7 @@ button {
   .grid, .metrics { grid-template-columns: 1fr; }
   .card { padding: 17px; border-radius: 18px; }
 }
+.error { border-color: #8d3d48; }
+.error p, .warning { color: #ffb3bd; }
+.analysis-text { margin-top: 18px; }
+.analysis-text h3 { margin: 18px 0 4px; }
