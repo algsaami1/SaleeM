@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>SaleeM — محلل شارت الذهب</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="container">
+    <header class="hero">
+      <div>
+        <span class="badge">نسخة أولية 0.1</span>
+        <h1>SaleeM</h1>
+        <p>ارفع صورة شارت GOLD على فريم 5 دقائق لبدء التحليل.</p>
+      </div>
+    </header>
+
+    <section class="card">
+      <form action="/analyze" method="post" enctype="multipart/form-data">
+        <label class="field">
+          <span>صورة الشارت</span>
+          <input type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+        </label>
+
+        <div class="grid">
+          <label class="field">
+            <span>الرمز</span>
+            <input type="text" name="symbol" value="GOLD" maxlength="20">
+          </label>
+
+          <label class="field">
+            <span>الفريم</span>
+            <select name="timeframe">
+              <option selected>M5</option>
+              <option>M1</option>
+              <option>M15</option>
+              <option>H1</option>
+            </select>
+          </label>
+        </div>
+
+        <button type="submit">تحليل الصورة</button>
+      </form>
+    </section>
+
+    {% if result %}
+    <section class="card result">
+      <h2>النتيجة</h2>
+      <p class="success">{{ result.message }}</p>
+
+      <div class="metrics">
+        <div><span>الأصل</span><strong>{{ result.symbol }}</strong></div>
+        <div><span>الفريم</span><strong>{{ result.timeframe }}</strong></div>
+        <div><span>الاتجاه</span><strong>{{ result.direction_label }}</strong></div>
+        <div><span>القواعد المحملة</span><strong>{{ result.rules_loaded }}</strong></div>
+      </div>
+
+      <img src="{{ result.result_url }}" alt="نتيجة تحليل الشارت">
+    </section>
+    {% endif %}
+
+    <section class="card roadmap">
+      <h2>مراحل البناء</h2>
+      <ol>
+        <li class="done">رفع الصورة وعرض النتيجة</li>
+        <li>قص منطقة الشارت تلقائيًا</li>
+        <li>قراءة محور الأسعار</li>
+        <li>اكتشاف الشموع</li>
+        <li>الدعم والمقاومة</li>
+        <li>الكسر وإعادة الاختبار</li>
+        <li>قواعدك وذاكرة الحالات</li>
+      </ol>
+    </section>
+  </main>
+</body>
+</html>
