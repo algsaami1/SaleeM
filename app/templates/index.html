@@ -7,21 +7,20 @@
   <title>SaleeM Gold Analyst | سليم لتحليل الذهب</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <main class="app-shell">
     <header class="hero">
-      <div class="gold-logo" aria-label="SaleeM Gold Analyst logo">
+      <div class="gold-logo" aria-label="SaleeM Gold Analyst">
         <span class="orbit orbit-one"></span>
         <span class="orbit orbit-two"></span>
         <span class="logo-letter">S</span>
         <i class="spark spark-a"></i><i class="spark spark-b"></i><i class="spark spark-c"></i>
       </div>
-      <h1>SaleeM Gold Analyst</h1>
-      <h2>سليم لتحليل الذهب</h2>
-      <p>ارفع صورة شارت الذهب للحصول على صورة تحليل واحدة.</p>
+      <h1>مرحبًا بك 👋</h1>
+      <p>جاهز لتحليل شارت الذهب؟</p>
     </header>
 
     <section class="upload-card card">
@@ -31,20 +30,20 @@
 
         <label class="drop-zone" id="drop-zone">
           <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp">
-          <span class="upload-icon" aria-hidden="true">↑</span>
+          <span class="upload-cloud" aria-hidden="true"><span>↑</span></span>
           <strong>ارفع صورة الشارت</strong>
-          <small>شارت الذهب XAUUSD على فريم 5 دقائق</small>
-          <span class="primary-button">اختيار صورة</span>
+          <small>قم برفع صورة شارت الذهب XAUUSD <b>(فريم 5 دقائق)</b></small>
+          <span class="primary-button"><span aria-hidden="true">⇧</span> اختيار صورة</span>
           <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
         </label>
 
         <div class="separator"><span>أو</span></div>
 
         <label class="url-field">
-          <span>الصق رابط الصورة</span>
+          <span class="url-title">الصق رابط الصورة</span>
           <div class="url-control">
-            <input id="image-url" type="url" name="image_url" placeholder="https://example.com/chart.png" inputmode="url">
             <span aria-hidden="true">↗</span>
+            <input id="image-url" type="url" name="image_url" placeholder="https://example.com/chart.png" inputmode="url">
           </div>
         </label>
 
@@ -72,7 +71,7 @@
       <div class="notice-icon">i</div>
       <div>
         <strong>ملاحظة مهمة</strong>
-        <p>تم تصميم التطبيق خصيصًا لتحليل الذهب XAUUSD على فريم 5 دقائق (5M) فقط. نسبة السيناريو ليست ضمانًا للنتيجة.</p>
+        <p>تم تصميم التطبيق خصيصًا لتحليل الذهب XAUUSD على فريم 5 دقائق (5M) فقط.</p>
       </div>
     </section>
 
@@ -87,8 +86,6 @@
       <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
     </section>
     {% endif %}
-
-    <footer>SaleeM Gold Analyst · XAUUSD · 5M</footer>
   </main>
   <script src="/static/app.js" defer></script>
 </body>
