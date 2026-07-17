@@ -1,4 +1,4 @@
-# SaleeM Gold Analyst v2.0
+# SaleeM v2.0
 
 تطبيق متخصص في تحليل الذهب XAUUSD على فريم خمس دقائق.
 

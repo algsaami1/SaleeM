@@ -18,8 +18,8 @@ TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 load_final_spec()
 
 app = FastAPI(
-    title="SaleeM Gold Analyst",
-    version="2.1.0",
+    title="SaleeM",
+    version="2.1.1",
     description="Reconstructs the last two hours of XAUUSD M5 in the fixed SaleeM visual template.",
 )
 
@@ -39,14 +39,14 @@ async def home(request: Request):
 async def health():
     return {
         "status": "ok",
-        "app": "SaleeM Gold Analyst",
+        "app": "SaleeM",
         "version": "2.1.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "2h / 24 candles",
         "storage": "temporary-only",
         "memory": "read-only",
-        "renderer": "saleem-fixed-poster-v2",
+        "renderer": "saleem-fixed-poster-v2.1",
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
