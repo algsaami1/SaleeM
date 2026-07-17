@@ -1,5 +1,10 @@
-# SaleeM Gold Analyst v0.7
+# SaleeM Gold Analyst v0.8
 
-XAUUSD M5 chart analyzer with a read-only knowledge base and one annotated image output.
+تطبيق متخصص في تحليل الذهب XAUUSD على فريم 5 دقائق وإخراج صورة واحدة مرسومة فوق الشارت المرفوع.
 
-This release adds an engine package, the official project constitution, BUY/SELL percentages, full-chart overlays, FVG boxes, support/resistance, entry/SL/TP levels, and a small right-side information panel.
+## جديد v0.8
+- مكتبة معرفة أصلية ومنظمة من عشرة أقسام.
+- أكثر من 80 قاعدة ونمط وسيناريو مرجعي.
+- رسومات SVG تعليمية أصلية.
+- محرك ذاكرة يحمّل كل الأقسام للقراءة فقط.
+- لا يوجد أرشيف للتحليلات أو النتائج.

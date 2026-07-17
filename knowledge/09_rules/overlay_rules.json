@@ -1,0 +1,81 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "overlay_rules",
+  "drawing_rules": [
+    {
+      "element": "support",
+      "color": "blue",
+      "style": "thin solid line",
+      "label": "SUP"
+    },
+    {
+      "element": "resistance",
+      "color": "orange-red",
+      "style": "thin solid line",
+      "label": "RES"
+    },
+    {
+      "element": "buy",
+      "color": "green",
+      "style": "marker and expected path"
+    },
+    {
+      "element": "sell",
+      "color": "red",
+      "style": "marker and expected path"
+    },
+    {
+      "element": "stop_loss",
+      "color": "red",
+      "style": "dashed thin line",
+      "label": "SL"
+    },
+    {
+      "element": "targets",
+      "color": "green",
+      "style": "thin line",
+      "labels": [
+        "TP1",
+        "TP2",
+        "TP3"
+      ]
+    },
+    {
+      "element": "fvg",
+      "color": "purple",
+      "style": "transparent rectangle",
+      "label": "FVG"
+    },
+    {
+      "element": "bos_choch",
+      "color": "gold",
+      "style": "small label and thin segment"
+    },
+    {
+      "element": "expected_path",
+      "color_rule": "green bullish / red bearish",
+      "style": "curved or segmented dashed path"
+    },
+    {
+      "element": "info_panel",
+      "position": "right",
+      "maximum_width_percent": 20,
+      "content": [
+        "BUY%",
+        "SELL%",
+        "Trend",
+        "Scenario",
+        "Note"
+      ]
+    }
+  ],
+  "constraints": [
+    "لا تغطِ الشموع قدر الإمكان",
+    "لا تصغر الشارت لإنشاء لوحة منفصلة",
+    "الملاحظة سطر واحد",
+    "تظهر الصورة الناتجة كأن محللًا رسم على لقطة المستخدم نفسها"
+  ]
+}

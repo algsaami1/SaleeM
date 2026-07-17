@@ -1,0 +1,104 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "catalog",
+  "description_ar": "فهرس مكتبة المعرفة الخاصة بتطبيق SaleeM Gold Analyst",
+  "categories": [
+    {
+      "folder": "01_market_structure",
+      "json_files": [
+        "market_structure.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "02_support_resistance",
+      "json_files": [
+        "support_resistance.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "03_candlesticks",
+      "json_files": [
+        "candlesticks.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "04_fvg",
+      "json_files": [
+        "fvg.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "05_order_blocks",
+      "json_files": [
+        "order_blocks.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "06_liquidity",
+      "json_files": [
+        "liquidity.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "07_scenarios",
+      "json_files": [
+        "scenarios.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "08_indicators",
+      "json_files": [
+        "indicators.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "09_rules",
+      "json_files": [
+        "decision_rules.json",
+        "overlay_rules.json",
+        "probability_weights.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "10_reference_images",
+      "json_files": [],
+      "reference_files": [
+        "bearish_breakout_retest.svg",
+        "bos_choch.svg",
+        "bullish_breakout_retest.svg",
+        "bullish_fvg.svg",
+        "liquidity_sweep.svg",
+        "market_structure_hh_hl.svg",
+        "market_structure_lh_ll.svg",
+        "range_market.svg",
+        "support_resistance.svg"
+      ]
+    },
+    {
+      "folder": "rules",
+      "json_files": [
+        "core_rules.json"
+      ],
+      "reference_files": []
+    },
+    {
+      "folder": "scenarios",
+      "json_files": [
+        "basic_scenarios.json"
+      ],
+      "reference_files": []
+    }
+  ]
+}

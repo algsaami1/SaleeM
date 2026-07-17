@@ -11,3 +11,11 @@
 - Note is one short line only.
 - The project knowledge base is read-only during analysis.
 - Uploaded images and generated results are not stored permanently.
+
+
+## مكتبة المعرفة
+- توجد داخل مجلد `knowledge/` بعشرة أقسام رسمية.
+- المكتبة للقراءة فقط أثناء التحليل.
+- الرسم النهائي يتم فوق صورة الشارت الأصلية المرفوعة.
+- لا يوجد أرشيف للتحليلات أو نتائج الصفقات.
+- يتم اختيار سيناريو واحد فقط، مع عرض BUY% وSELL%.
