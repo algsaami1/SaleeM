@@ -8,88 +8,98 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=1.0.0">
 </head>
 <body>
   <main class="app-shell">
     <header class="hero">
-      <div class="brand-row" dir="ltr">
-        <div class="gold-logo" aria-label="SaleeM Gold Analyst logo">
-          <span class="orbit orbit-one"></span>
-          <span class="orbit orbit-two"></span>
+      <div class="brand" dir="ltr">
+        <div class="gold-logo" aria-hidden="true">
+          <span class="logo-orbit orbit-a"></span>
+          <span class="logo-orbit orbit-b"></span>
           <span class="logo-letter">S</span>
-          <i class="spark spark-a"></i><i class="spark spark-b"></i>
+          <i class="logo-spark spark-a"></i>
+          <i class="logo-spark spark-b"></i>
         </div>
         <h1>SaleeM Gold Analyst</h1>
       </div>
-      <h2>👋 مرحبًا بك</h2>
+      <h2>مرحبًا بك <span aria-hidden="true">👋</span></h2>
       <p>جاهز لتحليل شارت الذهب؟</p>
     </header>
 
-    <section class="upload-card card">
+    <section class="card upload-card">
       <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
         <input type="hidden" name="symbol" value="XAUUSD">
         <input type="hidden" name="timeframe" value="M5">
 
-        <label class="drop-zone" id="drop-zone">
+        <label class="drop-zone" id="drop-zone" for="image-input">
           <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-          <span class="upload-icon" aria-hidden="true">↑</span>
+          <span class="upload-cloud" aria-hidden="true">
+            <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
+          </span>
           <strong>ارفع صورة الشارت</strong>
           <small>قم برفع صورة شارت الذهب XAUUSD <b>(فريم 5 دقائق)</b></small>
-          <span class="primary-button">اختيار صورة</span>
+          <span class="primary-button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+            اختيار صورة
+          </span>
           <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
         </label>
 
-        <button class="analyze-button" type="submit">بدء التحليل</button>
+        <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
       </form>
     </section>
 
-    <section class="processing-card card" id="processing-card" hidden aria-live="polite">
-      <div class="progress-ring" id="progress-ring" style="--progress:0">
-        <div class="progress-inner"><strong id="progress-value">0%</strong><span>جاري المعالجة</span></div>
+    <section class="card processing-card" id="processing-card" hidden aria-live="polite">
+      <div class="progress-column">
+        <div class="progress-ring" id="progress-ring" style="--progress:0">
+          <div class="progress-inner">
+            <strong id="progress-value">0%</strong>
+            <span>جاري المعالجة</span>
+          </div>
+        </div>
+        <small class="eta">الوقت المتوقع: 10 - 15 ثانية</small>
       </div>
       <div class="processing-copy">
         <h3>جاري التحليل...</h3>
-        <p id="processing-message">قراءة صورة الشارت</p>
+        <p>نقوم بتحليل الشارت وإنشاء أفضل سيناريو</p>
         <div class="steps">
           <span class="active">قراءة الشارت وتحليل البيانات</span>
           <span>تحليل الاتجاه العام</span>
-          <span>تحديد الدعم والمقاومة</span>
+          <span>تحديد الدعم والمقاومات</span>
           <span>تحليل السيناريوهات</span>
           <span>إنشاء الصورة النهائية</span>
         </div>
       </div>
     </section>
 
-    <section class="features-card card">
-      <div class="section-title"><span>✨</span><h3>مميزات تطبيقنا</h3></div>
+    <section class="card features-card">
+      <div class="section-title"><h3>مميزات تطبيقنا</h3><span>✨</span></div>
       <div class="features-grid">
-        <article><span>🚀</span><strong>تحليل ذكي</strong><small>قراءة منظمة للشارت</small></article>
-        <article><span>🎯</span><strong>دقة عالية</strong><small>مستويات واضحة</small></article>
-        <article><span>⚡</span><strong>نتائج سريعة</strong><small>صورة تحليل واحدة</small></article>
-        <article><span>🛡️</span><strong>موثوق وآمن</strong><small>خصوصيتك محفوظة</small></article>
+        <article><span class="feature-icon purple">🚀</span><strong>تحليل ذكي</strong><small>قراءة منظمة للشارت</small></article>
+        <article><span class="feature-icon purple">🎯</span><strong>دقة عالية</strong><small>مستويات واضحة</small></article>
+        <article><span class="feature-icon gold">⚡</span><strong>نتائج سريعة</strong><small>صورة تحليل واحدة</small></article>
+        <article><span class="feature-icon purple">🛡️</span><strong>موثوق وآمن</strong><small>خصوصيتك محفوظة</small></article>
       </div>
     </section>
 
-    <section class="notice card">
-      <div class="notice-icon">💡</div>
+    <section class="card notice">
+      <span class="notice-icon">💡</span>
       <p>تم تصميم هذا التطبيق خصيصًا لتحليل الذهب <b>XAUUSD</b> على فريم <b>5 دقائق (5M)</b> فقط.</p>
     </section>
 
     {% if error %}
-    <section class="error-card card"><strong>تعذر التحليل</strong><p>{{ error }}</p></section>
+    <section class="card error-card"><strong>تعذر التحليل</strong><p>{{ error }}</p></section>
     {% endif %}
 
     {% if result %}
-    <section class="result-card card" id="result-card">
+    <section class="card result-card" id="result-card">
       <div class="result-heading"><div><span>اكتمل التحليل</span><h3>صورة التحليل</h3></div><span class="done-mark">✓</span></div>
       <img src="{{ result.result_url }}" alt="نتيجة تحليل الذهب على فريم 5 دقائق">
       <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
     </section>
     {% endif %}
-
-    <footer>SaleeM Gold Analyst · XAUUSD · 5M</footer>
   </main>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=1.0.0" defer></script>
 </body>
 </html>

@@ -20,7 +20,7 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="0.4.0",
+    version="0.5.0",
     description="Gold XAUUSD M5 chart analysis with a single annotated image output.",
 )
 
