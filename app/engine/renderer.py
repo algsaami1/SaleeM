@@ -24,9 +24,9 @@ PANEL_2 = (12, 21, 34, 248)
 GRID = (73, 87, 105, 62)
 BORDER = (89, 108, 132, 145)
 RED = (246, 67, 77, 255)
-RED_FILL = (246, 67, 77, 45)
+RED_FILL = (246, 67, 77, 18)
 GREEN = (29, 211, 116, 255)
-GREEN_FILL = (29, 211, 116, 45)
+GREEN_FILL = (29, 211, 116, 18)
 BLUE = (47, 137, 255, 255)
 WHITE = (245, 248, 252, 255)
 GRAY = (170, 184, 200, 255)
@@ -183,22 +183,58 @@ def _dash_line(
         pos += dash + gap
 
 
-def _arrow(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], color, width: int = 9) -> None:
+def _arrow(
+    draw: ImageDraw.ImageDraw,
+    points: list[tuple[int, int]],
+    color,
+    width: int = 9,
+    probability: int = 50,
+) -> None:
     if len(points) < 2:
         return
-    draw.line(points, fill=color, width=width, joint="curve")
-    p1, p2 = points[-2], points[-1]
+
+    segments_per_leg = 10
+    expanded: list[tuple[float, float]] = []
+    for idx in range(len(points) - 1):
+        x1, y1 = points[idx]
+        x2, y2 = points[idx + 1]
+        for step in range(segments_per_leg):
+            t = step / segments_per_leg
+            expanded.append((x1 + (x2 - x1) * t, y1 + (y2 - y1) * t))
+    expanded.append(points[-1])
+
+    total = max(1, len(expanded) - 1)
+    base_r, base_g, base_b = color[:3]
+
+    prob = max(35, min(95, int(probability or 50)))
+    strength = (prob - 35) / 60.0
+    alpha_start = int(70 + 70 * strength)
+    alpha_end = int(170 + 85 * strength)
+
+    for index in range(total):
+        p1 = expanded[index]
+        p2 = expanded[index + 1]
+        ratio = index / total
+        alpha = int(alpha_start + (alpha_end - alpha_start) * ratio)
+        seg_width = max(3, int(width * (0.80 + 0.34 * ratio)))
+        seg_color = (base_r, base_g, base_b, alpha)
+        draw.line([p1, p2], fill=seg_color, width=seg_width)
+
+    p1, p2 = expanded[-2], expanded[-1]
     angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-    size = 28
+    size = max(34, int(width * 3.8))
+    wing_angle = math.pi / 5.4
     left = (
-        p2[0] - size * math.cos(angle - math.pi / 6),
-        p2[1] - size * math.sin(angle - math.pi / 6),
+        p2[0] - size * math.cos(angle - wing_angle),
+        p2[1] - size * math.sin(angle - wing_angle),
     )
     right = (
-        p2[0] - size * math.cos(angle + math.pi / 6),
-        p2[1] - size * math.sin(angle + math.pi / 6),
+        p2[0] - size * math.cos(angle + wing_angle),
+        p2[1] - size * math.sin(angle + wing_angle),
     )
-    draw.polygon([p2, left, right], fill=color)
+    head_alpha = min(255, alpha_end + 10)
+    head_color = (base_r, base_g, base_b, head_alpha)
+    draw.polygon([p2, left, right], fill=head_color)
 
 
 def _strength_width(strength: int) -> int:
@@ -559,23 +595,43 @@ def _draw_trade(
         if positions[key] != y:
             draw.line((right, y, rect[0], positions[key]), fill=GREEN, width=1)
 
-    end_y = target_ys[-1] if target_ys else (entry_y - 180 if direction == "صاعد" else entry_y + 180)
+    probability = int(analysis.get("trade_probability") or 50)
+    current_price = _number(analysis.get("current_price"))
+    start_price = entry if entry is not None else current_price
+    if start_price is None:
+        start_price = (price_min + price_max) / 2
+    start_y = _price_y(start_price, price_min, price_max)
+
+    end_y = target_ys[-1] if target_ys else (start_y - 180 if direction == "صاعد" else start_y + 180)
     end_y = max(top + 25, min(bottom - 25, end_y))
-    arrow_x = int(left + (right - left) * 0.58)
-    mid_y = int((entry_y + end_y) / 2)
-    bend = 28 if direction == "صاعد" else -28
+
+    arrow_start_x = zone_left + 32
+    arrow_end_x = min(right - 42, zone_left + int((right - zone_left) * 0.48))
+    arrow_mid_x = min(right - 60, zone_left + int((right - zone_left) * 0.28))
+    arrow_mid_y = int(start_y + (end_y - start_y) * 0.48)
+
+    arrow_width = 7
+    if probability >= 85:
+        arrow_width = 17
+    elif probability >= 75:
+        arrow_width = 14
+    elif probability >= 65:
+        arrow_width = 12
+    elif probability >= 55:
+        arrow_width = 10
+
     _arrow(
         draw,
-        [(arrow_x, entry_y), (arrow_x + bend, mid_y), (arrow_x + 4, end_y)],
+        [(arrow_start_x, start_y), (arrow_mid_x, arrow_mid_y), (arrow_end_x, end_y)],
         color,
-        width=9,
+        width=arrow_width,
+        probability=probability,
     )
 
     state = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(
         str(analysis.get("draw_mode")), "مشروط"
     )
     side = str(analysis.get("trade_side") or ("شراء" if direction == "صاعد" else "بيع"))
-    probability = int(analysis.get("trade_probability") or 50)
     _rounded_label(
         draw,
         left + 12,

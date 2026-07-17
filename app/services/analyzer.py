@@ -28,7 +28,8 @@ CONFIRMED_PROBABILITY = 65
 CONDITIONAL_PROBABILITY = 55
 MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
-MAX_STOP_DISTANCE = 12.0
+MAX_STOP_DISTANCE = 4.0
+STOP_ATR_MULTIPLIER = 1.10
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -333,31 +334,47 @@ def _validated_stop(
     data: dict[str, Any], direction: str, entry: float, candles: list[dict[str, Any]],
     supports: list[dict[str, Any]], resistances: list[dict[str, Any]],
 ) -> tuple[float, str]:
+    atr = max(0.01, _atr(candles))
+    dynamic_max = max(1.20, min(MAX_STOP_DISTANCE, atr * STOP_ATR_MULTIPLIER))
+    buffer = max(0.12, min(0.45, atr * 0.10))
     proposed = _number(data.get("stop_loss"))
-    reason = str(data.get("stop_reason") or "خلف منطقة إبطال السيناريو")
+    proposed_reason = str(data.get("stop_reason") or "خلف منطقة الإبطال القريبة")
+
+    choices: list[tuple[float, str]] = []
+
+    def add_choice(stop: float, reason: str) -> None:
+        distance = abs(stop - entry)
+        correct_side = (direction == "صاعد" and stop < entry) or (direction == "هابط" and stop > entry)
+        if correct_side and MIN_STOP_DISTANCE <= distance <= dynamic_max:
+            choices.append((round(stop, 2), reason))
+
     if proposed is not None:
-        distance = abs(proposed - entry)
-        correct_side = (direction == "صاعد" and proposed < entry) or (direction == "هابط" and proposed > entry)
-        if correct_side and MIN_STOP_DISTANCE <= distance <= MAX_STOP_DISTANCE:
-            return round(proposed, 2), reason
+        add_choice(proposed, proposed_reason)
 
-    buffer = max(0.20, _atr(candles) * 0.15)
+    recent = candles[-5:]
     if direction == "صاعد":
-        candidates = [float(level["price"]) for level in supports if float(level["price"]) < entry]
-        if candidates:
-            stop = max(candidates) - buffer
-            if MIN_STOP_DISTANCE <= entry - stop <= MAX_STOP_DISTANCE:
-                return round(stop, 2), "أسفل أقرب دعم وقاع بنيوي"
-        stop = entry - max(1.0, min(6.0, _atr(candles) * 1.25))
-        return round(stop, 2), "أسفل التذبذب الأخير"
+        recent_low = min(float(candle["low"]) for candle in recent) - buffer
+        add_choice(recent_low, "أسفل أقرب قاع محلي من آخر خمس شمعات")
+        for level in supports:
+            price = float(level["price"])
+            if price < entry:
+                add_choice(price - buffer, "أسفل أقرب دعم بنيوي")
+    else:
+        recent_high = max(float(candle["high"]) for candle in recent) + buffer
+        add_choice(recent_high, "فوق أقرب قمة محلية من آخر خمس شمعات")
+        for level in resistances:
+            price = float(level["price"])
+            if price > entry:
+                add_choice(price + buffer, "فوق أقرب مقاومة بنيوية")
 
-    candidates = [float(level["price"]) for level in resistances if float(level["price"]) > entry]
-    if candidates:
-        stop = min(candidates) + buffer
-        if MIN_STOP_DISTANCE <= stop - entry <= MAX_STOP_DISTANCE:
-            return round(stop, 2), "فوق أقرب مقاومة وقمة بنيوية"
-    stop = entry + max(1.0, min(6.0, _atr(candles) * 1.25))
-    return round(stop, 2), "فوق التذبذب الأخير"
+    if choices:
+        stop, reason = min(choices, key=lambda item: abs(item[0] - entry))
+        return stop, reason
+
+    fallback_distance = max(MIN_STOP_DISTANCE, min(dynamic_max, atr * 0.85))
+    if direction == "صاعد":
+        return round(entry - fallback_distance, 2), "أسفل منطقة الإبطال القريبة حسب تذبذب M5"
+    return round(entry + fallback_distance, 2), "فوق منطقة الإبطال القريبة حسب تذبذب M5"
 
 
 
@@ -487,7 +504,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - touches عدد اللمسات أو الاختبارات الواضحة.
 - اجمع المستويات المتقاربة، ولا تعد المستوى نفسه مرتين.
 - entry قريب وواقعي، بعد اختراق أو كسر أو إعادة اختبار أو تأكيد واضح.
-- stop_loss من بنية الشارت والذاكرة: خلف أقرب قمة/قاع أو مستوى إبطال، وليس مسافة ثابتة.
+- stop_loss قريب من الدخول ومن بنية الشارت: خلف أقرب قمة/قاع محلي خلال آخر خمس شمعات أو أقرب مستوى إبطال. لا تستخدم قمة أو قاع بعيدة. غالبًا تكون المسافة بين 0.6 و4.0 دولار حسب تذبذب M5.
 - ضع ثلاثة أهداف مرتبة TP1 ثم TP2 ثم TP3، ولا تضع هدفًا تم تجاوزه.
 - M/قمتان يدعم الهبوط بعد كسر خط العنق أو إعادة اختبار فاشلة.
 - W/قاعان يدعم الصعود بعد اختراق خط العنق أو إعادة اختبار ناجحة.
