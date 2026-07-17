@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,14 @@ from app.engine.renderer import render_result
 OPENAI_URL = "https://api.openai.com/v1/responses"
 BASE_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
+SPEC_PATH = BASE_DIR / "SALEEM_FINAL_SPEC.md"
+
+
+def load_final_spec() -> str:
+    """قراءة دستور SaleeM النهائي دون تعديله."""
+    if not SPEC_PATH.exists():
+        raise RuntimeError("ملف SALEEM_FINAL_SPEC.md غير موجود في المجلد الرئيسي للمشروع.")
+    return SPEC_PATH.read_text(encoding="utf-8").strip()
 
 CONFIRMED_PROBABILITY = 65
 CONDITIONAL_PROBABILITY = 55
@@ -62,7 +71,7 @@ ANALYSIS_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "chart_readable": {"type": "boolean"},
-        "candles": {"type": "array", "items": CANDLE, "minItems": 24, "maxItems": 24},
+        "candles": {"type": "array", "items": CANDLE, "minItems": 0, "maxItems": 24},
         "direction": {"type": "string", "enum": ["صاعد", "هابط", "عرضي", "غير واضح"]},
         "buy_probability": {"type": "integer", "minimum": 5, "maximum": 95},
         "sell_probability": {"type": "integer", "minimum": 5, "maximum": 95},
@@ -125,6 +134,7 @@ def _number(value: Any) -> float | None:
     return None
 
 
+
 def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
     candles: list[dict[str, Any]] = []
     for index, item in enumerate(raw if isinstance(raw, list) else []):
@@ -134,18 +144,39 @@ def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
         if any(value is None for value in values):
             continue
         open_, high, low, close = [float(value) for value in values]
-        high = max(high, open_, close, low)
-        low = min(low, open_, close, high)
+        true_high = max(high, open_, close)
+        true_low = min(low, open_, close)
+        if true_high <= true_low:
+            continue
         candles.append(
             {
                 "time": str(item.get("time") or f"-{(23 - index) * 5}m")[:8],
                 "open": round(open_, 2),
-                "high": round(high, 2),
-                "low": round(low, 2),
+                "high": round(true_high, 2),
+                "low": round(true_low, 2),
                 "close": round(close, 2),
             }
         )
-    return candles[-24:]
+
+    candles = candles[-24:]
+    if len(candles) != 24:
+        raise RuntimeError("يجب أن تظهر 24 شمعة كاملة لآخر ساعتين على فريم خمس دقائق.")
+
+    ranges = [max(0.01, c["high"] - c["low"]) for c in candles]
+    median_range = statistics.median(ranges)
+    if median_range <= 0:
+        raise RuntimeError("تعذر معايرة حركة الشموع من الصورة.")
+
+    # رفض الأخطاء الكبيرة الناتجة عن قراءة رقم من المحور على أنه شمعة.
+    for index, candle in enumerate(candles):
+        if candle["high"] - candle["low"] > median_range * 8:
+            raise RuntimeError("توجد شمعة غير مقروءة بدقة. قرّب الشارت وأظهر محور السعر.")
+        if index:
+            previous_close = candles[index - 1]["close"]
+            if abs(candle["open"] - previous_close) > median_range * 6:
+                raise RuntimeError("تعذر تتبع تسلسل الشموع بسبب عدم وضوح الصورة.")
+
+    return candles
 
 
 def _atr(candles: list[dict[str, Any]], periods: int = 8) -> float:
@@ -236,12 +267,33 @@ def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
     return buy, sell
 
 
-def _choose_direction(data: dict[str, Any], candles: list[dict[str, Any]], buy: int, sell: int) -> str:
-    if buy != sell:
-        return "صاعد" if buy > sell else "هابط"
-    if len(candles) >= 6:
-        return "صاعد" if candles[-1]["close"] >= candles[-6]["close"] else "هابط"
-    return "صاعد"
+
+def _choose_direction(
+    data: dict[str, Any],
+    candles: list[dict[str, Any]],
+    buy: int,
+    sell: int,
+) -> tuple[str, int, int]:
+    atr = max(0.01, _atr(candles))
+    full_move = (float(candles[-1]["close"]) - float(candles[0]["close"])) / atr
+    recent_move = (float(candles[-1]["close"]) - float(candles[-6]["close"])) / atr
+    model_bias = (buy - sell) / 20.0
+    score = model_bias * 0.55 + full_move * 0.30 + recent_move * 0.15
+
+    if score > 0.18:
+        direction = "صاعد"
+    elif score < -0.18:
+        direction = "هابط"
+    else:
+        direction = "صاعد" if float(candles[-1]["close"]) >= float(candles[-6]["close"]) else "هابط"
+
+    # تخفيض الثقة عند تعارض رأي النموذج مع حركة آخر ساعتين.
+    structure_agrees = (direction == "صاعد" and full_move >= 0) or (direction == "هابط" and full_move <= 0)
+    selected = buy if direction == "صاعد" else sell
+    probability = max(52, min(88, selected if structure_agrees else min(selected, 64)))
+    buy_final = probability if direction == "صاعد" else 100 - probability
+    sell_final = 100 - buy_final
+    return direction, buy_final, sell_final
 
 
 def _nearest_entry(
@@ -308,43 +360,65 @@ def _validated_stop(
     return round(stop, 2), "فوق التذبذب الأخير"
 
 
-def _validated_targets(data: dict[str, Any], direction: str, entry: float, stop: float) -> list[float]:
-    targets: list[float] = []
+
+def _validated_targets(
+    data: dict[str, Any],
+    direction: str,
+    entry: float,
+    stop: float,
+    supports: list[dict[str, Any]],
+    resistances: list[dict[str, Any]],
+) -> list[float]:
+    candidates: list[float] = []
+
+    # المستويات المقابلة أولًا لأنها أكثر منطقية من أهداف عشوائية.
+    level_source = resistances if direction == "صاعد" else supports
+    for level in level_source:
+        value = _number(level.get("price"))
+        if value is None:
+            continue
+        valid = (direction == "صاعد" and value > entry) or (direction == "هابط" and value < entry)
+        if valid:
+            candidates.append(round(value, 2))
+
     for key in ("target_1", "target_2", "target_3"):
         value = _number(data.get(key))
         if value is None:
             continue
         valid = (direction == "صاعد" and value > entry) or (direction == "هابط" and value < entry)
-        if valid and all(abs(value - existing) >= 0.25 for existing in targets):
-            targets.append(round(value, 2))
+        if valid:
+            candidates.append(round(value, 2))
 
     risk = max(MIN_STOP_DISTANCE, abs(entry - stop))
-    multipliers = (1.0, 1.7, 2.5)
-    for multiplier in multipliers:
-        if len(targets) >= 3:
-            break
+    for multiplier in (1.0, 1.7, 2.5, 3.2):
         value = entry + risk * multiplier if direction == "صاعد" else entry - risk * multiplier
-        if all(abs(value - existing) >= 0.25 for existing in targets):
-            targets.append(round(value, 2))
+        candidates.append(round(value, 2))
 
-    targets = sorted(targets, reverse=(direction == "هابط"))[:3]
-    return targets
+    unique: list[float] = []
+    for value in sorted(candidates, reverse=(direction == "هابط")):
+        if all(abs(value - existing) >= max(0.25, risk * 0.15) for existing in unique):
+            unique.append(value)
+        if len(unique) == 3:
+            break
+
+    if len(unique) < 3:
+        raise RuntimeError("تعذر تكوين ثلاثة أهداف منطقية داخل السيناريو.")
+    return unique
 
 
 def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
+    if data.get("chart_readable") is False:
+        raise RuntimeError("الصورة أو محور الأسعار غير واضحين بما يكفي للتحليل.")
     candles = _normalize_candles(data.get("candles"))
-    if len(candles) < 12:
-        raise RuntimeError("تعذر استخراج شموع كافية من الصورة. قرّب الشارت وأظهر محور الأسعار.")
-
-    current = _number(data.get("current_price")) or float(candles[-1]["close"])
+    current = float(candles[-1]["close"])
     buy, sell = _normalize_probabilities(data)
-    direction = _choose_direction(data, candles, buy, sell)
+    direction, buy, sell = _choose_direction(data, candles, buy, sell)
     probability = buy if direction == "صاعد" else sell
     supports = _normalize_levels(data.get("support_levels"), candles, "support", current)
     resistances = _normalize_levels(data.get("resistance_levels"), candles, "resistance", current)
     entry, entry_kind, confirmation = _nearest_entry(data, direction, current, supports, resistances)
     stop, stop_reason = _validated_stop(data, direction, entry, candles, supports, resistances)
-    targets = _validated_targets(data, direction, entry, stop)
+    targets = _validated_targets(data, direction, entry, stop, supports, resistances)
 
     model_state = str(data.get("setup_state") or "مراقبة")
     if probability >= CONFIRMED_PROBABILITY and model_state == "مؤكد":
@@ -394,10 +468,15 @@ def _analyze(path: Path) -> dict[str, Any]:
         raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
 
     prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD على فريم خمس دقائق فقط.
+
+===== الدستور النهائي الملزم =====
+{load_final_spec()}
+===== نهاية الدستور =====
+
 اقرأ صورة الشارت المرفوعة، ثم أعد بناء آخر ساعتين فقط: آخر 24 شمعة M5 من أقصى يمين الشارت، مرتبة من الأقدم إلى الأحدث.
 استخرج OHLC لكل شمعة اعتمادًا على جسم الشمعة وذيولها ومحور الأسعار. استخدم السعر الحالي من إغلاق آخر شمعة.
 إذا كانت بعض القيم غير مطبوعة حرفيًا، قدّرها بدقة من محور السعر، لكن لا تغيّر ترتيب واتجاه الشموع.
-اجعل chart_readable=false فقط إذا كانت الشموع أو محور الأسعار غير قابلين للقراءة إطلاقًا.
+اجعل chart_readable=false فقط إذا كانت الشموع أو محور الأسعار غير قابلين للقراءة إطلاقًا، وفي هذه الحالة أعد candles=[] ولا تخترع شموعًا.
 
 التحليل المطلوب:
 - اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.

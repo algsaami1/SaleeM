@@ -4,7 +4,7 @@ WORKDIR /app
 
 # خط عربي واضح لـ Pillow داخل Railway.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-core fontconfig \
+    && apt-get install -y --no-install-recommends fonts-noto-core fonts-dejavu-core fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

@@ -6,17 +6,21 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image
+from starlette.concurrency import run_in_threadpool
 
-from app.services.analyzer import analyze_chart_image
+from app.services.analyzer import analyze_chart_image, load_final_spec
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
 TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 
+# يتأكد عند التشغيل أن الدستور النهائي موجود داخل النسخة المنشورة.
+load_final_spec()
+
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="2.0.0",
-    description="Reconstructs the last two hours of XAUUSD M5 and renders one clear technical scenario.",
+    version="2.1.0",
+    description="Reconstructs the last two hours of XAUUSD M5 in the fixed SaleeM visual template.",
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -25,7 +29,10 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "result": None, "error": None})
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "result": None, "error": None},
+    )
 
 
 @app.get("/health")
@@ -33,16 +40,17 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM Gold Analyst",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "2h / 24 candles",
         "storage": "temporary-only",
         "memory": "read-only",
-        "renderer": "reconstructed-two-hour-chart-v1",
+        "renderer": "saleem-fixed-poster-v2",
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
-        "support_resistance": "strength-weighted-lines",
+        "support_resistance": "nearest-two-strength-weighted-lines",
+        "title": "تحليل SaleeM - XAUUSD - M5 - آخر ساعتين",
     }
 
 
@@ -68,8 +76,16 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
         with Image.open(temp_path) as source:
             source.verify()
 
-        result = analyze_chart_image(temp_path, "XAUUSD", "M5")
-        return templates.TemplateResponse("index.html", {"request": request, "result": result, "error": None})
+        result = await run_in_threadpool(
+            analyze_chart_image,
+            temp_path,
+            "XAUUSD",
+            "M5",
+        )
+        return templates.TemplateResponse(
+            "index.html",
+            {"request": request, "result": result, "error": None},
+        )
     except HTTPException:
         raise
     except Exception:
@@ -78,7 +94,10 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
             {
                 "request": request,
                 "result": None,
-                "error": "تعذر تحليل الصورة. أظهر آخر ساعتين ومحور الأسعار بوضوح ثم حاول مرة أخرى.",
+                "error": (
+                    "تعذر إنشاء التحليل بدقة. اعرض 24 شمعة كاملة على M5 "
+                    "مع محور الأسعار واضحًا، ثم حاول مرة أخرى."
+                ),
             },
             status_code=500,
         )
