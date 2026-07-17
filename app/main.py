@@ -15,7 +15,7 @@ TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="0.9.0",
+    version="1.0.0",
     description="Gold XAUUSD M5 analysis rendered directly on the uploaded chart.",
 )
 
@@ -36,15 +36,15 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM Gold Analyst",
-        "version": "0.9.0",
+        "version": "1.0.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "storage": "temporary-only",
         "memory": "read-only",
-        "renderer": "on-chart-single-best-trade-v3",
-        "trade_mode": "highest-probability-only",
+        "renderer": "axis-calibrated-nearest-trade-v4",
+        "trade_mode": "highest-probability-nearest-entry",
         "max_drawn_trades": 1,
-        "stop_policy": "chart-structure-and-read-only-memory",
+        "stop_policy": "validated-chart-structure-and-read-only-memory",
     }
 
 
