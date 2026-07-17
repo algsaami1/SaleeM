@@ -24,9 +24,9 @@ PANEL_2 = (12, 21, 34, 248)
 GRID = (73, 87, 105, 62)
 BORDER = (89, 108, 132, 145)
 RED = (246, 67, 77, 255)
-RED_FILL = (246, 67, 77, 18)
+RED_FILL = (246, 67, 77, 42)
 GREEN = (29, 211, 116, 255)
-GREEN_FILL = (29, 211, 116, 18)
+GREEN_FILL = (29, 211, 116, 36)
 BLUE = (47, 137, 255, 255)
 WHITE = (245, 248, 252, 255)
 GRAY = (170, 184, 200, 255)
@@ -461,7 +461,7 @@ def _draw_levels(
 
 def _draw_pattern(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     confidence = int(analysis.get("pattern_confidence") or 0)
-    if confidence < 60:
+    if confidence < 75:
         return
     for line in analysis.get("pattern_lines") or []:
         if isinstance(line, list) and len(line) == 4:
@@ -499,6 +499,7 @@ def _spaced_label_positions(items: list[tuple[str, float, int]], min_gap: int = 
 
 
 def _draw_trade(
+    image: Image.Image,
     draw: ImageDraw.ImageDraw,
     analysis: dict[str, Any],
     price_min: float,
@@ -519,19 +520,30 @@ def _draw_trade(
     target_ys = [_price_y(value, price_min, price_max) for value in targets]
     zone_left = int(left + (right - left) * 0.68)
 
+    # Draw profit/loss zones on a separate transparent layer.
+    # Drawing RGBA colors directly onto the base image and later converting to RGB
+    # discards alpha and makes the rectangles look fully opaque.
+    zones = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    zones_draw = ImageDraw.Draw(zones)
+
     if stop_y is not None:
-        draw.rectangle(
+        zones_draw.rectangle(
             (zone_left, min(entry_y, stop_y), right, max(entry_y, stop_y)),
             fill=RED_FILL,
         )
-        _dash_line(draw, (zone_left, stop_y), (right, stop_y), RED, width=3)
 
     if target_ys:
         far_y = target_ys[-1]
-        draw.rectangle(
+        zones_draw.rectangle(
             (zone_left, min(entry_y, far_y), right, max(entry_y, far_y)),
             fill=GREEN_FILL,
         )
+
+    composed = Image.alpha_composite(image, zones)
+    image.paste(composed)
+
+    if stop_y is not None:
+        _dash_line(draw, (zone_left, stop_y), (right, stop_y), RED, width=3)
 
     _dash_line(draw, (left, entry_y), (right, entry_y), WHITE, width=3)
     for y in target_ys:
@@ -620,13 +632,30 @@ def _draw_trade(
     elif probability >= 55:
         arrow_width = 10
 
+    arrow_points = [
+        (arrow_start_x, start_y),
+        (arrow_mid_x, arrow_mid_y),
+        (arrow_end_x, end_y),
+    ]
+    arrow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    arrow_draw = ImageDraw.Draw(arrow_layer)
+    # Dark outline keeps the arrow readable inside both green and red zones.
     _arrow(
-        draw,
-        [(arrow_start_x, start_y), (arrow_mid_x, arrow_mid_y), (arrow_end_x, end_y)],
+        arrow_draw,
+        arrow_points,
+        (0, 0, 0, 230),
+        width=arrow_width + 6,
+        probability=95,
+    )
+    _arrow(
+        arrow_draw,
+        arrow_points,
         color,
         width=arrow_width,
         probability=probability,
     )
+    composed_arrow = Image.alpha_composite(image, arrow_layer)
+    image.paste(composed_arrow)
 
     state = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(
         str(analysis.get("draw_mode")), "مشروط"
@@ -750,7 +779,7 @@ def render_result(analysis: dict[str, Any]) -> bytes:
     _draw_candles(draw, candles, price_min, price_max)
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_pattern(draw, analysis)
-    _draw_trade(draw, analysis, price_min, price_max)
+    _draw_trade(image, draw, analysis, price_min, price_max)
     _draw_notes(draw, analysis)
 
     output = io.BytesIO()
