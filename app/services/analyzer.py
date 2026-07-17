@@ -15,6 +15,7 @@ from app.engine.renderer import render_result
 OPENAI_URL = "https://api.openai.com/v1/responses"
 BASE_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
+MIN_TRADE_PROBABILITY = 55
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -51,6 +52,7 @@ ANALYSIS_SCHEMA = {
         "resistance": NUM_NULL,
         "entry": NUM_NULL,
         "stop_loss": NUM_NULL,
+        "stop_reason": {"type": "string"},
         "target_1": NUM_NULL,
         "target_2": NUM_NULL,
         "target_3": NUM_NULL,
@@ -114,6 +116,7 @@ ANALYSIS_SCHEMA = {
         "resistance",
         "entry",
         "stop_loss",
+        "stop_reason",
         "target_1",
         "target_2",
         "target_3",
@@ -158,26 +161,81 @@ def _text(payload: dict[str, Any]) -> str:
     raise RuntimeError("لم ترجع خدمة التحليل نتيجة صالحة.")
 
 
-def _force_two_dollar_stop(analysis: dict[str, Any]) -> dict[str, Any]:
-    """يجعل وقف الخسارة دائمًا على بُعد دولارين من الدخول."""
-    entry = analysis.get("entry")
-    if not isinstance(entry, (int, float)):
-        analysis["stop_loss"] = None
-        analysis["stop_loss_y"] = None
-        return analysis
+def _number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
-    direction = analysis.get("direction")
-    if direction == "هابط":
-        analysis["stop_loss"] = round(float(entry) + 2.0, 2)
-    elif direction == "صاعد":
-        analysis["stop_loss"] = round(float(entry) - 2.0, 2)
-    elif analysis.get("sell_probability", 50) > analysis.get("buy_probability", 50):
-        analysis["stop_loss"] = round(float(entry) + 2.0, 2)
+
+def _valid_targets(analysis: dict[str, Any], direction: str, entry: float) -> list[tuple[float, Any]]:
+    targets: list[tuple[float, Any]] = []
+    for price_key, y_key in (
+        ("target_1", "target_1_y"),
+        ("target_2", "target_2_y"),
+        ("target_3", "target_3_y"),
+    ):
+        price = _number(analysis.get(price_key))
+        if price is None:
+            continue
+        if direction == "هابط" and price < entry:
+            targets.append((price, analysis.get(y_key)))
+        elif direction == "صاعد" and price > entry:
+            targets.append((price, analysis.get(y_key)))
+    return targets
+
+
+def _validate_single_trade(analysis: dict[str, Any]) -> dict[str, Any]:
+    """يعتمد صفقة واحدة فقط: الاتجاه الأعلى احتمالًا، مع وقف بنيوي من الشارت."""
+    analysis = normalize_analysis(analysis)
+    buy = int(analysis.get("buy_probability", 50))
+    sell = int(analysis.get("sell_probability", 50))
+
+    direction = "صاعد" if buy > sell else "هابط"
+    probability = buy if direction == "صاعد" else sell
+    side = "شراء" if direction == "صاعد" else "بيع"
+
+    # لا نغيّر الاتجاه العرضي/غير الواضح إلى صفقة بالقوة.
+    raw_direction = str(analysis.get("direction") or "غير واضح")
+    if raw_direction in {"عرضي", "غير واضح"}:
+        trade_valid = False
     else:
-        analysis["stop_loss"] = round(float(entry) - 2.0, 2)
+        trade_valid = raw_direction == direction
 
-    # موضع الوقف يُعاد حسابه داخل renderer بحسب علاقة السعر بمحور الشارت.
-    analysis["stop_loss_y"] = None
+    entry = _number(analysis.get("entry"))
+    stop = _number(analysis.get("stop_loss"))
+    targets = _valid_targets(analysis, direction, entry) if entry is not None else []
+
+    if probability < MIN_TRADE_PROBABILITY or entry is None or stop is None or not targets:
+        trade_valid = False
+
+    if trade_valid and direction == "هابط" and stop <= entry:
+        trade_valid = False
+    if trade_valid and direction == "صاعد" and stop >= entry:
+        trade_valid = False
+
+    # الهدف الأساسي هو الأقرب إلى الدخول؛ لأنه الأعلى قابلية للتحقق على M5.
+    selected_target: float | None = None
+    selected_target_y: Any = None
+    if targets:
+        if direction == "هابط":
+            selected_target, selected_target_y = max(targets, key=lambda item: item[0])
+        else:
+            selected_target, selected_target_y = min(targets, key=lambda item: item[0])
+
+    analysis["direction"] = direction if trade_valid else raw_direction
+    analysis["trade_valid"] = trade_valid
+    analysis["trade_side"] = side if trade_valid else None
+    analysis["trade_probability"] = probability if trade_valid else max(buy, sell)
+    analysis["selected_target"] = selected_target if trade_valid else None
+    analysis["selected_target_y"] = selected_target_y if trade_valid else None
+
+    if not trade_valid:
+        analysis["path_points"] = []
+        analysis["retest_box"] = None
+        analysis["note"] = "لا توجد صفقة واضحة الآن"
+
     return analysis
 
 
@@ -187,26 +245,35 @@ def _analyze(path: Path) -> dict[str, Any]:
         raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
 
     prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD على فريم 5 دقائق فقط.
-افحص صورة الشارت بدقة، واستفد من القواعد والسيناريوهات المرجعية للقراءة فقط، ثم أرجع JSON منظمًا للرسم فوق صورة الشارت نفسها.
+افحص صورة الشارت بدقة، واستفد من الذاكرة المرجعية للقراءة فقط.
+حلل الاحتمالات داخليًا، لكن أخرج صفقة واحدة فقط: الصفقة الأعلى احتمالًا والأوضح فنيًا.
 
-قواعد التحليل:
-- حدد الاتجاه والدعم والمقاومة والدخول وثلاثة أهداف فقط عندما تكون الأسعار مقروءة.
-- BUY وSELL يجب أن يكون مجموعهما 100، ولا تستخدم 0 أو 100.
-- لا تخترع أي سعر غير واضح؛ استخدم null عند عدم الوضوح.
-- stop_loss يمكن أن يكون null لأن البرنامج سيحسبه آليًا على بُعد دولارين من الدخول.
-- note ملاحظة عربية قصيرة جدًا لا تتجاوز 82 حرفًا.
-- اختر سيناريو واحدًا فقط، ولا تعرض سيناريوهات متعارضة.
+قواعد اختيار الصفقة الوحيدة:
+- قارن الشراء والبيع، واختر جهة واحدة فقط. BUY وSELL مجموعهما 100 ولا تستخدم 0 أو 100.
+- إذا لم توجد صفقة واضحة أو الاتجاه عرضي، اجعل entry وstop_loss والأهداف null.
+- لا ترسم أو تقترح مسارين متعارضين.
+- إذا كان نموذج قمتين M واضحًا، رجّح الهبوط فقط بعد كسر/تأكيد مناسب.
+- إذا كان نموذج قاعين W واضحًا، رجّح الصعود فقط بعد كسر/تأكيد مناسب.
+- السهم المتوقع يتبع بنية الشارت: أحمر للهبوط وأخضر للصعود.
 
-قواعد إحداثيات الرسم:
+قواعد الدخول والوقف والهدف:
+- entry هو دخول الصفقة الأعلى احتمالًا فقط، وليس السعر الحالي تلقائيًا.
+- stop_loss يُختار من بنية الشارت والذاكرة: خلف آخر قمة/قاع أو خلف منطقة إبطال النموذج أو إعادة الاختبار.
+- لا تستخدم وقفًا ثابتًا ولا تخترع مستوى غير مقروء.
+- stop_reason سبب عربي قصير يشرح مستوى إبطال الصفقة.
+- الأهداف تكون في اتجاه الصفقة، والهدف الأول هو الأكثر قابلية للتحقق.
+- لا تستخدم null إلا عندما لا يكون السعر مقروءًا أو لا توجد صفقة.
+
+قواعد الرسم:
 - جميع إحداثيات x وy نسبية من 0 إلى 1 بالنسبة للصورة كاملة.
-- y=0 أعلى الصورة وy=1 أسفلها، وx=0 اليسار وx=1 اليمين.
-- ضع الرسم داخل مساحة الشارت فقط، وتجنب شريط الهاتف العلوي وأزرار التطبيق السفلية.
-- pattern_lines: خطوط النموذج الفني الأساسية فقط، كل خط [x1,y1,x2,y2].
-- pattern_path: مسار أبيض يربط القمم والقيعان داخل النموذج.
-- retest_box: مربع إعادة الاختبار [x1,y1,x2,y2] أو null.
-- fvg_boxes: مناطق FVG الواضحة فقط.
-- path_points: المسار المستقبلي المتوقع بعد الدخول فقط، وليس تاريخ حركة السعر.
-- لا تضف بطاقات جانبية أو لوحة سفلية؛ جميع الرسومات والملاحظات تكون داخل الشارت.
+- ضع الرسم داخل مساحة الشارت وتجنب شريط الهاتف وأزرار التطبيق.
+- pattern_lines: خطوط النموذج الأساسية فقط.
+- pattern_path: مسار أبيض يربط القمم والقيعان، خصوصًا M أو W عند وضوحهما.
+- retest_box: منطقة إعادة الاختبار للصفقة المختارة فقط أو null.
+- fvg_boxes: المناطق الواضحة المرتبطة بالصفقة المختارة فقط.
+- path_points: سهم واحد فقط يبدأ من الدخول/إعادة الاختبار ويتجه إلى الهدف.
+- لا تضف لوحة جانبية أو لوحة سفلية.
+- note سطر عربي قصير جدًا.
 
 الذاكرة المرجعية:
 {memory_context(KNOWLEDGE_DIR)}
@@ -226,7 +293,7 @@ def _analyze(path: Path) -> dict[str, Any]:
         "text": {
             "format": {
                 "type": "json_schema",
-                "name": "saleem_overlay_v2",
+                "name": "saleem_single_best_trade",
                 "strict": True,
                 "schema": ANALYSIS_SCHEMA,
             }
@@ -249,11 +316,7 @@ def _analyze(path: Path) -> dict[str, Any]:
         )
 
     raw_analysis = json.loads(_text(response.json()))
-    normalized = normalize_analysis(raw_analysis)
-
-    # نحافظ على حقول الرسم الجديدة حتى لو لم تكن موجودة في normalize_analysis.
-    analysis = {**raw_analysis, **normalized}
-    return _force_two_dollar_stop(analysis)
+    return _validate_single_trade(raw_analysis)
 
 
 def analyze_chart_image(

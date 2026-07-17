@@ -1,21 +1,19 @@
-# SaleeM Gold Analyst — Project Constitution
+# SaleeM Gold Analyst — دستور المشروع
 
-- Asset: XAUUSD only.
-- Entry timeframe: M5 only.
-- Larger timeframes are reviewed internally when available.
-- Output: one annotated image only.
-- The chart occupies the full image; the information panel is small and placed on the right.
-- Draw support, resistance, FVG, BOS/CHOCH when visible, entry, SL, TP1–TP3, and one expected scenario path.
-- Bullish path is green; bearish path is red.
-- Show BUY% and SELL%; their sum is 100 and neither may be 100.
-- Note is one short line only.
-- The project knowledge base is read-only during analysis.
-- Uploaded images and generated results are not stored permanently.
-
-
-## مكتبة المعرفة
-- توجد داخل مجلد `knowledge/` بعشرة أقسام رسمية.
-- المكتبة للقراءة فقط أثناء التحليل.
-- الرسم النهائي يتم فوق صورة الشارت الأصلية المرفوعة.
-- لا يوجد أرشيف للتحليلات أو نتائج الصفقات.
-- يتم اختيار سيناريو واحد فقط، مع عرض BUY% وSELL%.
+- الأصل: الذهب XAUUSD فقط.
+- فريم الدخول: M5 فقط.
+- الإخراج: صورة واحدة مرسومة فوق الشارت الأصلي.
+- يرسم التطبيق صفقة واحدة فقط: الأعلى احتمالًا والأوضح فنيًا.
+- لا يرسم مساري شراء وبيع معًا.
+- تظهر نسبة نجاح تقديرية للصفقة المختارة فقط، وليست ضمانًا.
+- وقف الخسارة يُستخرج من بنية الشارت والذاكرة: خلف القمة/القاع أو مستوى إبطال النموذج أو إعادة الاختبار.
+- لا يوجد وقف ثابت.
+- منطقة الوقف حمراء شفافة، ومنطقة الهدف خضراء شفافة داخل الشارت.
+- السهم أحمر للهبوط وأخضر للصعود، ويتبع مسار الشارت من الدخول أو إعادة الاختبار إلى الهدف.
+- نموذج M (قمتان) يدعم السيناريو الهابط بعد التأكيد.
+- نموذج W (قاعان) يدعم السيناريو الصاعد بعد التأكيد.
+- لا توجد لوحة جانبية أو لوحة سفلية.
+- لا يُرسم دخول عند الاتجاه العرضي أو غير الواضح، أو عند غياب أسعار موثوقة.
+- عند غياب صفقة واضحة تظهر عبارة: «لا توجد صفقة واضحة الآن».
+- الذاكرة للقراءة فقط أثناء التحليل.
+- الصور والنتائج لا تُحفظ بصورة دائمة.

@@ -255,9 +255,11 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
     small_font = _font(max(23, int(width * 0.023)), bold=True)
 
     direction = str(analysis.get("direction") or "غير واضح")
-    entry = _number(analysis.get("entry"))
-    if entry is None:
-        entry = _number(analysis.get("current_price"))
+    trade_valid = bool(analysis.get("trade_valid"))
+    entry = _number(analysis.get("entry")) if trade_valid else None
+    stop = _number(analysis.get("stop_loss")) if trade_valid else None
+    probability = int(analysis.get("trade_probability") or 50)
+    side = str(analysis.get("trade_side") or "")
 
     # 1) رسم خطوط النموذج الفني باللون الأزرق.
     for line in analysis.get("pattern_lines") or []:
@@ -292,7 +294,9 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
         x1, y1 = _point(retest_box[:2], width, height)
         x2, y2 = _point(retest_box[2:], width, height)
         rect = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
-        draw.rounded_rectangle(rect, radius=12, fill=RED_FILL, outline=RED, width=thin_width)
+        retest_color = RED if direction == "هابط" else GREEN
+        retest_fill = RED_FILL if direction == "هابط" else GREEN_FILL
+        draw.rounded_rectangle(rect, radius=12, fill=retest_fill, outline=retest_color, width=thin_width)
         label_y = max(int(height * 0.08), rect[1] - int(height * 0.042))
         _label(
             draw,
@@ -300,15 +304,17 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
             "إعادة اختبار",
             small_font,
             BLACK_GLASS,
-            RED,
+            retest_color,
             width,
             int(width * 0.014),
             int(width * 0.008),
         )
 
-    if entry is not None:
-        stop = round(entry + 2.0, 2) if direction == "هابط" else round(entry - 2.0, 2)
-        target, target_explicit_y = _select_target(analysis, direction, entry)
+    if entry is not None and stop is not None:
+        target = _number(analysis.get("selected_target"))
+        target_explicit_y = analysis.get("selected_target_y")
+        if target is None:
+            target, target_explicit_y = _select_target(analysis, direction, entry)
 
         entry_y_n = _price_y(analysis, entry, analysis.get("entry_y"), 0.62)
         stop_y_n = _price_y(
@@ -332,7 +338,7 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
         zone_right = int(width * 0.91)
         label_x = int(width * 0.64)
 
-        # منطقة الوقف: صغيرة وشفافة، دائمًا دولاران فقط.
+        # منطقة الوقف: مبنية على مستوى إبطال الصفقة من قراءة الشارت والذاكرة.
         draw.rectangle(
             (
                 zone_left,
@@ -359,11 +365,14 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
                 width=thin_width,
             )
 
+        entry_color = RED if direction == "هابط" else GREEN
+        entry_fill = (130, 24, 32, 225) if direction == "هابط" else (12, 108, 56, 230)
+
         _dash_line(
             draw,
             (int(width * 0.04), entry_y),
             (zone_right, entry_y),
-            GREEN,
+            entry_color,
             thin_width,
             dash=max(14, int(width * 0.017)),
             gap=max(10, int(width * 0.011)),
@@ -404,10 +413,10 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
         _label(
             draw,
             (label_x, entry_y + int(height * 0.006)),
-            f"الدخول {entry:.2f}",
+            f"دخول {entry:.2f}",
             main_font,
-            (12, 108, 56, 230),
-            GREEN,
+            entry_fill,
+            entry_color,
             width,
             int(width * 0.016),
             int(width * 0.009),
@@ -448,8 +457,43 @@ def render_result(image_path: Path, analysis: dict[str, Any]) -> bytes:
                 line_width * 2,
             )
 
+    # بطاقة واحدة فقط لنسبة الصفقة المختارة.
+    if trade_valid:
+        probability_color = RED if direction == "هابط" else GREEN
+        probability_fill = (130, 24, 32, 225) if direction == "هابط" else (12, 108, 56, 230)
+        _label(
+            draw,
+            (int(width * 0.68), int(height * 0.11)),
+            f"{side} {probability}%",
+            main_font,
+            probability_fill,
+            probability_color,
+            width,
+            int(width * 0.016),
+            int(width * 0.009),
+        )
+
+    # عند غياب صفقة واضحة لا نرسم دخولًا أو وقفًا أو هدفًا مزيفًا.
+    if not trade_valid:
+        _label(
+            draw,
+            (int(width * 0.22), int(height * 0.48)),
+            "لا توجد صفقة واضحة الآن",
+            main_font,
+            BLACK_GLASS,
+            GOLD,
+            width,
+            int(width * 0.018),
+            int(width * 0.010),
+        )
+
     # 5) عناوين صغيرة داخل الشارت فقط، دون بطاقات جانبية أو لوحة سفلية.
     pattern_type = str(analysis.get("pattern_type") or "")
+    if pattern_type == "قمتان":
+        pattern_type = "نموذج M"
+    elif pattern_type == "قاعان":
+        pattern_type = "نموذج W"
+
     if pattern_type and pattern_type != "لا يوجد":
         _label(
             draw,

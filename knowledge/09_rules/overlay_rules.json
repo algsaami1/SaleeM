@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "market": "XAUUSD",
   "entry_timeframe": "M5",
   "usage": "read_only_reference",
@@ -60,22 +60,25 @@
       "style": "curved or segmented dashed path"
     },
     {
-      "element": "info_panel",
-      "position": "right",
-      "maximum_width_percent": 20,
+      "element": "single_best_trade",
+      "maximum_drawn_trades": 1,
+      "selection": "highest estimated probability with valid technical structure",
       "content": [
-        "BUY%",
-        "SELL%",
-        "Trend",
-        "Scenario",
-        "Note"
+        "direction",
+        "estimated success probability",
+        "entry",
+        "structure-based stop",
+        "transparent target zone",
+        "one expected path"
       ]
     }
   ],
   "constraints": [
     "لا تغطِ الشموع قدر الإمكان",
-    "لا تصغر الشارت لإنشاء لوحة منفصلة",
-    "الملاحظة سطر واحد",
+    "لا توجد لوحة جانبية أو لوحة سفلية",
+    "ارسم صفقة واحدة فقط وهي الأعلى احتمالًا",
+    "وقف الخسارة من بنية الشارت وليس مسافة ثابتة",
+    "السهم أحمر للهبوط وأخضر للصعود",
     "تظهر الصورة الناتجة كأن محللًا رسم على لقطة المستخدم نفسها"
   ]
 }
