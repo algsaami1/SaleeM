@@ -1,16 +1,5 @@
-# SaleeM Gold Analyst | سليم لتحليل الذهب
+# SaleeM Gold Analyst v0.7
 
-تطبيق FastAPI مخصص لتحليل صور شارت الذهب XAUUSD على فريم 5 دقائق، ويُنتج صورة واحدة تحتوي على عداد قوة السيناريو والاتجاه والدخول ووقف الخسارة وثلاثة أهداف والدعم والمقاومة.
+XAUUSD M5 chart analyzer with a read-only knowledge base and one annotated image output.
 
-## متغيرات Railway المطلوبة
-
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL` اختياري، والقيمة الافتراضية `gpt-4.1-mini`
-
-لا يستخدم المشروع Gemini، ولا يحتاج إلى `GEMINI_API_KEY`.
-
-## التشغيل المحلي
-
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
+This release adds an engine package, the official project constitution, BUY/SELL percentages, full-chart overlays, FVG boxes, support/resistance, entry/SL/TP levels, and a small right-side information panel.
