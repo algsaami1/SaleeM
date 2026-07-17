@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=1.0.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.0.0">
 </head>
 <body>
   <main class="app-shell">
@@ -29,16 +29,13 @@
 
     <section class="card upload-card">
       <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
-        <input type="hidden" name="symbol" value="XAUUSD">
-        <input type="hidden" name="timeframe" value="M5">
-
         <label class="drop-zone" id="drop-zone" for="image-input">
           <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
           <span class="upload-cloud" aria-hidden="true">
             <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
           </span>
           <strong>ارفع صورة الشارت</strong>
-          <small>قم برفع صورة شارت الذهب XAUUSD <b>(فريم 5 دقائق)</b></small>
+          <small>ارفع شارت الذهب XAUUSD على فريم خمس دقائق، مع إظهار آخر ساعتين ومحور الأسعار</small>
           <span class="primary-button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
             اختيار صورة
@@ -62,11 +59,11 @@
       </div>
       <div class="processing-copy">
         <h3>جاري التحليل...</h3>
-        <p>نقوم بتحليل الشارت وإنشاء أفضل سيناريو</p>
+        <p>نقرأ آخر 24 شمعة ونعيد رسم الشارت مع أفضل سيناريو</p>
         <div class="steps">
           <span class="active">قراءة الشارت وتحليل البيانات</span>
           <span>تحليل الاتجاه العام</span>
-          <span>تحديد الدعم والمقاومات</span>
+          <span>تحديد قوة الدعم والمقاومة</span>
           <span>تحليل السيناريوهات</span>
           <span>إنشاء الصورة النهائية</span>
         </div>
@@ -78,14 +75,14 @@
       <div class="features-grid">
         <article><span class="feature-icon purple">🚀</span><strong>تحليل ذكي</strong><small>قراءة منظمة للشارت</small></article>
         <article><span class="feature-icon purple">🎯</span><strong>دقة عالية</strong><small>مستويات واضحة</small></article>
-        <article><span class="feature-icon gold">⚡</span><strong>نتائج سريعة</strong><small>صورة تحليل واحدة</small></article>
+        <article><span class="feature-icon gold">⚡</span><strong>نتائج سريعة</strong><small>شارت جديد واضح</small></article>
         <article><span class="feature-icon purple">🛡️</span><strong>موثوق وآمن</strong><small>خصوصيتك محفوظة</small></article>
       </div>
     </section>
 
     <section class="card notice">
       <span class="notice-icon">💡</span>
-      <p>تم تصميم هذا التطبيق خصيصًا لتحليل الذهب <b>XAUUSD</b> على فريم <b>5 دقائق (5M)</b> فقط.</p>
+      <p>يقرأ التطبيق آخر ساعتين من الذهب <b>XAUUSD</b> على فريم <b>خمس دقائق</b>، ثم يعيد رسم 24 شمعة مع الدعم والمقاومة والسيناريو والأهداف.</p>
     </section>
 
     {% if error %}
@@ -95,11 +92,11 @@
     {% if result %}
     <section class="card result-card" id="result-card">
       <div class="result-heading"><div><span>اكتمل التحليل</span><h3>صورة التحليل</h3></div><span class="done-mark">✓</span></div>
-      <img src="{{ result.result_url }}" alt="نتيجة تحليل الذهب على فريم 5 دقائق">
+      <img src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه لآخر ساعتين مع السيناريو الفني">
       <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=1.0.0" defer></script>
+  <script src="/static/app.js?v=2.0.0" defer></script>
 </body>
 </html>

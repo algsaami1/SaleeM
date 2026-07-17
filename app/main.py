@@ -1,7 +1,7 @@
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -15,8 +15,8 @@ TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="1.0.0",
-    description="Gold XAUUSD M5 analysis rendered directly on the uploaded chart.",
+    version="2.0.0",
+    description="Reconstructs the last two hours of XAUUSD M5 and renders one clear technical scenario.",
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -25,10 +25,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request, "result": None, "error": None},
-    )
+    return templates.TemplateResponse("index.html", {"request": request, "result": None, "error": None})
 
 
 @app.get("/health")
@@ -36,25 +33,21 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM Gold Analyst",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
+        "window": "2h / 24 candles",
         "storage": "temporary-only",
         "memory": "read-only",
-        "renderer": "axis-calibrated-nearest-trade-v4",
-        "trade_mode": "highest-probability-nearest-entry",
-        "max_drawn_trades": 1,
-        "stop_policy": "validated-chart-structure-and-read-only-memory",
+        "renderer": "reconstructed-two-hour-chart-v1",
+        "trade_mode": "single-highest-probability-scenario",
+        "targets": 3,
+        "support_resistance": "strength-weighted-lines",
     }
 
 
 @app.post("/analyze", response_class=HTMLResponse)
-async def analyze(
-    request: Request,
-    image: UploadFile | None = File(None),
-    symbol: str = Form("XAUUSD"),
-    timeframe: str = Form("M5"),
-):
+async def analyze(request: Request, image: UploadFile | None = File(None)):
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
     if not image or not image.filename:
         raise HTTPException(status_code=400, detail="يرجى اختيار صورة الشارت.")
@@ -67,31 +60,26 @@ async def analyze(
 
     suffix = Path(image.filename).suffix.lower() or ".png"
     temp_path: Path | None = None
-
     try:
         with NamedTemporaryFile(delete=False, suffix=suffix) as temp:
             temp.write(raw)
             temp_path = Path(temp.name)
 
-        with Image.open(temp_path) as img:
-            img.verify()
+        with Image.open(temp_path) as source:
+            source.verify()
 
-        result = analyze_chart_image(
-            image_path=temp_path,
-            symbol=symbol.strip().upper() or "XAUUSD",
-            timeframe=timeframe.strip().upper() or "M5",
-        )
-
-        return templates.TemplateResponse(
-            "index.html",
-            {"request": request, "result": result, "error": None},
-        )
+        result = analyze_chart_image(temp_path, "XAUUSD", "M5")
+        return templates.TemplateResponse("index.html", {"request": request, "result": result, "error": None})
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception:
         return templates.TemplateResponse(
             "index.html",
-            {"request": request, "result": None, "error": str(exc)},
+            {
+                "request": request,
+                "result": None,
+                "error": "تعذر تحليل الصورة. أظهر آخر ساعتين ومحور الأسعار بوضوح ثم حاول مرة أخرى.",
+            },
             status_code=500,
         )
     finally:

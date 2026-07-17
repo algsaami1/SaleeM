@@ -9,7 +9,6 @@ from typing import Any
 import httpx
 
 from app.engine.memory_engine import memory_context
-from app.engine.models import normalize_analysis
 from app.engine.renderer import render_result
 
 OPENAI_URL = "https://api.openai.com/v1/responses"
@@ -18,9 +17,9 @@ KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 
 CONFIRMED_PROBABILITY = 65
 CONDITIONAL_PROBABILITY = 55
-MAX_ENTRY_DISTANCE = 6.0
-MAX_STRUCTURAL_STOP = 8.0
-MIN_STRUCTURAL_STOP = 0.8
+MAX_ENTRY_DISTANCE = 8.0
+MIN_STOP_DISTANCE = 0.6
+MAX_STOP_DISTANCE = 12.0
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -35,11 +34,27 @@ LINE = {
     "minItems": 4,
     "maxItems": 4,
 }
-BOX_NULL = {
-    "type": ["array", "null"],
-    "items": {"type": "number", "minimum": 0, "maximum": 1},
-    "minItems": 4,
-    "maxItems": 4,
+CANDLE = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "time": {"type": "string"},
+        "open": {"type": "number"},
+        "high": {"type": "number"},
+        "low": {"type": "number"},
+        "close": {"type": "number"},
+    },
+    "required": ["time", "open", "high", "low", "close"],
+}
+LEVEL = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "price": {"type": "number"},
+        "strength": {"type": "integer", "minimum": 0, "maximum": 100},
+        "touches": {"type": "integer", "minimum": 1, "maximum": 12},
+    },
+    "required": ["price", "strength", "touches"],
 }
 
 ANALYSIS_SCHEMA = {
@@ -47,11 +62,7 @@ ANALYSIS_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "chart_readable": {"type": "boolean"},
-        "chart_box": LINE,
-        "axis_top_price": NUM_NULL,
-        "axis_top_y": NUM_NULL,
-        "axis_bottom_price": NUM_NULL,
-        "axis_bottom_y": NUM_NULL,
+        "candles": {"type": "array", "items": CANDLE, "minItems": 24, "maxItems": 24},
         "direction": {"type": "string", "enum": ["صاعد", "هابط", "عرضي", "غير واضح"]},
         "buy_probability": {"type": "integer", "minimum": 5, "maximum": 95},
         "sell_probability": {"type": "integer", "minimum": 5, "maximum": 95},
@@ -59,37 +70,34 @@ ANALYSIS_SCHEMA = {
         "entry_kind": {"type": "string", "enum": ["مباشر", "اختراق", "إعادة اختبار", "مراقبة"]},
         "confirmation": {"type": "string"},
         "current_price": NUM_NULL,
-        "support": NUM_NULL,
-        "resistance": NUM_NULL,
+        "support_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
+        "resistance_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "entry": NUM_NULL,
         "stop_loss": NUM_NULL,
         "stop_reason": {"type": "string"},
         "target_1": NUM_NULL,
         "target_2": NUM_NULL,
         "target_3": NUM_NULL,
-        "fvg_boxes": {"type": "array", "items": LINE, "maxItems": 1},
         "pattern_type": {
             "type": "string",
             "enum": [
                 "مثلث متماثل", "مثلث هابط", "مثلث صاعد", "وتد هابط", "وتد صاعد",
-                "قناة هابطة", "قناة صاعدة", "قمتان", "قاعان", "لا يوجد",
+                "قناة هابطة", "قناة صاعدة", "قمتان", "قاعان", "كسر وإعادة اختبار", "لا يوجد",
             ],
         },
         "pattern_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
-        "pattern_lines": {"type": "array", "items": LINE, "maxItems": 3},
-        "pattern_path": {"type": "array", "items": POINT, "maxItems": 10},
-        "retest_box": BOX_NULL,
-        "path_points": {"type": "array", "items": POINT, "maxItems": 5},
+        "pattern_lines": {"type": "array", "items": LINE, "maxItems": 4},
+        "pattern_path": {"type": "array", "items": POINT, "maxItems": 12},
         "scenario": {"type": "string"},
         "note": {"type": "string"},
         "memory_matches": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     },
     "required": [
-        "chart_readable", "chart_box", "axis_top_price", "axis_top_y", "axis_bottom_price", "axis_bottom_y",
-        "direction", "buy_probability", "sell_probability", "setup_state", "entry_kind", "confirmation",
-        "current_price", "support", "resistance", "entry", "stop_loss", "stop_reason",
-        "target_1", "target_2", "target_3", "fvg_boxes", "pattern_type", "pattern_confidence",
-        "pattern_lines", "pattern_path", "retest_box", "path_points", "scenario", "note", "memory_matches",
+        "chart_readable", "candles", "direction", "buy_probability", "sell_probability",
+        "setup_state", "entry_kind", "confirmation", "current_price", "support_levels",
+        "resistance_levels", "entry", "stop_loss", "stop_reason", "target_1", "target_2",
+        "target_3", "pattern_type", "pattern_confidence", "pattern_lines", "pattern_path",
+        "scenario", "note", "memory_matches",
     ],
 }
 
@@ -117,183 +125,267 @@ def _number(value: Any) -> float | None:
     return None
 
 
-def _valid_axis(analysis: dict[str, Any]) -> bool:
-    top_price = _number(analysis.get("axis_top_price"))
-    bottom_price = _number(analysis.get("axis_bottom_price"))
-    top_y = _number(analysis.get("axis_top_y"))
-    bottom_y = _number(analysis.get("axis_bottom_y"))
-    if None in {top_price, bottom_price, top_y, bottom_y}:
-        return False
-    return bool(top_price > bottom_price and 0 <= top_y < bottom_y <= 1)
+def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
+    candles: list[dict[str, Any]] = []
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        values = [_number(item.get(key)) for key in ("open", "high", "low", "close")]
+        if any(value is None for value in values):
+            continue
+        open_, high, low, close = [float(value) for value in values]
+        high = max(high, open_, close, low)
+        low = min(low, open_, close, high)
+        candles.append(
+            {
+                "time": str(item.get("time") or f"-{(23 - index) * 5}m")[:8],
+                "open": round(open_, 2),
+                "high": round(high, 2),
+                "low": round(low, 2),
+                "close": round(close, 2),
+            }
+        )
+    return candles[-24:]
 
 
-def _valid_targets(analysis: dict[str, Any], direction: str, entry: float) -> list[float]:
-    values: list[float] = []
-    for key in ("target_1", "target_2", "target_3"):
-        price = _number(analysis.get(key))
+def _atr(candles: list[dict[str, Any]], periods: int = 8) -> float:
+    sample = candles[-periods:] if candles else []
+    if not sample:
+        return 2.0
+    ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in sample]
+    return sum(ranges) / len(ranges)
+
+
+def _cluster_levels(candles: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+    if not candles:
+        return []
+    prices = [float(c["low"] if kind == "support" else c["high"]) for c in candles]
+    total_range = max(prices) - min(prices)
+    tolerance = max(0.35, total_range * 0.035)
+    clusters: list[list[float]] = []
+    for price in sorted(prices):
+        for cluster in clusters:
+            center = sum(cluster) / len(cluster)
+            if abs(price - center) <= tolerance:
+                cluster.append(price)
+                break
+        else:
+            clusters.append([price])
+
+    levels: list[dict[str, Any]] = []
+    for cluster in clusters:
+        touches = len(cluster)
+        if touches < 2:
+            continue
+        center = sum(cluster) / touches
+        strength = min(92, 48 + touches * 8)
+        levels.append({"price": round(center, 2), "strength": strength, "touches": min(touches, 12)})
+    return sorted(levels, key=lambda level: (-int(level["strength"]), -int(level["touches"])))[:4]
+
+
+def _normalize_levels(raw: Any, candles: list[dict[str, Any]], kind: str, current: float) -> list[dict[str, Any]]:
+    levels: list[dict[str, Any]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        price = _number(item.get("price"))
         if price is None:
             continue
-        if direction == "هابط" and price < entry:
-            values.append(price)
-        elif direction == "صاعد" and price > entry:
-            values.append(price)
-    return values
+        # الدعم يجب أن يكون أسفل/قريبًا من السعر، والمقاومة أعلى/قريبة منه.
+        side_tolerance = max(0.25, _atr(candles) * 0.20)
+        if kind == "support" and price > current + side_tolerance:
+            continue
+        if kind == "resistance" and price < current - side_tolerance:
+            continue
+        strength = max(35, min(95, int(item.get("strength") or 50)))
+        touches = max(1, min(12, int(item.get("touches") or 1)))
+        levels.append({"price": round(price, 2), "strength": strength, "touches": touches})
+
+    if len(levels) < 2:
+        existing = {round(float(level["price"]), 1) for level in levels}
+        side_tolerance = max(0.25, _atr(candles) * 0.20)
+        for derived in _cluster_levels(candles, kind):
+            price = float(derived["price"])
+            if kind == "support" and price > current + side_tolerance:
+                continue
+            if kind == "resistance" and price < current - side_tolerance:
+                continue
+            if round(price, 1) not in existing:
+                levels.append(derived)
+                existing.add(round(price, 1))
+
+    # قوة المستوى أولًا ثم قربه من السعر الحالي، مع دمج المستويات المتقاربة.
+    levels.sort(key=lambda level: (-(float(level["strength"]) - abs(float(level["price"]) - current) * 1.5)))
+    merged: list[dict[str, Any]] = []
+    merge_distance = max(0.35, _atr(candles) * 0.35)
+    for level in levels:
+        if any(abs(float(level["price"]) - float(other["price"])) <= merge_distance for other in merged):
+            continue
+        merged.append(level)
+        if len(merged) == 2:
+            break
+    return sorted(merged, key=lambda level: float(level["price"]), reverse=True)
+
+
+def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
+    try:
+        buy = max(5, min(95, int(round(float(data.get("buy_probability", 50))))))
+    except (TypeError, ValueError):
+        buy = 50
+    sell = 100 - buy
+    return buy, sell
+
+
+def _choose_direction(data: dict[str, Any], candles: list[dict[str, Any]], buy: int, sell: int) -> str:
+    if buy != sell:
+        return "صاعد" if buy > sell else "هابط"
+    if len(candles) >= 6:
+        return "صاعد" if candles[-1]["close"] >= candles[-6]["close"] else "هابط"
+    return "صاعد"
 
 
 def _nearest_entry(
-    analysis: dict[str, Any], direction: str, current: float
+    data: dict[str, Any], direction: str, current: float,
+    supports: list[dict[str, Any]], resistances: list[dict[str, Any]],
 ) -> tuple[float, str, str]:
-    """يرجع أقرب نقطة تفعيل من المستويات المقروءة، ولا يختار مستوى بعيدًا."""
-    proposed = _number(analysis.get("entry"))
+    proposed = _number(data.get("entry"))
     if proposed is not None and abs(proposed - current) <= MAX_ENTRY_DISTANCE:
-        kind = str(analysis.get("entry_kind") or "مراقبة")
-        return proposed, kind, str(analysis.get("confirmation") or "انتظار تأكيد شمعة خمس دقائق")
+        return round(proposed, 2), str(data.get("entry_kind") or "مراقبة"), str(data.get("confirmation") or "انتظار تأكيد شمعة خمس دقائق")
 
-    support = _number(analysis.get("support"))
-    resistance = _number(analysis.get("resistance"))
     candidates: list[tuple[float, str, str]] = []
-
     if direction == "صاعد":
-        if resistance is not None and current <= resistance <= current + MAX_ENTRY_DISTANCE:
-            candidates.append((resistance, "اختراق", "إغلاق شمعة خمس دقائق فوق المقاومة"))
-        if support is not None and current - 4.0 <= support <= current:
-            candidates.append((support, "إعادة اختبار", "ثبات الدعم وظهور شمعة صاعدة"))
+        for level in resistances:
+            price = float(level["price"])
+            if current <= price <= current + MAX_ENTRY_DISTANCE:
+                candidates.append((price, "اختراق", "إغلاق شمعة خمس دقائق فوق المقاومة"))
+        for level in supports:
+            price = float(level["price"])
+            if current - MAX_ENTRY_DISTANCE <= price <= current:
+                candidates.append((price, "إعادة اختبار", "ثبات الدعم وظهور شمعة صاعدة"))
     else:
-        if support is not None and current - MAX_ENTRY_DISTANCE <= support <= current:
-            candidates.append((support, "اختراق", "إغلاق شمعة خمس دقائق تحت الدعم"))
-        if resistance is not None and current <= resistance <= current + 4.0:
-            candidates.append((resistance, "إعادة اختبار", "رفض المقاومة وظهور شمعة هابطة"))
+        for level in supports:
+            price = float(level["price"])
+            if current - MAX_ENTRY_DISTANCE <= price <= current:
+                candidates.append((price, "اختراق", "إغلاق شمعة خمس دقائق تحت الدعم"))
+        for level in resistances:
+            price = float(level["price"])
+            if current <= price <= current + MAX_ENTRY_DISTANCE:
+                candidates.append((price, "إعادة اختبار", "رفض المقاومة وظهور شمعة هابطة"))
 
     if candidates:
         return min(candidates, key=lambda item: abs(item[0] - current))
-
-    # عندما لا يوجد مستوى قريب، نعرض مراقبة عند السعر الحالي بدل رسم دخول بعيد وغير منطقي.
-    return current, "مراقبة", "انتظار شمعة تأكيد خمس دقائق قبل الدخول"
+    return round(current, 2), "مراقبة", "انتظار شمعة تأكيد خمس دقائق عند السعر الحالي"
 
 
 def _validated_stop(
-    analysis: dict[str, Any], direction: str, entry: float
-) -> tuple[float | None, str]:
-    stop = _number(analysis.get("stop_loss"))
-    reason = str(analysis.get("stop_reason") or "خلف منطقة إبطال السيناريو")
+    data: dict[str, Any], direction: str, entry: float, candles: list[dict[str, Any]],
+    supports: list[dict[str, Any]], resistances: list[dict[str, Any]],
+) -> tuple[float, str]:
+    proposed = _number(data.get("stop_loss"))
+    reason = str(data.get("stop_reason") or "خلف منطقة إبطال السيناريو")
+    if proposed is not None:
+        distance = abs(proposed - entry)
+        correct_side = (direction == "صاعد" and proposed < entry) or (direction == "هابط" and proposed > entry)
+        if correct_side and MIN_STOP_DISTANCE <= distance <= MAX_STOP_DISTANCE:
+            return round(proposed, 2), reason
 
-    if stop is not None:
-        distance = abs(stop - entry)
-        correct_side = (direction == "صاعد" and stop < entry) or (direction == "هابط" and stop > entry)
-        if correct_side and MIN_STRUCTURAL_STOP <= distance <= MAX_STRUCTURAL_STOP:
-            return stop, reason
+    buffer = max(0.20, _atr(candles) * 0.15)
+    if direction == "صاعد":
+        candidates = [float(level["price"]) for level in supports if float(level["price"]) < entry]
+        if candidates:
+            stop = max(candidates) - buffer
+            if MIN_STOP_DISTANCE <= entry - stop <= MAX_STOP_DISTANCE:
+                return round(stop, 2), "أسفل أقرب دعم وقاع بنيوي"
+        stop = entry - max(1.0, min(6.0, _atr(candles) * 1.25))
+        return round(stop, 2), "أسفل التذبذب الأخير"
 
-    structural = _number(analysis.get("support" if direction == "صاعد" else "resistance"))
-    if structural is not None:
-        distance = abs(structural - entry)
-        correct_side = (direction == "صاعد" and structural < entry) or (direction == "هابط" and structural > entry)
-        if correct_side and MIN_STRUCTURAL_STOP <= distance <= MAX_STRUCTURAL_STOP:
-            return structural, "خلف أقرب دعم" if direction == "صاعد" else "فوق أقرب مقاومة"
-
-    return None, "الوقف ينتظر تأكيد البنية"
-
-
-def _select_target(
-    analysis: dict[str, Any], direction: str, entry: float, stop: float | None
-) -> float | None:
-    targets = _valid_targets(analysis, direction, entry)
-    if not targets:
-        return None
-
-    ordered = sorted(targets, reverse=(direction == "هابط"))
-    if stop is None:
-        return ordered[0]
-
-    risk = abs(entry - stop)
-    for target in ordered:
-        reward = abs(target - entry)
-        if risk > 0 and reward / risk >= 1.15:
-            return target
-    return ordered[0]
+    candidates = [float(level["price"]) for level in resistances if float(level["price"]) > entry]
+    if candidates:
+        stop = min(candidates) + buffer
+        if MIN_STOP_DISTANCE <= stop - entry <= MAX_STOP_DISTANCE:
+            return round(stop, 2), "فوق أقرب مقاومة وقمة بنيوية"
+    stop = entry + max(1.0, min(6.0, _atr(candles) * 1.25))
+    return round(stop, 2), "فوق التذبذب الأخير"
 
 
-def _validate_single_trade(analysis: dict[str, Any]) -> dict[str, Any]:
-    """يعرض صفقة واحدة أو أقرب تفعيل محتمل، ويمنع المستويات البعيدة أو المقلوبة."""
-    analysis = normalize_analysis(analysis)
-    buy = int(analysis.get("buy_probability", 50))
-    sell = int(analysis.get("sell_probability", 50))
-    direction = "صاعد" if buy >= sell else "هابط"
+def _validated_targets(data: dict[str, Any], direction: str, entry: float, stop: float) -> list[float]:
+    targets: list[float] = []
+    for key in ("target_1", "target_2", "target_3"):
+        value = _number(data.get(key))
+        if value is None:
+            continue
+        valid = (direction == "صاعد" and value > entry) or (direction == "هابط" and value < entry)
+        if valid and all(abs(value - existing) >= 0.25 for existing in targets):
+            targets.append(round(value, 2))
+
+    risk = max(MIN_STOP_DISTANCE, abs(entry - stop))
+    multipliers = (1.0, 1.7, 2.5)
+    for multiplier in multipliers:
+        if len(targets) >= 3:
+            break
+        value = entry + risk * multiplier if direction == "صاعد" else entry - risk * multiplier
+        if all(abs(value - existing) >= 0.25 for existing in targets):
+            targets.append(round(value, 2))
+
+    targets = sorted(targets, reverse=(direction == "هابط"))[:3]
+    return targets
+
+
+def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
+    candles = _normalize_candles(data.get("candles"))
+    if len(candles) < 12:
+        raise RuntimeError("تعذر استخراج شموع كافية من الصورة. قرّب الشارت وأظهر محور الأسعار.")
+
+    current = _number(data.get("current_price")) or float(candles[-1]["close"])
+    buy, sell = _normalize_probabilities(data)
+    direction = _choose_direction(data, candles, buy, sell)
     probability = buy if direction == "صاعد" else sell
-    side = "شراء" if direction == "صاعد" else "بيع"
+    supports = _normalize_levels(data.get("support_levels"), candles, "support", current)
+    resistances = _normalize_levels(data.get("resistance_levels"), candles, "resistance", current)
+    entry, entry_kind, confirmation = _nearest_entry(data, direction, current, supports, resistances)
+    stop, stop_reason = _validated_stop(data, direction, entry, candles, supports, resistances)
+    targets = _validated_targets(data, direction, entry, stop)
 
-    current = _number(analysis.get("current_price"))
-    chart_readable = bool(analysis.get("chart_readable")) and current is not None and _valid_axis(analysis)
-
-    analysis["direction"] = direction
-    analysis["trade_side"] = side
-    analysis["trade_probability"] = probability
-    analysis["no_setup"] = not chart_readable
-
-    if not chart_readable or current is None:
-        analysis.update(
-            {
-                "trade_valid": False,
-                "draw_mode": "none",
-                "entry": None,
-                "stop_loss": None,
-                "selected_target": None,
-                "path_points": [],
-                "note": "تعذر قراءة محور السعر بوضوح",
-            }
-        )
-        return analysis
-
-    entry, entry_kind, confirmation = _nearest_entry(analysis, direction, current)
-    stop, stop_reason = _validated_stop(analysis, direction, entry)
-    target = _select_target(analysis, direction, entry, stop)
-
-    model_state = str(analysis.get("setup_state") or "مراقبة")
-    distance = abs(entry - current)
-    complete_risk_plan = stop is not None and target is not None
-
-    if probability >= CONFIRMED_PROBABILITY and model_state == "مؤكد" and distance <= 3.0 and complete_risk_plan:
+    model_state = str(data.get("setup_state") or "مراقبة")
+    if probability >= CONFIRMED_PROBABILITY and model_state == "مؤكد":
         draw_mode = "confirmed"
-        trade_valid = True
     elif probability >= CONDITIONAL_PROBABILITY:
         draw_mode = "conditional"
-        trade_valid = False
     else:
         draw_mode = "watch"
-        trade_valid = False
 
-    # إذا تجاوز السعر الهدف أو ابتعد كثيرًا عن الدخول، تتحول الفكرة إلى مراقبة عند أقرب تفعيل.
-    if target is not None:
-        target_passed = (direction == "صاعد" and current >= target) or (direction == "هابط" and current <= target)
-        if target_passed:
-            target = None
-            draw_mode = "watch"
-            trade_valid = False
+    pattern_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
+    if pattern_confidence < 60:
+        data["pattern_lines"] = []
+        data["pattern_path"] = []
+        data["pattern_type"] = "لا يوجد"
 
-    analysis.update(
+    data.update(
         {
-            "trade_valid": trade_valid,
+            "chart_readable": True,
+            "candles": candles,
+            "current_price": round(current, 2),
+            "buy_probability": buy,
+            "sell_probability": sell,
+            "direction": direction,
+            "trade_side": "شراء" if direction == "صاعد" else "بيع",
+            "trade_probability": probability,
             "draw_mode": draw_mode,
-            "entry": round(entry, 2),
+            "support_levels": supports,
+            "resistance_levels": resistances,
+            "entry": entry,
             "entry_kind": entry_kind,
-            "confirmation": confirmation,
-            "stop_loss": round(stop, 2) if stop is not None else None,
-            "stop_reason": stop_reason,
-            "selected_target": round(target, 2) if target is not None else None,
-            "note": (
-                f"{side} مؤكد" if draw_mode == "confirmed" else
-                f"{side} محتمل بعد التأكيد" if draw_mode == "conditional" else
-                f"مراقبة احتمال {side}"
-            ),
+            "confirmation": " ".join(confirmation.split())[:70],
+            "stop_loss": stop,
+            "stop_reason": " ".join(stop_reason.split())[:65],
+            "target_1": targets[0],
+            "target_2": targets[1],
+            "target_3": targets[2],
+            "scenario": " ".join(str(data.get("scenario") or "").split())[:85],
+            "note": " ".join(str(data.get("note") or "").split())[:90],
         }
     )
-
-    # لا نستخدم نقاط سهم بعيدة من النموذج؛ الرسام يبني السهم من الدخول إلى الهدف/الاتجاه.
-    analysis["path_points"] = []
-    if int(analysis.get("pattern_confidence") or 0) < 65:
-        analysis["pattern_lines"] = []
-        analysis["pattern_path"] = []
-        analysis["retest_box"] = None
-    return analysis
+    return data
 
 
 def _analyze(path: Path) -> dict[str, Any]:
@@ -301,77 +393,74 @@ def _analyze(path: Path) -> dict[str, Any]:
     if not key:
         raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
 
-    prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD على فريم M5 فقط.
-اقرأ صورة الشارت كما هي، واستفد من الذاكرة المرجعية للقراءة فقط. أخرج سيناريو واحدًا فقط: الأعلى احتمالًا.
+    prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD على فريم خمس دقائق فقط.
+اقرأ صورة الشارت المرفوعة، ثم أعد بناء آخر ساعتين فقط: آخر 24 شمعة M5 من أقصى يمين الشارت، مرتبة من الأقدم إلى الأحدث.
+استخرج OHLC لكل شمعة اعتمادًا على جسم الشمعة وذيولها ومحور الأسعار. استخدم السعر الحالي من إغلاق آخر شمعة.
+إذا كانت بعض القيم غير مطبوعة حرفيًا، قدّرها بدقة من محور السعر، لكن لا تغيّر ترتيب واتجاه الشموع.
+اجعل chart_readable=false فقط إذا كانت الشموع أو محور الأسعار غير قابلين للقراءة إطلاقًا.
 
-أهم قاعدة: لا تعطِ دخولًا بعيدًا عن السعر الحالي. ابحث عن أقرب نقطة تفعيل واقعية خلال نحو 6 دولارات من السعر الحالي.
-إذا لم تكتمل الصفقة، لا تقل مباشرة لا توجد صفقة؛ أخرج أقرب دخول محتمل مشروط بالتأكيد مع سهم اتجاه واحد.
-استخدم حالة غير صالح فقط إذا كانت صورة الشارت أو محور الأسعار غير مقروءين.
-
-قراءة المحور:
-- chart_box هو حدود مساحة الشموع فقط بصيغة [x1,y1,x2,y2] نسبةً للصورة كاملة، مع استبعاد شريط الهاتف ومحور الوقت والأزرار.
-- axis_top_price وaxis_top_y: سعر واضح مرتفع على محور اليمين وموقعه y نسبةً للصورة.
-- axis_bottom_price وaxis_bottom_y: سعر واضح منخفض على محور اليمين وموقعه y نسبةً للصورة.
-- يجب أن يكون axis_top_price أكبر من axis_bottom_price وaxis_top_y أصغر من axis_bottom_y.
-
-اختيار الاتجاه والصفقة:
+التحليل المطلوب:
+- اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
 - BUY وSELL مجموعهما 100، ولا تستخدم 0 أو 100.
-- اختر شراء أو بيع واحدًا فقط.
-- M/قمتان لا يصبح بيعًا إلا بعد كسر خط العنق أو إعادة اختبار فاشلة مع شمعة هابطة.
-- W/قاعان لا يصبح شراءً إلا بعد اختراق خط العنق أو إعادة اختبار ناجحة مع شمعة صاعدة.
-- setup_state: مؤكد عند وجود كسر/إغلاق/إعادة اختبار أو تأكيد واضح؛ مشروط عند انتظار التفعيل؛ مراقبة عند ضعف التأكيد.
-- entry_kind: مباشر أو اختراق أو إعادة اختبار أو مراقبة.
-- confirmation عبارة عربية قصيرة توضح شرط الدخول، واكتب خمس دقائق بدل M5 داخل النص العربي.
+- عند ضعف التأكيد، لا تقل لا توجد صفقة؛ أعطِ أقرب نقطة تفعيل مشروطة مع اتجاه متوقع.
+- حدد أقرب دعمين وأقرب مقاومتين مهمين خلال آخر 24 شمعة.
+- strength من 0 إلى 100 حسب عدد اللمسات، قوة الرفض، حداثة المستوى، وتوافقه مع بنية السوق.
+- touches عدد اللمسات أو الاختبارات الواضحة.
+- اجمع المستويات المتقاربة، ولا تعد المستوى نفسه مرتين.
+- entry قريب وواقعي، بعد اختراق أو كسر أو إعادة اختبار أو تأكيد واضح.
+- stop_loss من بنية الشارت والذاكرة: خلف أقرب قمة/قاع أو مستوى إبطال، وليس مسافة ثابتة.
+- ضع ثلاثة أهداف مرتبة TP1 ثم TP2 ثم TP3، ولا تضع هدفًا تم تجاوزه.
+- M/قمتان يدعم الهبوط بعد كسر خط العنق أو إعادة اختبار فاشلة.
+- W/قاعان يدعم الصعود بعد اختراق خط العنق أو إعادة اختبار ناجحة.
+- pattern_lines وpattern_path إحداثيات نسبية داخل مساحة الشارت المعاد رسمها: 0,0 أعلى اليسار و1,1 أسفل اليمين.
+- لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
+- confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-الدخول والوقف والهدف:
-- entry أقرب نقطة تفعيل من السعر الحالي، وليس مستوى تاريخيًا بعيدًا.
-- stop_loss خلف آخر قمة/قاع أو خلف الدعم/المقاومة التي تبطل السيناريو، وليس وقفًا ثابتًا.
-- لا تجعل مسافة الوقف مبالغًا فيها لفريم M5؛ استخدم أقرب إبطال بنيوي واضح.
-- target_1 هو الهدف الأقرب والمنطقي، ثم target_2 وtarget_3 إن ظهرت.
-- لا تضع هدفًا تم تجاوزه بالفعل.
+النتيجة النهائية سيعيد البرنامج رسمها كصورة جديدة: 24 شمعة، دعم ومقاومة، سهم واحد، دخول، وقف، ثلاثة أهداف، وملاحظات أسفل الشارت.
 
-الرسم:
-- pattern_lines وpattern_path وretest_box وfvg_boxes تكون إحداثياتها داخل chart_box نفسه: 0,0 أعلى يسار مساحة الشارت و1,1 أسفل يمينها.
-- ارسم نموذجًا فقط إذا كان واضحًا، واكتب pattern_confidence بصدق.
-- لا تنشئ خطوطًا طويلة عشوائية عبر الشارت.
-- سهم واحد فقط؛ الأحمر للهبوط والأخضر للصعود.
-- لا توجد لوحة جانبية أو سفلية.
-
-الذاكرة المرجعية:
+الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
 """
 
     body = {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        "input": [{"role": "user", "content": [
-            {"type": "input_text", "text": prompt},
-            {"type": "input_image", "image_url": _data_url(path)},
-        ]}],
-        "text": {"format": {
-            "type": "json_schema",
-            "name": "saleem_nearest_single_trade",
-            "strict": True,
-            "schema": ANALYSIS_SCHEMA,
-        }},
+        "model": os.getenv("OPENAI_MODEL", "gpt-4.1"),
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image", "image_url": _data_url(path)},
+                ],
+            }
+        ],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "saleem_two_hour_reconstructed_chart",
+                "strict": True,
+                "schema": ANALYSIS_SCHEMA,
+            }
+        },
     }
 
-    with httpx.Client(timeout=120) as client:
+    with httpx.Client(timeout=150) as client:
         response = client.post(
             OPENAI_URL,
             headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
             json=body,
         )
     if response.status_code >= 400:
-        raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}): {response.text[:500]}")
-    return _validate_single_trade(json.loads(_text(response.json())))
+        raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}).")
+    return _validate_analysis(json.loads(_text(response.json())))
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
     analysis = _analyze(image_path)
-    png = render_result(image_path, analysis)
+    png = render_result(analysis)
     return {
         **analysis,
         "symbol": "XAUUSD",
         "timeframe": "M5",
+        "window": "آخر ساعتين",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
     }
