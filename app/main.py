@@ -6,8 +6,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from PIL import Image
-import httpx
-from urllib.parse import urlparse
 
 from app.services.analyzer import analyze_chart_image
 
@@ -22,7 +20,7 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="0.3.0",
+    version="0.4.0",
     description="Gold XAUUSD M5 chart analysis with a single annotated image output.",
 )
 
@@ -51,7 +49,6 @@ async def health():
 async def analyze(
     request: Request,
     image: UploadFile | None = File(None),
-    image_url: str = Form(""),
     symbol: str = Form("XAUUSD"),
     timeframe: str = Form("M5"),
 ):
@@ -59,28 +56,14 @@ async def analyze(
     raw: bytes
     suffix = ".png"
 
-    if image and image.filename:
-        if image.content_type not in allowed_types:
-            raise HTTPException(status_code=400, detail="يرجى رفع صورة PNG أو JPG أو WEBP.")
-        raw = await image.read()
-        suffix = Path(image.filename).suffix.lower() or ".png"
-    elif image_url.strip():
-        parsed = urlparse(image_url.strip())
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise HTTPException(status_code=400, detail="رابط الصورة غير صالح.")
-        try:
-            async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
-                response = await client.get(image_url.strip(), headers={"User-Agent": "SaleeM-Gold-Analyst/0.3"})
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise HTTPException(status_code=400, detail="تعذر تحميل الصورة من الرابط.") from exc
-        content_type = response.headers.get("content-type", "").split(";")[0].lower()
-        if content_type not in allowed_types:
-            raise HTTPException(status_code=400, detail="الرابط يجب أن يشير إلى صورة PNG أو JPG أو WEBP.")
-        raw = response.content
-        suffix = {"image/png": ".png", "image/webp": ".webp"}.get(content_type, ".jpg")
-    else:
-        raise HTTPException(status_code=400, detail="اختر صورة أو الصق رابط الصورة.")
+    if not image or not image.filename:
+        raise HTTPException(status_code=400, detail="يرجى اختيار صورة الشارت.")
+
+    if image.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="يرجى رفع صورة PNG أو JPG أو WEBP.")
+
+    raw = await image.read()
+    suffix = Path(image.filename).suffix.lower() or ".png"
 
     if len(raw) > 12 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="حجم الصورة أكبر من 12 ميجابايت.")
