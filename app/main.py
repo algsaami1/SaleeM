@@ -19,7 +19,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="2.1.7",
+    version="2.3.0",
     description="Reconstructs the last two hours of XAUUSD M5 in the fixed SaleeM visual template.",
 )
 
@@ -40,13 +40,14 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "2.1.7",
+        "version": "2.3.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "2h / 24 candles",
         "storage": "temporary-only",
         "memory": "read-only",
         "renderer": "saleem-fixed-poster-v2.1-close-stop",
+        "ui": "saleem-approved-portrait-hero",
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
