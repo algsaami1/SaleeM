@@ -15,8 +15,8 @@ TEMPLATES_DIR = BASE_DIR / "app" / "templates"
 
 app = FastAPI(
     title="SaleeM Gold Analyst",
-    version="0.7.0",
-    description="Gold XAUUSD M5 chart analysis with a read-only knowledge base and one image output.",
+    version="0.8.0",
+    description="Gold XAUUSD M5 analysis rendered directly on the uploaded chart.",
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -25,7 +25,10 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "result": None, "error": None})
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "result": None, "error": None},
+    )
 
 
 @app.get("/health")
@@ -33,11 +36,13 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM Gold Analyst",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "storage": "temporary-only",
         "memory": "read-only",
+        "renderer": "on-chart-overlay-v2",
+        "stop_distance_usd": 2.0,
     }
 
 
@@ -60,6 +65,7 @@ async def analyze(
 
     suffix = Path(image.filename).suffix.lower() or ".png"
     temp_path: Path | None = None
+
     try:
         with NamedTemporaryFile(delete=False, suffix=suffix) as temp:
             temp.write(raw)
@@ -73,6 +79,7 @@ async def analyze(
             symbol=symbol.strip().upper() or "XAUUSD",
             timeframe=timeframe.strip().upper() or "M5",
         )
+
         return templates.TemplateResponse(
             "index.html",
             {"request": request, "result": result, "error": None},
