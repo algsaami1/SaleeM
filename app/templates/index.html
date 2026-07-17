@@ -3,48 +3,93 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>SaleeM — محلل شارت الذهب</title>
+  <meta name="theme-color" content="#ffffff">
+  <title>SaleeM Gold Analyst | سليم لتحليل الذهب</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="container">
-    <header class="hero"><div><span class="badge">ChatGPT + Gemini</span><h1>SaleeM</h1><p>ChatGPT يحلل الشارت، ثم يرسل تعليمات الرسم إلى Gemini.</p></div></header>
+  <main class="app-shell">
+    <header class="hero">
+      <div class="gold-logo" aria-label="SaleeM Gold Analyst logo">
+        <span class="orbit orbit-one"></span>
+        <span class="orbit orbit-two"></span>
+        <span class="logo-letter">S</span>
+        <i class="spark spark-a"></i><i class="spark spark-b"></i><i class="spark spark-c"></i>
+      </div>
+      <h1>SaleeM Gold Analyst</h1>
+      <h2>سليم لتحليل الذهب</h2>
+      <p>ارفع صورة شارت الذهب للحصول على صورة تحليل واحدة.</p>
+    </header>
 
-    <section class="card">
-      <form action="/analyze" method="post" enctype="multipart/form-data">
-        <label class="field"><span>صورة الشارت</span><input type="file" name="image" accept="image/png,image/jpeg,image/webp" required></label>
-        <div class="grid">
-          <label class="field"><span>الرمز</span><input type="text" name="symbol" value="GOLD" maxlength="20"></label>
-          <label class="field"><span>الفريم</span><select name="timeframe"><option selected>M5</option><option>M1</option><option>M15</option><option>H1</option></select></label>
-        </div>
-        <button type="submit">تحليل ورسم الصورة</button>
+    <section class="upload-card card">
+      <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
+        <input type="hidden" name="symbol" value="XAUUSD">
+        <input type="hidden" name="timeframe" value="M5">
+
+        <label class="drop-zone" id="drop-zone">
+          <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp">
+          <span class="upload-icon" aria-hidden="true">↑</span>
+          <strong>ارفع صورة الشارت</strong>
+          <small>شارت الذهب XAUUSD على فريم 5 دقائق</small>
+          <span class="primary-button">اختيار صورة</span>
+          <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
+        </label>
+
+        <div class="separator"><span>أو</span></div>
+
+        <label class="url-field">
+          <span>الصق رابط الصورة</span>
+          <div class="url-control">
+            <input id="image-url" type="url" name="image_url" placeholder="https://example.com/chart.png" inputmode="url">
+            <span aria-hidden="true">↗</span>
+          </div>
+        </label>
+
+        <button class="analyze-button" type="submit">بدء التحليل</button>
       </form>
     </section>
 
-    {% if error %}<section class="card error"><h2>تعذر التحليل</h2><p>{{ error }}</p></section>{% endif %}
-
-    {% if result %}
-    <section class="card result">
-      <h2>النتيجة</h2><p class="success">{{ result.message }}</p>
-      <div class="metrics">
-        <div><span>الاتجاه</span><strong>{{ result.direction }}</strong></div>
-        <div><span>الثقة</span><strong>{{ result.confidence }}%</strong></div>
-        <div><span>الدعم</span><strong>{{ result.support or 'غير واضح' }} — {{ result.support_strength }}%</strong></div>
-        <div><span>المقاومة</span><strong>{{ result.resistance or 'غير واضح' }} — {{ result.resistance_strength }}%</strong></div>
+    <section class="processing-card card" id="processing-card" hidden aria-live="polite">
+      <div class="progress-ring" id="progress-ring" style="--progress:0">
+        <div class="progress-inner"><strong id="progress-value">0%</strong><span>جاري المعالجة</span></div>
       </div>
-      <img src="{{ result.result_url }}" alt="نتيجة تحليل الشارت">
-      <div class="analysis-text">
-        <h3>الخلاصة</h3><p>{{ result.summary }}</p>
-        <h3>النموذج والشموع</h3><p>{{ result.pattern }} — {{ result.candle_signal }}</p>
-        <h3>حالة الكسر</h3><p>{{ result.break_status }}</p>
-        <h3>سيناريو الشراء</h3><p>{{ result.buy_condition }}</p>
-        <h3>سيناريو البيع</h3><p>{{ result.sell_condition }}</p>
-        <h3>إبطال التحليل</h3><p>{{ result.invalidation }}</p>
-        <p class="warning">{{ result.risk_warning }}</p>
-        {% if result.drawing_error %}<p class="warning">ملاحظة الرسم: {{ result.drawing_error }}</p>{% endif %}
+      <div class="processing-copy">
+        <h3>جاري التحليل...</h3>
+        <p id="processing-message">قراءة صورة الشارت</p>
+        <div class="steps">
+          <span class="active">قراءة الشارت وتحليل البيانات</span>
+          <span>تحليل الاتجاه العام</span>
+          <span>تحديد الدعم والمقاومة</span>
+          <span>إعداد الصورة النهائية</span>
+        </div>
       </div>
     </section>
+
+    <section class="notice card">
+      <div class="notice-icon">i</div>
+      <div>
+        <strong>ملاحظة مهمة</strong>
+        <p>تم تصميم التطبيق خصيصًا لتحليل الذهب XAUUSD على فريم 5 دقائق (5M) فقط. نسبة السيناريو ليست ضمانًا للنتيجة.</p>
+      </div>
+    </section>
+
+    {% if error %}
+    <section class="error-card card"><strong>تعذر التحليل</strong><p>{{ error }}</p></section>
     {% endif %}
+
+    {% if result %}
+    <section class="result-card card" id="result-card">
+      <div class="result-heading"><div><span>اكتمل التحليل</span><h3>صورة التحليل</h3></div><span class="done-mark">✓</span></div>
+      <img src="{{ result.result_url }}" alt="نتيجة تحليل الذهب على فريم 5 دقائق">
+      <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
+    </section>
+    {% endif %}
+
+    <footer>SaleeM Gold Analyst · XAUUSD · 5M</footer>
   </main>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>
