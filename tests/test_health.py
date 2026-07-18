@@ -10,7 +10,7 @@ def test_health():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "2.3.3"
+    assert payload["version"] == "2.3.5"
     assert payload["window"] == "2h / 24 candles"
     assert payload["targets"] == 3
 

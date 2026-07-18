@@ -8,13 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2.3.3">
+  <link rel="stylesheet" href="/static/style.css?v=2.3.5">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
     <header class="hero hero-art">
       <h1 class="sr-only">SaleeM</h1>
-      <img class="hero-banner" src="/static/saleem-hero.webp?v=2.3.3" alt="واجهة SaleeM مع صورة المطور وخلفية تحليل الأسواق">
+      <img class="hero-banner" src="/static/saleem-hero.webp?v=2.3.5" alt="واجهة SaleeM مع صورة المطور وخلفية تحليل الأسواق">
     </header>
 
     <section class="card upload-card">
@@ -34,6 +34,10 @@
         </label>
 
         <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
+        <div class="analysis-counter" aria-live="polite">
+          <span>عدد التحليلات الناجحة</span>
+          <strong id="analysis-count">0</strong>
+        </div>
       </form>
     </section>
 
@@ -82,8 +86,18 @@
     {% if result %}
     <section class="card result-card" id="result-card">
       <div class="result-heading"><div><span>اكتمل التحليل</span><h3>تحليل SaleeM</h3></div><span class="done-mark">✓</span></div>
-      <img src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه لآخر ساعتين مع السيناريو الفني">
-      <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
+      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه لآخر ساعتين مع السيناريو الفني">
+      <div class="result-actions">
+        <button class="result-action save-button" id="save-image-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 18v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>
+          حفظ في الاستديو
+        </button>
+        <button class="result-action share-button" id="share-image-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+          مشاركة
+        </button>
+      </div>
+      <p class="result-action-status" id="result-action-status" role="status" aria-live="polite"></p>
     </section>
 
     <section class="card feedback-card" id="feedback-card" hidden aria-labelledby="feedback-title">
@@ -131,6 +145,6 @@
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=2.3.3" defer></script>
+  <script src="/static/app.js?v=2.3.5" defer></script>
 </body>
 </html>
