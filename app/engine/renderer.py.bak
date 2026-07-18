@@ -102,18 +102,6 @@ def _number(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) else None
 
 
-def _fmt_price(value: Any) -> str:
-    number = _number(value)
-    if number is None:
-        return "غير واضح"
-    rounded = round(float(number), 2)
-    if abs(rounded - round(rounded)) < 0.005:
-        return str(int(round(rounded)))
-    if abs(rounded * 10 - round(rounded * 10)) < 0.005:
-        return f"{rounded:.1f}"
-    return f"{rounded:.2f}".rstrip("0").rstrip(".")
-
-
 def _display(text: str, rtl: bool = True) -> str:
     return _rtl(text) if rtl else text
 
@@ -365,7 +353,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         draw,
         cards[3],
         "السعر الحالي",
-        _fmt_price(current),
+        f"{current:.2f}" if current is not None else "غير واضح",
         GREEN if current is not None else GRAY,
         False,
     )
@@ -380,7 +368,7 @@ def _draw_grid(draw: ImageDraw.ImageDraw, price_min: float, price_max: float) ->
         y = int(top + index * (bottom - top) / (ticks - 1))
         draw.line((left, y, right, y), fill=GRID, width=1)
         price = price_max - index * (price_max - price_min) / (ticks - 1)
-        draw.text((PRICE_AXIS_X, y), _fmt_price(price), font=AXIS_FONT, fill=GRAY, anchor="lm")
+        draw.text((PRICE_AXIS_X, y), f"{price:.2f}", font=AXIS_FONT, fill=GRAY, anchor="lm")
     for index in range(7):
         x = int(left + index * (right - left) / 6)
         draw.line((x, top, x, bottom), fill=GRID, width=1)
@@ -457,7 +445,7 @@ def _draw_levels(
             draw.line((left, y, right, y), fill=color, width=width)
             label_y = _level_label_y(y, used_labels)
             label_y = max(top + 6, min(bottom - 34, label_y))
-            text = f"{name} {_strength_name(strength)} {_fmt_price(price)} - {strength}٪"
+            text = f"{name} {_strength_name(strength)} {price:.2f} - {strength}٪"
             _rounded_label(
                 draw,
                 left + 8,
@@ -573,7 +561,7 @@ def _draw_trade(
         draw,
         1018,
         positions["entry"] - 17,
-        f"{entry_prefix} {_fmt_price(entry)}",
+        f"{entry_prefix} {entry:.2f}",
         TRADE_FONT,
         (235, 240, 246, 245),
         WHITE,
@@ -590,7 +578,7 @@ def _draw_trade(
             draw,
             1018,
             positions["stop"] - 17,
-            f"وقف {_fmt_price(stop)}",
+            f"وقف {stop:.2f}",
             TRADE_FONT,
             (126, 25, 34, 245),
             RED,
@@ -607,7 +595,7 @@ def _draw_trade(
             draw,
             1018,
             positions[key] - 17,
-            f"TP{index}  {_fmt_price(target)}",
+            f"TP{index}  {target:.2f}",
             TRADE_FONT,
             (7, 82, 45, 244),
             GREEN,
@@ -742,10 +730,10 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         if pattern != "لا يوجد"
         else "لا يوجد نموذج مكتمل؛ الاعتماد على البنية والمستويات"
     )
-    entry_value = f"{_fmt_price(entry)} - {confirmation}" if entry is not None else confirmation
-    stop_value = f"{_fmt_price(stop)} - {stop_reason}" if stop is not None else stop_reason
+    entry_value = f"{entry:.2f} - {confirmation}" if entry is not None else confirmation
+    stop_value = f"{stop:.2f} - {stop_reason}" if stop is not None else stop_reason
     target_value = " | ".join(
-        f"TP{index}: {_fmt_price(value)}"
+        f"TP{index}: {value:.2f}"
         for index, value in enumerate(targets, start=1)
         if value is not None
     )

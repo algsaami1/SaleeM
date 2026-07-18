@@ -8,13 +8,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2.3.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.3.3">
 </head>
-<body>
+<body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
     <header class="hero hero-art">
       <h1 class="sr-only">SaleeM</h1>
-      <img class="hero-banner" src="/static/saleem-hero.webp?v=2.3.0" alt="واجهة SaleeM مع صورة المطور وخلفية تحليل الأسواق">
+      <img class="hero-banner" src="/static/saleem-hero.webp?v=2.3.3" alt="واجهة SaleeM مع صورة المطور وخلفية تحليل الأسواق">
     </header>
 
     <section class="card upload-card">
@@ -85,8 +85,52 @@
       <img src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه لآخر ساعتين مع السيناريو الفني">
       <a class="save-button" href="{{ result.result_url }}" download>حفظ الصورة</a>
     </section>
+
+    <section class="card feedback-card" id="feedback-card" hidden aria-labelledby="feedback-title">
+      <div class="feedback-heading">
+        <span class="feedback-icon" aria-hidden="true">☆</span>
+        <div>
+          <small>ساعدنا على تحسين التطبيق</small>
+          <h3 id="feedback-title">قيّم نتيجة التحليل</h3>
+        </div>
+      </div>
+
+      <p class="feedback-intro">بعد أربع محاولات نطلب رأيك مرة واحدة. اختر تقييمك واكتب اقتراحاتك أو ملاحظاتك.</p>
+
+      <form id="feedback-form">
+        <fieldset class="rating-fieldset">
+          <legend>التقييم</legend>
+          <div class="rating-stars" id="rating-stars" role="radiogroup" aria-label="اختر تقييمًا من خمس نجوم">
+            <button type="button" class="rating-star" data-rating="1" aria-label="نجمة واحدة">☆</button>
+            <button type="button" class="rating-star" data-rating="2" aria-label="نجمتان">☆</button>
+            <button type="button" class="rating-star" data-rating="3" aria-label="ثلاث نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="4" aria-label="أربع نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="5" aria-label="خمس نجوم">☆</button>
+          </div>
+          <input id="rating-value" type="hidden" value="">
+        </fieldset>
+
+        <label class="feedback-label" for="feedback-notes">الملاحظات والاقتراحات</label>
+        <textarea id="feedback-notes" maxlength="700" rows="5" placeholder="اكتب ملاحظاتك هنا..."></textarea>
+        <div class="feedback-counter"><span id="feedback-count">0</span>/700</div>
+
+        <label class="support-option">
+          <input id="support-developer" type="checkbox">
+          <span>أرغب في دعم المطور SaleeM برسوم رمزية عند إطلاق النسخة المدفوعة.</span>
+        </label>
+
+        <div class="experimental-note">
+          <strong>نسخة تجريبية</strong>
+          <span>التطبيق لا يزال قيد التطوير، وسيكون لاحقًا برسوم رمزية لدعم المطور SaleeM.</span>
+        </div>
+
+        <button class="feedback-submit" type="submit">إرسال التقييم والملاحظات</button>
+        <p class="feedback-email-note">سيتم تجهيز رسالة بريد إلى <b>algsaami@gmail.com</b></p>
+        <p class="feedback-status" id="feedback-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=2.3.0" defer></script>
+  <script src="/static/app.js?v=2.3.3" defer></script>
 </body>
 </html>
