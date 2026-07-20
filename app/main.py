@@ -1,3 +1,5 @@
+import logging
+import os
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -19,8 +21,8 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="2.3.5",
-    description="Reconstructs the last two hours of XAUUSD M5 in the fixed SaleeM visual template.",
+    version="2.5.0",
+    description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -40,14 +42,19 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "2.3.5",
+        "version": "2.5.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "2h / 24 candles",
-        "storage": "temporary-only",
+        "storage": "per-timeframe-json-cache",
         "memory": "read-only",
         "renderer": "saleem-fixed-poster-v2.1-close-stop",
         "ui": "saleem-clean-hero-progress-save-share",
+        "market_data": "Twelve Data: M5/M15/H1/H4",
+        "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
+        "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
+        "cache_policy": "M5=4m,M15=14m,H1=55m,H4=4h",
+        "cache_path": os.getenv("MARKET_DATA_CACHE_PATH", "/tmp/saleem_market_data_cache.json"),
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
@@ -89,16 +96,27 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
         )
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        logging.exception("SaleeM analysis failed")
+        technical_message = str(exc).strip()
+        safe_prefixes = (
+            "متغير OPENAI_API_KEY",
+            "تعذر جلب بيانات الفريمات",
+            "خطأ خدمة التحليل",
+        )
+        if technical_message.startswith(safe_prefixes):
+            error_message = technical_message
+        else:
+            error_message = (
+                "تعذر إنشاء التحليل بدقة. اعرض 24 شمعة كاملة على M5 "
+                "مع محور الأسعار واضحًا، ثم حاول مرة أخرى."
+            )
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
                 "result": None,
-                "error": (
-                    "تعذر إنشاء التحليل بدقة. اعرض 24 شمعة كاملة على M5 "
-                    "مع محور الأسعار واضحًا، ثم حاول مرة أخرى."
-                ),
+                "error": error_message,
             },
             status_code=500,
         )

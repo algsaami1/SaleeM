@@ -11,6 +11,11 @@ import httpx
 
 from app.engine.memory_engine import memory_context
 from app.engine.renderer import render_result
+from app.services.market_data import (
+    MarketDataError,
+    compact_market_context,
+    fetch_market_data,
+)
 
 OPENAI_URL = "https://api.openai.com/v1/responses"
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -268,18 +273,131 @@ def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
     return buy, sell
 
 
+def _clip(value: float, minimum: float, maximum: float) -> float:
+    return max(minimum, min(maximum, value))
+
+
+def _market_frame_signal(candles: Any) -> dict[str, Any]:
+    """تلخيص اتجاه فريم واحد من بيانات OHLC الفعلية."""
+    valid: list[dict[str, float]] = []
+    for item in candles if isinstance(candles, list) else []:
+        if not isinstance(item, dict):
+            continue
+        values = [_number(item.get(key)) for key in ("open", "high", "low", "close")]
+        if any(value is None for value in values):
+            continue
+        open_, high, low, close = [float(value) for value in values]
+        valid.append(
+            {
+                "open": open_,
+                "high": max(high, open_, close),
+                "low": min(low, open_, close),
+                "close": close,
+            }
+        )
+
+    if len(valid) < 24:
+        return {"direction": "غير واضح", "score": 0.0, "confidence": 0}
+
+    ranges = [max(0.01, candle["high"] - candle["low"]) for candle in valid[-40:]]
+    atr = max(0.01, sum(ranges) / len(ranges))
+    closes = [candle["close"] for candle in valid]
+    fast = sum(closes[-8:]) / 8
+    slow = sum(closes[-21:]) / 21
+    recent_move = (closes[-1] - closes[-10]) / atr
+    broad_index = max(0, len(closes) - 40)
+    broad_move = (closes[-1] - closes[broad_index]) / atr
+    score = _clip(
+        ((fast - slow) / atr) * 0.50
+        + recent_move * 0.30
+        + broad_move * 0.20,
+        -3.0,
+        3.0,
+    )
+
+    if score > 0.20:
+        direction = "صاعد"
+    elif score < -0.20:
+        direction = "هابط"
+    else:
+        direction = "عرضي"
+
+    confidence = int(round(_clip(48 + abs(score) * 18, 48, 90)))
+    if direction == "عرضي":
+        confidence = int(round(_clip(62 - abs(score) * 20, 50, 62)))
+    return {
+        "direction": direction,
+        "score": round(score, 3),
+        "confidence": confidence,
+        "last_close": round(closes[-1], 3),
+    }
+
+
+def _build_market_summary(market_data: dict[str, Any]) -> dict[str, Any]:
+    frames = market_data.get("frames") if isinstance(market_data, dict) else None
+    frame_signals: dict[str, dict[str, Any]] = {}
+    for timeframe in ("H4", "H1", "M15", "M5"):
+        candles = frames.get(timeframe) if isinstance(frames, dict) else None
+        frame_signals[timeframe] = _market_frame_signal(candles)
+
+    weights = {"H4": 0.32, "H1": 0.30, "M15": 0.23, "M5": 0.15}
+    weighted_score = sum(
+        float(frame_signals[frame].get("score") or 0.0) * weight
+        for frame, weight in weights.items()
+    )
+    if weighted_score > 0.20:
+        direction = "صاعد"
+    elif weighted_score < -0.20:
+        direction = "هابط"
+    else:
+        direction = "عرضي"
+
+    if direction in {"صاعد", "هابط"}:
+        aligned_count = sum(
+            1
+            for item in frame_signals.values()
+            if item.get("direction") == direction
+        )
+        alignment = round(100 * aligned_count / max(1, len(frame_signals)))
+    else:
+        alignment = 50
+
+    return {
+        "source": market_data.get("source"),
+        "symbol": market_data.get("symbol"),
+        "fetched_at": market_data.get("fetched_at"),
+        "latest_candle_time": market_data.get("latest_candle_time"),
+        "direction": direction,
+        "score": round(weighted_score, 3),
+        "alignment": int(alignment),
+        "frames": frame_signals,
+        "cache": market_data.get("cache"),
+        "warnings": market_data.get("warnings") or [],
+    }
+
 
 def _choose_direction(
     data: dict[str, Any],
     candles: list[dict[str, Any]],
     buy: int,
     sell: int,
+    market_summary: dict[str, Any] | None = None,
 ) -> tuple[str, int, int]:
     atr = max(0.01, _atr(candles))
     full_move = (float(candles[-1]["close"]) - float(candles[0]["close"])) / atr
     recent_move = (float(candles[-1]["close"]) - float(candles[-6]["close"])) / atr
     model_bias = (buy - sell) / 20.0
-    score = model_bias * 0.55 + full_move * 0.30 + recent_move * 0.15
+
+    image_score = model_bias * 0.45 + full_move * 0.35 + recent_move * 0.20
+    higher_score = 0.0
+    if isinstance(market_summary, dict):
+        try:
+            higher_score = float(market_summary.get("score") or 0.0)
+        except (TypeError, ValueError):
+            higher_score = 0.0
+
+    # M5 والصورة مسؤولان عن التوقيت، والفريمات العليا تمنع الدخول عكس الاتجاه العام.
+    score = image_score * 0.58 + higher_score * 0.42
 
     if score > 0.18:
         direction = "صاعد"
@@ -288,10 +406,22 @@ def _choose_direction(
     else:
         direction = "صاعد" if float(candles[-1]["close"]) >= float(candles[-6]["close"]) else "هابط"
 
-    # تخفيض الثقة عند تعارض رأي النموذج مع حركة آخر ساعتين.
     structure_agrees = (direction == "صاعد" and full_move >= 0) or (direction == "هابط" and full_move <= 0)
     selected = buy if direction == "صاعد" else sell
     probability = max(52, min(88, selected if structure_agrees else min(selected, 64)))
+
+    if isinstance(market_summary, dict):
+        higher_direction = str(market_summary.get("direction") or "عرضي")
+        alignment = int(market_summary.get("alignment") or 50)
+        if higher_direction in {"صاعد", "هابط"} and higher_direction != direction:
+            probability = min(probability, 60)
+        elif higher_direction == direction:
+            probability = min(90, probability + max(0, alignment - 50) // 8)
+        else:
+            probability = min(probability, 64)
+        if market_summary.get("warnings"):
+            probability = min(probability, 62)
+
     buy_final = probability if direction == "صاعد" else 100 - probability
     sell_final = 100 - buy_final
     return direction, buy_final, sell_final
@@ -423,13 +553,16 @@ def _validated_targets(
     return unique
 
 
-def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
+def _validate_analysis(
+    data: dict[str, Any],
+    market_summary: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if data.get("chart_readable") is False:
         raise RuntimeError("الصورة أو محور الأسعار غير واضحين بما يكفي للتحليل.")
     candles = _normalize_candles(data.get("candles"))
     current = float(candles[-1]["close"])
     buy, sell = _normalize_probabilities(data)
-    direction, buy, sell = _choose_direction(data, candles, buy, sell)
+    direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
     probability = buy if direction == "صاعد" else sell
     supports = _normalize_levels(data.get("support_levels"), candles, "support", current)
     resistances = _normalize_levels(data.get("resistance_levels"), candles, "resistance", current)
@@ -474,6 +607,13 @@ def _validate_analysis(data: dict[str, Any]) -> dict[str, Any]:
             "target_3": targets[2],
             "scenario": " ".join(str(data.get("scenario") or "").split())[:85],
             "note": " ".join(str(data.get("note") or "").split())[:90],
+            "market_data_source": (market_summary or {}).get("source"),
+            "market_data_fetched_at": (market_summary or {}).get("fetched_at"),
+            "market_direction": (market_summary or {}).get("direction", "غير واضح"),
+            "frame_alignment": int((market_summary or {}).get("alignment") or 0),
+            "frame_directions": (market_summary or {}).get("frames", {}),
+            "market_data_cache": (market_summary or {}).get("cache", {}),
+            "market_data_warnings": (market_summary or {}).get("warnings", []),
         }
     )
     return data
@@ -484,11 +624,34 @@ def _analyze(path: Path) -> dict[str, Any]:
     if not key:
         raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
 
-    prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD على فريم خمس دقائق فقط.
+    try:
+        market_data = fetch_market_data()
+        market_context = compact_market_context(
+            market_data,
+            candles_per_frame=120,
+        )
+        market_summary = _build_market_summary(market_data)
+    except MarketDataError as exc:
+        raise RuntimeError(f"تعذر جلب بيانات الفريمات: {exc}") from exc
+
+    prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD، وتنفذ الصفقة على فريم خمس دقائق بعد مراجعة الفريمات العليا.
 
 ===== الدستور النهائي الملزم =====
 {load_final_spec()}
 ===== نهاية الدستور =====
+
+===== بيانات السوق الحية المجلوبة تلقائيًا =====
+الملخص الحسابي للفريمات:
+{json.dumps(market_summary, ensure_ascii=False)}
+
+شموع السوق من Twelve Data:
+{json.dumps(market_context, ensure_ascii=False)}
+===== نهاية بيانات السوق =====
+
+استخدم H4 لتحديد الاتجاه الرئيسي، وH1 لبنية السوق، وM15 لمنطقة التفعيل، وM5 لتوقيت الدخول.
+لا تستنتج اتجاه الفريمات العليا من صورة M5؛ بيانات Twelve Data هي مرجع الاتجاه والبنية فقط.
+قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
+إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
 
 اقرأ صورة الشارت المرفوعة، ثم أعد بناء آخر ساعتين فقط: آخر 24 شمعة M5 من أقصى يمين الشارت، مرتبة من الأقدم إلى الأحدث.
 استخرج OHLC لكل شمعة اعتمادًا على جسم الشمعة وذيولها ومحور الأسعار. استخدم السعر الحالي من إغلاق آخر شمعة.
@@ -547,7 +710,10 @@ def _analyze(path: Path) -> dict[str, Any]:
         )
     if response.status_code >= 400:
         raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}).")
-    return _validate_analysis(json.loads(_text(response.json())))
+    return _validate_analysis(
+        json.loads(_text(response.json())),
+        market_summary=market_summary,
+    )
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:

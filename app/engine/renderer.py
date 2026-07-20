@@ -728,6 +728,18 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
 
     direction = str(analysis.get("direction") or "غير واضح")
     probability = int(analysis.get("trade_probability") or 50)
+    frame_directions = analysis.get("frame_directions") or {}
+    arrow_by_direction = {
+        "صاعد": "↑",
+        "هابط": "↓",
+        "عرضي": "↔",
+        "غير واضح": "?",
+    }
+    frame_text = " ".join(
+        f"{frame}{arrow_by_direction.get(str((frame_directions.get(frame) or {}).get('direction')), '?')}"
+        for frame in ("H4", "H1", "M15")
+        if isinstance(frame_directions, dict)
+    )
     pattern = _pattern_name(analysis)
     pattern_confidence = int(analysis.get("pattern_confidence") or 0)
     entry = _number(analysis.get("entry"))
@@ -749,8 +761,12 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         for index, value in enumerate(targets, start=1)
         if value is not None
     )
+    direction_value = f"{direction} - احتمال فني {probability}٪"
+    if frame_text:
+        direction_value += f" | {frame_text}"
+
     rows = [
-        ("الاتجاه:", f"{direction} - احتمال فني {probability}٪", GREEN if direction == "صاعد" else RED),
+        ("الاتجاه:", direction_value, GREEN if direction == "صاعد" else RED),
         ("النمط:", pattern_value, BLUE),
         ("شرط الدخول:", entry_value, GREEN),
         ("وقف الخسارة:", stop_value, RED),
