@@ -21,7 +21,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="2.5.0",
+    version="2.5.1",
     description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
@@ -42,7 +42,7 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "2.5.0",
+        "version": "2.5.1",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "2h / 24 candles",

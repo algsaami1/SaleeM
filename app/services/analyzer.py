@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
+import random
 import statistics
+import time
 from pathlib import Path
 from typing import Any
 
@@ -626,10 +629,16 @@ def _analyze(path: Path) -> dict[str, Any]:
 
     try:
         market_data = fetch_market_data()
+        context_candles = max(24, min(80, int(os.getenv("MARKET_CONTEXT_CANDLES", "40"))))
         market_context = compact_market_context(
             market_data,
-            candles_per_frame=120,
+            candles_per_frame=context_candles,
         )
+        # صورة M5 هي المرجع التنفيذي، لذلك نكتفي بآخر 24 شمعة خارجية له
+        # ونحتفظ بسياق أكبر قليلًا للفريمات العليا فقط.
+        market_frames = market_context.get("frames", {})
+        if isinstance(market_frames, dict) and isinstance(market_frames.get("M5"), list):
+            market_frames["M5"] = market_frames["M5"][-24:]
         market_summary = _build_market_summary(market_data)
     except MarketDataError as exc:
         raise RuntimeError(f"تعذر جلب بيانات الفريمات: {exc}") from exc
@@ -682,7 +691,8 @@ def _analyze(path: Path) -> dict[str, Any]:
 """
 
     body = {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4.1"),
+        "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        "max_output_tokens": max(2000, min(8000, int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "5000")))),
         "input": [
             {
                 "role": "user",
@@ -702,14 +712,72 @@ def _analyze(path: Path) -> dict[str, Any]:
         },
     }
 
+    max_attempts = max(1, min(4, int(os.getenv("OPENAI_RETRIES", "2"))))
+    response: httpx.Response | None = None
+
     with httpx.Client(timeout=150) as client:
-        response = client.post(
-            OPENAI_URL,
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json=body,
-        )
+        for attempt in range(1, max_attempts + 1):
+            response = client.post(
+                OPENAI_URL,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            if response.status_code != 429 or attempt == max_attempts:
+                break
+
+            # المحاولات الفاشلة تُحتسب ضمن الحد؛ لذلك ننتظر بدل التكرار السريع.
+            retry_after = response.headers.get("retry-after")
+            try:
+                delay = float(retry_after) if retry_after else (3.0 * attempt)
+            except ValueError:
+                delay = 3.0 * attempt
+            time.sleep(min(20.0, delay + random.uniform(0.25, 1.0)))
+
+    if response is None:
+        raise RuntimeError("خطأ خدمة التحليل: لم يتم إرسال الطلب.")
+
     if response.status_code >= 400:
-        raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}).")
+        request_id = response.headers.get("x-request-id", "")
+        error_type = ""
+        error_code = ""
+        error_message = ""
+        try:
+            payload = response.json()
+            error = payload.get("error", {}) if isinstance(payload, dict) else {}
+            if isinstance(error, dict):
+                error_type = str(error.get("type") or "")
+                error_code = str(error.get("code") or "")
+                error_message = str(error.get("message") or "")
+        except ValueError:
+            error_message = response.text[:300]
+
+        logging.error(
+            "OpenAI request failed: status=%s type=%s code=%s request_id=%s message=%s",
+            response.status_code, error_type, error_code, request_id, error_message,
+        )
+
+        if response.status_code == 429:
+            combined = f"{error_type} {error_code} {error_message}".lower()
+            if "insufficient_quota" in combined or "quota" in combined:
+                raise RuntimeError(
+                    "خطأ خدمة التحليل (429): رصيد أو حد الإنفاق للمشروع غير متاح."
+                )
+            if "token" in combined:
+                raise RuntimeError(
+                    "خطأ خدمة التحليل (429): تم تجاوز حد الرموز في الدقيقة؛ "
+                    "تم تقليل حجم الطلب واستخدام النموذج الأخف، انتظر دقيقة ثم أعد المحاولة."
+                )
+            raise RuntimeError(
+                "خطأ خدمة التحليل (429): تم بلوغ حد الطلبات مؤقتًا؛ انتظر دقيقة ثم أعد المحاولة."
+            )
+
+        detail = error_code or error_type or "خطأ غير معروف"
+        raise RuntimeError(
+            f"خطأ خدمة التحليل ({response.status_code}): {detail}."
+        )
     return _validate_analysis(
         json.loads(_text(response.json())),
         market_summary=market_summary,
