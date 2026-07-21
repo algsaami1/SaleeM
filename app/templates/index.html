@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2.3.5">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.0">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
@@ -34,10 +34,6 @@
         </label>
 
         <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
-        <div class="analysis-counter" aria-live="polite">
-          <span>عدد التحليلات الناجحة</span>
-          <strong id="analysis-count">0</strong>
-        </div>
       </form>
     </section>
 
@@ -53,13 +49,12 @@
       </div>
       <div class="processing-copy">
         <h3>جاري التحليل...</h3>
-        <p>نقرأ آخر 24 شمعة ونعيد رسم الشارت مع أفضل سيناريو</p>
-        <div class="steps">
-          <span class="active">قراءة الشارت وتحليل البيانات</span>
-          <span>تحليل الاتجاه العام</span>
-          <span>تحديد قوة الدعم والمقاومة</span>
-          <span>تحليل السيناريوهات</span>
-          <span>إنشاء الصورة النهائية</span>
+        <div class="steps" id="processing-steps">
+          <span class="current">تحديث بيانات السوق</span>
+          <span>تحليل اتجاه الفريمات الأكبر</span>
+          <span>تحديد الدعم والمقاومة</span>
+          <span>بناء السيناريو الأفضل</span>
+          <span>إعادة رسم الشارت النهائي</span>
         </div>
       </div>
     </section>
@@ -100,20 +95,37 @@
       <p class="result-action-status" id="result-action-status" role="status" aria-live="polite"></p>
     </section>
 
-    <section class="card feedback-card" id="feedback-card" hidden aria-labelledby="feedback-title">
-      <div class="feedback-heading">
-        <span class="feedback-icon" aria-hidden="true">☆</span>
+    <section class="card experimental-banner">
+      <span class="experimental-icon">⚠️</span>
+      <div>
+        <strong>نسخة تجريبية — التطبيق لا يزال قيد التجربة والتطوير.</strong>
+        <p>شارك معنا في التقييم والملاحظات والاقتراحات لتحسين تجربة SaleeM.</p>
+      </div>
+    </section>
+
+    <section class="card feedback-card" id="feedback-card" aria-labelledby="feedback-title">
+      <div class="feedback-heading trade-heading">
+        <span class="feedback-icon" aria-hidden="true">◎</span>
         <div>
-          <small>ساعدنا على تحسين التطبيق</small>
-          <h3 id="feedback-title">قيّم نتيجة التحليل</h3>
+          <small>بعد كل تحليل أخبرنا بالنتيجة السابقة</small>
+          <h3 id="feedback-title">نتيجة الصفقة السابقة</h3>
         </div>
       </div>
 
-      <p class="feedback-intro">بعد أربع محاولات نطلب رأيك مرة واحدة. اختر تقييمك واكتب اقتراحاتك أو ملاحظاتك.</p>
+      <form id="trade-feedback-form" class="trade-feedback-form">
+        <fieldset class="trade-fieldset">
+          <legend>اختر نتيجة الصفقة المرتبطة بالتحليل السابق</legend>
+          <div class="trade-result-grid" id="trade-result-grid">
+            <button type="button" class="trade-result-option success" data-result="win">نجحت الصفقة</button>
+            <button type="button" class="trade-result-option danger" data-result="loss">فشلت الصفقة</button>
+            <button type="button" class="trade-result-option neutral" data-result="no_trade">لم أدخل الصفقة</button>
+            <button type="button" class="trade-result-option neutral" data-result="open">الصفقة ما زالت مفتوحة</button>
+          </div>
+          <input id="trade-result-value" type="hidden" value="">
+        </fieldset>
 
-      <form id="feedback-form">
         <fieldset class="rating-fieldset">
-          <legend>التقييم</legend>
+          <legend>قيّم التحليل السابق</legend>
           <div class="rating-stars" id="rating-stars" role="radiogroup" aria-label="اختر تقييمًا من خمس نجوم">
             <button type="button" class="rating-star" data-rating="1" aria-label="نجمة واحدة">☆</button>
             <button type="button" class="rating-star" data-rating="2" aria-label="نجمتان">☆</button>
@@ -124,27 +136,78 @@
           <input id="rating-value" type="hidden" value="">
         </fieldset>
 
-        <label class="feedback-label" for="feedback-notes">الملاحظات والاقتراحات</label>
-        <textarea id="feedback-notes" maxlength="700" rows="5" placeholder="اكتب ملاحظاتك هنا..."></textarea>
-        <div class="feedback-counter"><span id="feedback-count">0</span>/700</div>
+        <button class="feedback-submit" id="trade-feedback-submit" type="submit">إرسال التقييم</button>
+        <p class="feedback-helper-note">يساعد تقييمك في تحسين التطبيق.</p>
+        <p class="feedback-status" id="trade-feedback-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
 
-        <label class="support-option">
-          <input id="support-developer" type="checkbox">
-          <span>أرغب في دعم المطور SaleeM برسوم رمزية عند إطلاق النسخة المدفوعة.</span>
-        </label>
+    <section class="card summary-card" id="summary-card">
+      <div class="feedback-heading summary-heading">
+        <span class="feedback-icon" aria-hidden="true">👥</span>
+        <div>
+          <small>ملخص دائم لجميع المشاركين الذين قاموا بالإرسال</small>
+          <h3>ملخص المشاركين</h3>
+        </div>
+      </div>
 
-        <div class="experimental-note">
-          <strong>نسخة تجريبية</strong>
-          <span>التطبيق لا يزال قيد التطوير، وسيكون لاحقًا برسوم رمزية لدعم المطور SaleeM.</span>
+      <div class="summary-grid">
+        <div class="summary-gauge-block">
+          <div class="gauge-label">نسبة النجاح</div>
+          <div class="summary-gauge" id="summary-gauge" style="--summary-progress: {{ summary.success_rate }}">
+            <div class="summary-gauge-inner"><strong id="summary-success-rate">{{ summary.success_rate }}%</strong></div>
+          </div>
         </div>
 
-        <button class="feedback-submit" type="submit">إرسال التقييم والملاحظات</button>
-        <p class="feedback-email-note">سيتم تجهيز رسالة بريد إلى <b>algsaami@gmail.com</b></p>
-        <p class="feedback-status" id="feedback-status" role="status" aria-live="polite"></p>
+        <div class="summary-rating-block">
+          <div class="summary-rating-value"><span id="summary-average-rating">{{ '%.1f'|format(summary.average_rating) }}</span> <small>/ 5</small></div>
+          <div class="summary-stars" id="summary-stars" data-average="{{ summary.average_rating }}">
+            <span>★</span><span>★</span><span>★</span><span>★</span><span>★</span>
+          </div>
+          <div class="summary-rating-count">عدد التقييمات: <b id="summary-rating-count">{{ summary.rating_count }}</b></div>
+        </div>
+
+        <div class="summary-stat-list">
+          <div class="summary-stat-item"><span>إجمالي الصفقات</span><b id="summary-total-trades">{{ summary.total_trades }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات الناجحة</span><b id="summary-wins">{{ summary.wins }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات الفاشلة</span><b id="summary-losses">{{ summary.losses }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات المفتوحة</span><b id="summary-open-trades">{{ summary.open_trades }}</b></div>
+        </div>
+      </div>
+
+      <div class="summary-bar-block">
+        <div class="summary-bar-label">مقارنة النتائج (جميع المشاركين)</div>
+        <div class="summary-bar-wrap">
+          <span class="summary-bar-side summary-bar-side-right"><b id="summary-success-rate-inline">{{ summary.success_rate }}%</b> ناجحة</span>
+          <div class="summary-bar"><span id="summary-success-bar" style="width: {{ summary.success_rate }}%"></span></div>
+          <span class="summary-bar-side summary-bar-side-left"><b id="summary-failure-rate-inline">{{ summary.failure_rate }}%</b> فاشلة</span>
+        </div>
+      </div>
+
+      <div class="summary-footnote">تُعرض النتائج بشكل مجمّع دون إظهار هوية المشاركين.</div>
+    </section>
+
+    <section class="card notes-card" id="notes-card">
+      <div class="feedback-heading notes-heading">
+        <span class="feedback-icon" aria-hidden="true">✎</span>
+        <div>
+          <small>ساعدنا على تطوير SaleeM</small>
+          <h3>الملاحظات والاقتراحات</h3>
+        </div>
+      </div>
+
+      <form id="notes-form">
+        <label class="feedback-label" for="feedback-notes">اكتب ملاحظاتك أو اقتراحاتك</label>
+        <textarea id="feedback-notes" maxlength="1500" rows="5" placeholder="اكتب ملاحظاتك أو اقتراحاتك هنا..."></textarea>
+        <div class="feedback-counter"><span id="feedback-count">0</span>/1500</div>
+
+        <button class="feedback-submit notes-submit" type="submit">إرسال الملاحظات والاقتراحات</button>
+        <p class="feedback-email-note">تُرسل نسخة إلى بريد مالك التطبيق <b>{{ owner_email }}</b></p>
+        <p class="feedback-status" id="notes-status" role="status" aria-live="polite"></p>
       </form>
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=2.3.5" defer></script>
+  <script src="/static/app.js?v=2.6.0" defer></script>
 </body>
 </html>

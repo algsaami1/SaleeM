@@ -6,51 +6,35 @@
   const processingCard = document.getElementById('processing-card');
   const progressRing = document.getElementById('progress-ring');
   const progressValue = document.getElementById('progress-value');
-  const analysisCount = document.getElementById('analysis-count');
   const steps = processingCard ? [...processingCard.querySelectorAll('.steps span')] : [];
   const resultImage = document.getElementById('result-image');
   const saveImageButton = document.getElementById('save-image-button');
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
-  const feedbackCard = document.getElementById('feedback-card');
-  const feedbackForm = document.getElementById('feedback-form');
-  const feedbackNotes = document.getElementById('feedback-notes');
-  const feedbackCount = document.getElementById('feedback-count');
-  const feedbackStatus = document.getElementById('feedback-status');
+
+  const tradeFeedbackForm = document.getElementById('trade-feedback-form');
+  const tradeStatus = document.getElementById('trade-feedback-status');
+  const tradeResultInput = document.getElementById('trade-result-value');
+  const tradeResultOptions = [...document.querySelectorAll('.trade-result-option')];
   const ratingInput = document.getElementById('rating-value');
   const ratingStars = [...document.querySelectorAll('.rating-star')];
-  const supportDeveloper = document.getElementById('support-developer');
-  const ATTEMPT_KEY = 'saleem_analysis_attempts_v2';
-  const PENDING_KEY = 'saleem_analysis_pending_v2';
-  const FEEDBACK_KEY = 'saleem_feedback_prepared_v1';
+  const notesForm = document.getElementById('notes-form');
+  const feedbackNotes = document.getElementById('feedback-notes');
+  const feedbackCount = document.getElementById('feedback-count');
+  const notesStatus = document.getElementById('notes-status');
 
-  const getStoredNumber = (key) => {
-    try {
-      return Number.parseInt(window.localStorage.getItem(key) || '0', 10) || 0;
-    } catch {
-      return 0;
-    }
-  };
-
-  const setStoredValue = (key, value) => {
-    try {
-      window.localStorage.setItem(key, String(value));
-    } catch {
-      // يستمر التطبيق حتى إذا كان التخزين المحلي محظورًا.
-    }
-  };
-
-  const removeStoredValue = (key) => {
-    try {
-      window.localStorage.removeItem(key);
-    } catch {
-      // لا شيء.
-    }
-  };
-
-  const showAnalysisCount = () => {
-    if (analysisCount) analysisCount.textContent = String(getStoredNumber(ATTEMPT_KEY));
-  };
+  const summaryGauge = document.getElementById('summary-gauge');
+  const summaryAverageRating = document.getElementById('summary-average-rating');
+  const summaryRatingCount = document.getElementById('summary-rating-count');
+  const summarySuccessRate = document.getElementById('summary-success-rate');
+  const summarySuccessRateInline = document.getElementById('summary-success-rate-inline');
+  const summaryFailureRateInline = document.getElementById('summary-failure-rate-inline');
+  const summarySuccessBar = document.getElementById('summary-success-bar');
+  const summaryTotalTrades = document.getElementById('summary-total-trades');
+  const summaryWins = document.getElementById('summary-wins');
+  const summaryLosses = document.getElementById('summary-losses');
+  const summaryOpenTrades = document.getElementById('summary-open-trades');
+  const summaryStars = document.getElementById('summary-stars');
 
   const updateFileName = () => {
     if (fileName) fileName.textContent = fileInput?.files?.[0]?.name || 'لم يتم اختيار صورة';
@@ -83,6 +67,16 @@
     });
   }
 
+  const updateProcessingSteps = (progress) => {
+    if (!steps.length) return;
+    const currentStep = Math.min(steps.length - 1, Math.floor(progress / 20));
+    steps.forEach((step, index) => {
+      step.classList.remove('done', 'current');
+      if (index < currentStep) step.classList.add('done');
+      else if (index === currentStep) step.classList.add('current');
+    });
+  };
+
   form?.addEventListener('submit', (event) => {
     if (!fileInput?.files?.length) {
       event.preventDefault();
@@ -98,53 +92,29 @@
       return;
     }
 
-    setStoredValue(PENDING_KEY, 1);
     if (!processingCard || !progressRing || !progressValue) return;
-
     processingCard.hidden = false;
-    progressRing.style.setProperty('--progress', '1');
-    progressValue.textContent = '1%';
     processingCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     let progress = 1;
-    let currentStep = 0;
+    progressRing.style.setProperty('--progress', '1');
+    progressValue.textContent = '1%';
+    updateProcessingSteps(progress);
+
     const timer = window.setInterval(() => {
-      progress = Math.min(96, progress + Math.max(1, Math.round((97 - progress) / 18)));
+      const increment = progress < 25 ? 3 : progress < 50 ? 4 : progress < 80 ? 3 : 1;
+      progress = Math.min(96, progress + increment);
       progressRing.style.setProperty('--progress', String(progress));
       progressValue.textContent = `${progress}%`;
-
-      const nextStep = Math.min(4, Math.floor(progress / 20));
-      if (nextStep !== currentStep) {
-        currentStep = nextStep;
-        steps.forEach((step, index) => step.classList.toggle('active', index <= currentStep));
-      }
-
+      updateProcessingSteps(progress);
       if (progress >= 96) window.clearInterval(timer);
-    }, 260);
+    }, 320);
   });
-
-  const hasResult = document.body.dataset.hasResult === 'true';
-  const hasError = Boolean(document.querySelector('.error-card'));
-  if (hasResult && getStoredNumber(PENDING_KEY) === 1) {
-    setStoredValue(ATTEMPT_KEY, getStoredNumber(ATTEMPT_KEY) + 1);
-    removeStoredValue(PENDING_KEY);
-  } else if (hasError) {
-    removeStoredValue(PENDING_KEY);
-  }
-  showAnalysisCount();
-
-  const attempts = getStoredNumber(ATTEMPT_KEY);
-  const feedbackAlreadyPrepared = getStoredNumber(FEEDBACK_KEY) === 1;
-  if (feedbackCard && hasResult && attempts >= 4 && !feedbackAlreadyPrepared) {
-    feedbackCard.hidden = false;
-  }
 
   const imageFile = () => {
     if (!resultImage?.src) throw new Error('الصورة غير متاحة.');
     const name = `SaleeM-XAUUSD-M5-${Date.now()}.png`;
 
-    // النتيجة تصل كـ data URL؛ تحويلها محليًا يحافظ على صلاحية ضغطة المستخدم
-    // المطلوبة لفتح نافذة المشاركة في Safari على الآيفون.
     if (resultImage.src.startsWith('data:')) {
       const [header, encoded] = resultImage.src.split(',', 2);
       const mime = header.match(/^data:([^;]+)/)?.[1] || 'image/png';
@@ -156,10 +126,12 @@
       return new File([bytes], name, { type: mime });
     }
 
-    return fetch(resultImage.src).then((response) => {
-      if (!response.ok) throw new Error('تعذر تجهيز الصورة.');
-      return response.blob();
-    }).then((blob) => new File([blob], name, { type: blob.type || 'image/png' }));
+    return fetch(resultImage.src)
+      .then((response) => {
+        if (!response.ok) throw new Error('تعذر تجهيز الصورة.');
+        return response.blob();
+      })
+      .then((blob) => new File([blob], name, { type: blob.type || 'image/png' }));
   };
 
   const canShareFile = (file) => {
@@ -189,8 +161,8 @@
     try {
       const prepared = imageFile();
       const file = prepared instanceof Promise ? await prepared : prepared;
-      const isiPhoneOrIPad = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
-        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const isiPhoneOrIPad = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
       if (isiPhoneOrIPad && canShareFile(file)) {
         if (resultActionStatus) resultActionStatus.textContent = 'اختر «حفظ الصورة» من القائمة لتظهر في الاستديو.';
@@ -234,6 +206,18 @@
     }
   });
 
+  const selectTradeResult = (result) => {
+    if (tradeResultInput) tradeResultInput.value = result;
+    tradeResultOptions.forEach((option) => {
+      option.classList.toggle('selected', option.dataset.result === result);
+    });
+    if (tradeStatus) tradeStatus.textContent = '';
+  };
+
+  tradeResultOptions.forEach((option) => {
+    option.addEventListener('click', () => selectTradeResult(option.dataset.result || ''));
+  });
+
   const selectRating = (rating) => {
     const selected = Number(rating);
     if (ratingInput) ratingInput.value = String(selected);
@@ -243,7 +227,7 @@
       star.textContent = active ? '★' : '☆';
       star.setAttribute('aria-checked', active && Number(star.dataset.rating) === selected ? 'true' : 'false');
     });
-    if (feedbackStatus) feedbackStatus.textContent = '';
+    if (tradeStatus) tradeStatus.textContent = '';
   };
 
   ratingStars.forEach((star) => {
@@ -254,29 +238,99 @@
     if (feedbackCount) feedbackCount.textContent = String(feedbackNotes.value.length);
   });
 
-  feedbackForm?.addEventListener('submit', (event) => {
+  const paintSummaryStars = (average) => {
+    if (!summaryStars) return;
+    [...summaryStars.querySelectorAll('span')].forEach((star, index) => {
+      star.classList.toggle('filled', index < Math.round(Number(average) || 0));
+    });
+  };
+
+  const renderSummary = (summary) => {
+    if (!summary) return;
+    const average = Number(summary.average_rating || 0).toFixed(1);
+    if (summaryAverageRating) summaryAverageRating.textContent = average;
+    if (summaryRatingCount) summaryRatingCount.textContent = String(summary.rating_count ?? 0);
+    if (summarySuccessRate) summarySuccessRate.textContent = `${summary.success_rate ?? 0}%`;
+    if (summarySuccessRateInline) summarySuccessRateInline.textContent = `${summary.success_rate ?? 0}%`;
+    if (summaryFailureRateInline) summaryFailureRateInline.textContent = `${summary.failure_rate ?? 0}%`;
+    if (summarySuccessBar) summarySuccessBar.style.width = `${summary.success_rate ?? 0}%`;
+    if (summaryTotalTrades) summaryTotalTrades.textContent = String(summary.total_trades ?? 0);
+    if (summaryWins) summaryWins.textContent = String(summary.wins ?? 0);
+    if (summaryLosses) summaryLosses.textContent = String(summary.losses ?? 0);
+    if (summaryOpenTrades) summaryOpenTrades.textContent = String(summary.open_trades ?? 0);
+    if (summaryGauge) summaryGauge.style.setProperty('--summary-progress', String(summary.success_rate ?? 0));
+    paintSummaryStars(summary.average_rating || 0);
+  };
+
+  if (summaryStars) {
+    paintSummaryStars(summaryStars.dataset.average || 0);
+  }
+
+  tradeFeedbackForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
+    const tradeResult = tradeResultInput?.value || '';
     const rating = Number(ratingInput?.value || 0);
+
+    if (!tradeResult) {
+      if (tradeStatus) tradeStatus.textContent = 'اختر نتيجة الصفقة السابقة أولًا.';
+      tradeResultOptions[0]?.focus();
+      return;
+    }
     if (!rating) {
-      if (feedbackStatus) feedbackStatus.textContent = 'اختر عدد النجوم أولًا.';
+      if (tradeStatus) tradeStatus.textContent = 'اختر عدد النجوم أولًا.';
       ratingStars[0]?.focus();
       return;
     }
 
-    const notes = feedbackNotes?.value.trim() || 'لا توجد ملاحظات مكتوبة.';
-    const support = supportDeveloper?.checked ? 'نعم، أرغب في دعم المطور.' : 'ليس حاليًا.';
-    const subject = `تقييم تطبيق SaleeM - ${rating} من 5`;
-    const body = [
-      'تقييم تطبيق SaleeM',
-      `التقييم: ${rating} من 5`,
-      `دعم المطور: ${support}`,
-      '',
-      'الملاحظات والاقتراحات:',
-      notes,
-    ].join('\n');
+    const submitButton = document.getElementById('trade-feedback-submit');
+    if (tradeStatus) tradeStatus.textContent = 'جاري الحفظ...';
+    if (submitButton) submitButton.disabled = true;
 
-    setStoredValue(FEEDBACK_KEY, 1);
-    if (feedbackStatus) feedbackStatus.textContent = 'تم تجهيز رسالة البريد. اضغط إرسال داخل تطبيق البريد.';
-    window.location.href = `mailto:algsaami@gmail.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trade_result: tradeResult, rating }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'تعذر حفظ التقييم.');
+      renderSummary(payload.summary);
+      if (tradeStatus) tradeStatus.textContent = payload.message || 'تم حفظ التقييم.';
+    } catch (error) {
+      if (tradeStatus) tradeStatus.textContent = error.message || 'تعذر حفظ نتيجة الصفقة والتقييم.';
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+
+  notesForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const message = feedbackNotes?.value.trim() || '';
+    if (!message) {
+      if (notesStatus) notesStatus.textContent = 'اكتب ملاحظاتك أو اقتراحاتك أولًا.';
+      feedbackNotes?.focus();
+      return;
+    }
+
+    const submitButton = notesForm.querySelector('button[type="submit"]');
+    if (notesStatus) notesStatus.textContent = 'جاري إرسال الملاحظات...';
+    if (submitButton) submitButton.disabled = true;
+
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'تعذر إرسال الملاحظات.');
+      if (notesStatus) notesStatus.textContent = payload.message || 'تم إرسال الملاحظات.';
+      if (feedbackNotes) feedbackNotes.value = '';
+      if (feedbackCount) feedbackCount.textContent = '0';
+    } catch (error) {
+      if (notesStatus) notesStatus.textContent = error.message || 'تعذر إرسال الملاحظات والاقتراحات.';
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
   });
 })();
