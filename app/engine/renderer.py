@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import io
 import math
+from datetime import datetime
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable
 
 from PIL import Image, ImageDraw, ImageFont
@@ -14,35 +16,37 @@ except ImportError:  # pragma: no cover
     arabic_reshaper = None
     get_display = None
 
+# صورة عمودية مناسبة للهاتف، لكن جميع الإحداثيات داخلية وقابلة للتغيير.
 WIDTH = 1080
 HEIGHT = 1920
 
-BG_TOP = (3, 7, 13, 255)
-BG_BOTTOM = (8, 13, 22, 255)
-PANEL = (9, 16, 27, 248)
-PANEL_2 = (12, 21, 34, 248)
-GRID = (73, 87, 105, 62)
-BORDER = (89, 108, 132, 145)
-RED = (246, 67, 77, 255)
-RED_FILL = (246, 67, 77, 42)
-GREEN = (29, 211, 116, 255)
-GREEN_FILL = (29, 211, 116, 36)
-BLUE = (47, 137, 255, 255)
-WHITE = (245, 248, 252, 255)
-GRAY = (170, 184, 200, 255)
-GOLD = (245, 184, 48, 255)
-CYAN = (86, 210, 255, 255)
-BLACK_GLASS = (3, 8, 14, 224)
+# لوحة ألوان قريبة من التصميم المرجعي.
+BG = (248, 250, 253, 255)
+WHITE = (255, 255, 255, 255)
+NAVY = (15, 31, 67, 255)
+TEXT = (24, 38, 66, 255)
+MUTED = (104, 118, 143, 255)
+BORDER = (224, 230, 239, 255)
+GRID = (205, 214, 227, 115)
+GREEN = (17, 183, 94, 255)
+GREEN_DARK = (8, 130, 67, 255)
+GREEN_FILL = (17, 183, 94, 38)
+RED = (245, 63, 70, 255)
+RED_DARK = (187, 30, 39, 255)
+RED_FILL = (245, 63, 70, 36)
+BLUE = (38, 117, 247, 255)
+BLUE_FILL = (69, 139, 255, 22)
+GOLD = (245, 158, 11, 255)
+CREAM = (244, 194, 91, 30)
+ORANGE = (249, 115, 22, 255)
 
-MARGIN = 48
-INFO_TOP = 115
-INFO_BOTTOM = 248
-CHART_PANEL = (48, 275, 1032, 1292)
-CHART = (84, 322, 858, 1235)
-PRICE_AXIS_X = 875
-NOTES = (48, 1330, 1032, 1875)
+MAIN_CARD = (24, 150, 1056, 1892)
+CHART_CARD = (40, 505, 1040, 1320)
+CHART = (72, 555, 912, 1194)
+PRICE_AXIS_X = 934
+NOTES = (40, 1338, 1040, 1738)
 
-_FONT_CACHE: dict[tuple[int, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
+_FONT_CACHE: dict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
 
 def _rtl(text: str) -> str:
@@ -50,97 +54,129 @@ def _rtl(text: str) -> str:
         return ""
     if arabic_reshaper is None or get_display is None:
         return text
-    return get_display(arabic_reshaper.reshape(text))
+    return get_display(arabic_reshaper.reshape(str(text)))
 
 
-def _font(size: int, bold: bool = False):
-    key = (size, bold)
+def _font(size: int, bold: bool = False, latin: bool = False):
+    key = (size, bold, latin)
     if key in _FONT_CACHE:
         return _FONT_CACHE[key]
 
     root = Path(__file__).resolve().parents[2]
-    names = [
-        "NotoSansArabic-Bold.ttf" if bold else "NotoSansArabic-Regular.ttf",
-        "NotoNaskhArabic-Bold.ttf" if bold else "NotoNaskhArabic-Regular.ttf",
-    ]
-    candidates = [
-        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-    ]
-    candidates += [root / "fonts" / name for name in names]
-    candidates += [
-        Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
-        Path("/usr/share/fonts/opentype/noto/NotoSansArabic-Bold.ttf" if bold else "/usr/share/fonts/opentype/noto/NotoSansArabic-Regular.ttf"),
-    ]
+    if latin:
+        candidates = [
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ]
+    else:
+        candidates = [
+            root / "fonts" / ("NotoSansArabicUI-Bold.ttf" if bold else "NotoSansArabicUI-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansArabicUI-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSansArabicUI-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf" if bold else "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ]
     for path in candidates:
         if path.exists():
             font = ImageFont.truetype(str(path), size=size)
             _FONT_CACHE[key] = font
             return font
-
     font = ImageFont.load_default()
     _FONT_CACHE[key] = font
     return font
 
 
-TITLE_FONT = _font(42, True)
-TITLE_LATIN = _font(42, True)
-CARD_LABEL = _font(18, False)
-CARD_VALUE = _font(25, True)
-PRICE_FONT = _font(26, True)
-AXIS_FONT = _font(18, False)
-LEVEL_FONT = _font(18, False)
-TRADE_FONT = _font(21, True)
-NOTE_TITLE = _font(29, True)
-NOTE_FONT = _font(22, False)
-NOTE_BOLD = _font(23, True)
-FOOTER_FONT = _font(17, False)
+F_STATUS = _font(20, True, True)
+F_SMALL = _font(17)
+F_SMALL_BOLD = _font(17, True)
+F_LABEL = _font(19)
+F_CARD = _font(27, True)
+F_CARD_LATIN = _font(24, True, True)
+F_TITLE = _font(36, True)
+F_TITLE_LATIN = _font(36, True, True)
+F_HEADER = _font(35, True, True)
+F_BUY = _font(34, True, True)
+F_PERCENT = _font(29, True, True)
+F_AXIS = _font(15, False, True)
+F_LEVEL = _font(16, True)
+F_ZONE = _font(15, True, True)
+F_TRADE = _font(18, True)
+F_TRADE_LATIN = _font(18, True, True)
+F_NOTE_TITLE = _font(29, True)
+F_NOTE = _font(19)
+F_NOTE_MIXED = _font(19, False, True)
+F_NOTE_BOLD = _font(20, True)
+F_BUTTON = _font(27, False)
+F_DISCLAIMER = _font(15)
 
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
         return None
-    return float(value) if isinstance(value, (int, float)) else None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(str(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _fmt_price(value: Any) -> str:
     number = _number(value)
     if number is None:
-        return "غير واضح"
-    rounded = round(float(number), 2)
+        return "—"
+    rounded = round(number, 2)
     if abs(rounded - round(rounded)) < 0.005:
         return str(int(round(rounded)))
-    if abs(rounded * 10 - round(rounded * 10)) < 0.005:
-        return f"{rounded:.1f}"
     return f"{rounded:.2f}".rstrip("0").rstrip(".")
 
 
-def _display(text: str, rtl: bool = True) -> str:
-    return _rtl(text) if rtl else text
+def _time_label(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "--:--"
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.strftime("%H:%M")
+    except ValueError:
+        pass
+    if "T" in text:
+        time_part = text.split("T", 1)[1]
+        if len(time_part) >= 5:
+            return time_part[:5]
+    if " " in text:
+        time_part = text.rsplit(" ", 1)[-1]
+        if len(time_part) >= 5 and ":" in time_part:
+            return time_part[:5]
+    if len(text) >= 5 and text[2:3] == ":":
+        return text[:5]
+    return text[-5:]
 
 
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font, rtl: bool = True) -> int:
-    box = draw.textbbox((0, 0), _display(text, rtl), font=font)
-    return box[2] - box[0]
-
-
-def _draw_rtl(
-    draw: ImageDraw.ImageDraw,
-    xy: tuple[int, int],
-    text: str,
-    font,
-    fill=WHITE,
-    anchor: str = "ra",
-) -> None:
+def _draw_rtl(draw: ImageDraw.ImageDraw, xy: tuple[int, int], text: str, font, fill=TEXT, anchor: str = "ra") -> None:
     draw.text(xy, _rtl(text), font=font, fill=fill, anchor=anchor)
 
 
-def _fit_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int) -> str:
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font, rtl: bool = True) -> int:
+    shown = _rtl(text) if rtl else str(text)
+    box = draw.textbbox((0, 0), shown, font=font)
+    return box[2] - box[0]
+
+
+def _fit_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, rtl: bool = True) -> str:
     cleaned = " ".join(str(text).split())
-    if _text_width(draw, cleaned, font) <= max_width:
+    if _text_width(draw, cleaned, font, rtl) <= max_width:
         return cleaned
-    while len(cleaned) > 6 and _text_width(draw, cleaned + "…", font) > max_width:
+    while len(cleaned) > 7 and _text_width(draw, cleaned + "…", font, rtl) > max_width:
         cleaned = cleaned[:-1]
     return cleaned.rstrip() + "…"
+
+
+def _shadow_card(image: Image.Image, rect: tuple[int, int, int, int], radius: int = 22, shadow: int = 7) -> None:
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(layer)
+    x1, y1, x2, y2 = rect
+    d.rounded_rectangle((x1, y1 + shadow, x2, y2 + shadow), radius=radius, fill=(31, 49, 84, 20))
+    image.alpha_composite(layer)
 
 
 def _rounded_label(
@@ -149,104 +185,39 @@ def _rounded_label(
     y: int,
     text: str,
     font,
-    fill,
-    outline,
-    text_fill=WHITE,
+    *,
+    fill=WHITE,
+    outline=BORDER,
+    text_fill=TEXT,
     padding_x: int = 10,
     padding_y: int = 5,
-    align_right: bool = False,
     rtl: bool = True,
+    align_right: bool = False,
+    radius: int = 8,
 ) -> tuple[int, int, int, int]:
-    shown = _display(text, rtl)
+    shown = _rtl(text) if rtl else str(text)
     box = draw.textbbox((0, 0), shown, font=font)
     tw, th = box[2] - box[0], box[3] - box[1]
     if align_right:
         x -= tw + padding_x * 2
     rect = (x, y, x + tw + padding_x * 2, y + th + padding_y * 2)
-    draw.rounded_rectangle(rect, radius=9, fill=fill, outline=outline, width=1)
+    draw.rounded_rectangle(rect, radius=radius, fill=fill, outline=outline, width=1)
     draw.text((x + padding_x, y + padding_y - box[1]), shown, font=font, fill=text_fill)
     return rect
 
 
-def _dash_line(
-    draw: ImageDraw.ImageDraw,
-    start: tuple[int, int],
-    end: tuple[int, int],
-    color,
-    width: int = 3,
-    dash: int = 15,
-    gap: int = 10,
-) -> None:
+def _dash_line(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], color, width: int = 2, dash: int = 11, gap: int = 8) -> None:
     x1, y1 = start
     x2, y2 = end
-    distance = math.hypot(x2 - x1, y2 - y1)
-    if distance <= 0:
+    length = math.hypot(x2 - x1, y2 - y1)
+    if length <= 0:
         return
-    dx = (x2 - x1) / distance
-    dy = (y2 - y1) / distance
+    dx, dy = (x2 - x1) / length, (y2 - y1) / length
     pos = 0.0
-    while pos < distance:
-        stop = min(distance, pos + dash)
-        draw.line(
-            [(x1 + dx * pos, y1 + dy * pos), (x1 + dx * stop, y1 + dy * stop)],
-            fill=color,
-            width=width,
-        )
+    while pos < length:
+        stop = min(length, pos + dash)
+        draw.line((x1 + dx * pos, y1 + dy * pos, x1 + dx * stop, y1 + dy * stop), fill=color, width=width)
         pos += dash + gap
-
-
-def _arrow(
-    draw: ImageDraw.ImageDraw,
-    points: list[tuple[int, int]],
-    color,
-    width: int = 9,
-    probability: int = 50,
-) -> None:
-    if len(points) < 2:
-        return
-
-    segments_per_leg = 10
-    expanded: list[tuple[float, float]] = []
-    for idx in range(len(points) - 1):
-        x1, y1 = points[idx]
-        x2, y2 = points[idx + 1]
-        for step in range(segments_per_leg):
-            t = step / segments_per_leg
-            expanded.append((x1 + (x2 - x1) * t, y1 + (y2 - y1) * t))
-    expanded.append(points[-1])
-
-    total = max(1, len(expanded) - 1)
-    base_r, base_g, base_b = color[:3]
-
-    prob = max(35, min(95, int(probability or 50)))
-    strength = (prob - 35) / 60.0
-    alpha_start = int(70 + 70 * strength)
-    alpha_end = int(170 + 85 * strength)
-
-    for index in range(total):
-        p1 = expanded[index]
-        p2 = expanded[index + 1]
-        ratio = index / total
-        alpha = int(alpha_start + (alpha_end - alpha_start) * ratio)
-        seg_width = max(3, int(width * (0.80 + 0.34 * ratio)))
-        seg_color = (base_r, base_g, base_b, alpha)
-        draw.line([p1, p2], fill=seg_color, width=seg_width)
-
-    p1, p2 = expanded[-2], expanded[-1]
-    angle = math.atan2(p2[1] - p1[1], p2[0] - p1[0])
-    size = max(34, int(width * 3.8))
-    wing_angle = math.pi / 5.4
-    left = (
-        p2[0] - size * math.cos(angle - wing_angle),
-        p2[1] - size * math.sin(angle - wing_angle),
-    )
-    right = (
-        p2[0] - size * math.cos(angle + wing_angle),
-        p2[1] - size * math.sin(angle + wing_angle),
-    )
-    head_alpha = min(255, alpha_end + 10)
-    head_color = (base_r, base_g, base_b, head_alpha)
-    draw.polygon([p2, left, right], fill=head_color)
 
 
 def _strength_width(strength: int) -> int:
@@ -259,144 +230,166 @@ def _strength_width(strength: int) -> int:
 
 def _strength_name(strength: int) -> str:
     if strength >= 85:
-        return "قوي جدًا"
+        return "قوية جدًا"
     if strength >= 70:
-        return "قوي"
-    return "متوسط"
+        return "قوية"
+    return "متوسطة"
 
 
 def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
-    values: list[float] = []
-    for candle in analysis.get("candles") or []:
-        values.extend([float(candle["high"]), float(candle["low"])])
-    for key in ("entry", "stop_loss", "target_1", "target_2", "target_3", "current_price"):
-        value = _number(analysis.get(key))
-        if value is not None:
-            values.append(value)
+    candles = analysis.get("candles") or []
+    candle_values: list[float] = []
+    for candle in candles:
+        high = _number(candle.get("high"))
+        low = _number(candle.get("low"))
+        if high is not None and low is not None:
+            candle_values.extend((high, low))
+
+    trade_values = [
+        _number(analysis.get(key))
+        for key in ("entry", "stop_loss", "target_1", "target_2", "target_3", "current_price")
+    ]
+    level_values: list[float] = []
     for key in ("support_levels", "resistance_levels"):
         for level in analysis.get(key) or []:
             price = _number(level.get("price"))
             if price is not None:
-                values.append(price)
+                level_values.append(price)
+
+    values = candle_values + [v for v in trade_values if v is not None] + level_values
     if not values:
         return 0.0, 1.0
+
+    # تجاهل مستوى بعيد جدًا يمنع ضغط الشموع، مع الاحتفاظ بالصفقة الحالية.
+    center = _number(analysis.get("current_price"))
+    if center is None and candles:
+        center = _number(candles[-1].get("close"))
+    if center is not None and candle_values:
+        ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles]
+        atr = median(ranges) if ranges else 1.0
+        max_distance = max(atr * 14, 8.0)
+        nearby = [value for value in values if abs(value - center) <= max_distance]
+        if len(nearby) >= max(6, len(candle_values) // 2):
+            values = nearby
+
     low, high = min(values), max(values)
     spread = max(1.0, high - low)
-    padding = max(0.8, spread * 0.09)
+    padding = max(0.65, spread * 0.07)
     return low - padding, high + padding
 
 
 def _price_y(price: float, price_min: float, price_max: float) -> int:
     left, top, right, bottom = CHART
     ratio = (price_max - price) / max(0.0001, price_max - price_min)
-    return int(top + ratio * (bottom - top))
+    return int(top + max(0.0, min(1.0, ratio)) * (bottom - top))
 
 
-def _chart_point(point: Iterable[float]) -> tuple[int, int]:
-    x, y = point
-    left, top, right, bottom = CHART
-    return (
-        int(left + max(0.0, min(1.0, float(x))) * (right - left)),
-        int(top + max(0.0, min(1.0, float(y))) * (bottom - top)),
-    )
-
-
-def _draw_mixed_title(draw: ImageDraw.ImageDraw) -> None:
-    segments = [
-        ("تحليل", TITLE_FONT, WHITE, True),
-        ("SaleeM", TITLE_LATIN, GOLD, False),
-        ("- XAUUSD - M5 -", TITLE_LATIN, WHITE, False),
-        ("آخر ساعتين", TITLE_FONT, WHITE, True),
-    ]
-    gap = 13
-    widths = [_text_width(draw, text, font, rtl) for text, font, _, rtl in segments]
-    total = sum(widths) + gap * (len(segments) - 1)
-    x = int((WIDTH + total) / 2)
-    y = 49
-    for (text, font, color, rtl), width in zip(segments, widths):
-        draw.text((x, y), _display(text, rtl), font=font, fill=color, anchor="ra")
-        x -= width + gap
-    draw.line((MARGIN, 102, WIDTH - MARGIN, 102), fill=(GOLD[0], GOLD[1], GOLD[2], 120), width=2)
-
-
-def _draw_info_card(
-    draw: ImageDraw.ImageDraw,
-    rect: tuple[int, int, int, int],
-    label: str,
-    value: str,
-    value_color=WHITE,
-    value_rtl: bool = True,
-) -> None:
-    x1, y1, x2, y2 = rect
-    draw.rounded_rectangle(rect, radius=16, fill=PANEL_2, outline=BORDER, width=1)
-    _draw_rtl(draw, (x2 - 16, y1 + 22), label, CARD_LABEL, GRAY)
-    if value_rtl:
-        draw.text(
-            (x2 - 16, y1 + 67),
-            _display(value, True),
-            font=CARD_VALUE,
-            fill=value_color,
-            anchor="ra",
-        )
-    else:
-        shown = _fit_text(draw, value, CARD_VALUE, x2 - x1 - 24)
-        draw.text(
-            ((x1 + x2) // 2, y1 + 67),
-            shown,
-            font=CARD_VALUE,
-            fill=value_color,
-            anchor="ma",
-        )
+def _draw_status(draw: ImageDraw.ImageDraw) -> None:
+    draw.text((38, 29), "12:04", font=F_STATUS, fill=(10, 14, 24, 255), anchor="la")
+    draw.text((975, 29), "5G", font=F_STATUS, fill=(10, 14, 24, 255), anchor="ra")
+    # إشارة وبطارية مبسطة دون الاعتماد على رموز خطوط خاصة.
+    for i, h in enumerate((7, 11, 15, 20)):
+        draw.rounded_rectangle((894 + i * 10, 47 - h, 900 + i * 10, 47), radius=2, fill=(10, 14, 24, 255))
+    draw.rounded_rectangle((992, 23, 1041, 47), radius=6, outline=(30, 35, 45, 255), width=2)
+    draw.rectangle((1041, 30, 1046, 40), fill=(30, 35, 45, 255))
+    draw.rectangle((996, 27, 1022, 43), fill=(30, 35, 45, 255))
+    draw.ellipse((31, 79, 79, 127), fill=(225, 247, 235, 255))
+    draw.line((46, 103, 56, 113), fill=GREEN, width=4)
+    draw.line((56, 113, 68, 91), fill=GREEN, width=4)
+    _draw_rtl(draw, (1019, 58), "اكتمال التحليل", F_SMALL_BOLD, GREEN)
+    title_y = 84
+    _draw_rtl(draw, (1019, title_y), "تحليل", F_TITLE, NAVY)
+    arabic_width = _text_width(draw, "تحليل", F_TITLE)
+    draw.text((1019 - arabic_width - 14, title_y), "SaleeM", font=F_TITLE_LATIN, fill=NAVY, anchor="ra")
 
 
 def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    _draw_mixed_title(draw)
+    draw.rounded_rectangle(MAIN_CARD, radius=24, fill=WHITE, outline=BORDER, width=1)
+    draw.text((540, 188), "SaleeM - XAUUSD - M5", font=F_HEADER, fill=NAVY, anchor="ma")
+
+    card_y1, card_y2 = 230, 385
+    gap = 12
+    card_w = (984 - gap * 3) // 4
+    x_positions = [40 + i * (card_w + gap) for i in range(4)]
+    cards = [(x, card_y1, x + card_w, card_y2) for x in x_positions]
+
+    for rect in cards:
+        draw.rounded_rectangle(rect, radius=17, fill=(255, 255, 255, 255), outline=BORDER, width=1)
+
+    latest = analysis.get("market_latest_candle_time") or analysis.get("market_data_fetched_at")
+    update_time = _time_label(latest)
+    count = len(analysis.get("candles") or [])
     current = _number(analysis.get("current_price"))
-    cards = [
-        (48, INFO_TOP, 318, INFO_BOTTOM),
-        (330, INFO_TOP, 532, INFO_BOTTOM),
-        (544, INFO_TOP, 746, INFO_BOTTOM),
-        (758, INFO_TOP, 1032, INFO_BOTTOM),
-    ]
-    _draw_info_card(draw, cards[0], "الأصل والفريم", "XAUUSD (GOLD) | M5", GOLD, False)
-    _draw_info_card(draw, cards[1], "الفترة", "آخر ساعتين", WHITE, True)
-    _draw_info_card(draw, cards[2], "عدد الشموع", "24 شمعة", WHITE, True)
-    _draw_info_card(
-        draw,
-        cards[3],
-        "السعر الحالي",
-        _fmt_price(current),
-        GREEN if current is not None else GRAY,
-        False,
-    )
+
+    # البطاقة الأولى: الأصل والرمز.
+    _draw_rtl(draw, (cards[0][2] - 18, card_y1 + 31), "الأصل / الرمز", F_LABEL, TEXT)
+    # أيقونة ذهب بسيطة.
+    gx, gy = cards[0][0] + 26, card_y1 + 82
+    for dx, dy in ((0, 20), (28, 20), (14, 0)):
+        draw.polygon([(gx + dx, gy + dy + 16), (gx + dx + 14, gy + dy), (gx + dx + 35, gy + dy + 4), (gx + dx + 42, gy + dy + 22), (gx + dx + 10, gy + dy + 26)], fill=(247, 174, 25, 255), outline=(201, 126, 0, 255))
+    draw.text((cards[0][2] - 18, card_y1 + 88), "XAUUSD", font=F_CARD_LATIN, fill=ORANGE, anchor="ra")
+    draw.text((cards[0][2] - 18, card_y1 + 121), "(GOLD / USD)", font=F_STATUS, fill=ORANGE, anchor="ra")
+
+    # وقت التحديث.
+    _draw_rtl(draw, (cards[1][2] - 18, card_y1 + 31), "وقت آخر تحديث", F_LABEL, TEXT)
+    draw.ellipse((cards[1][0] + 27, card_y1 + 25, cards[1][0] + 57, card_y1 + 55), outline=(118, 136, 165, 255), width=2)
+    draw.line((cards[1][0] + 42, card_y1 + 31, cards[1][0] + 42, card_y1 + 41), fill=(118, 136, 165, 255), width=2)
+    draw.line((cards[1][0] + 42, card_y1 + 41, cards[1][0] + 50, card_y1 + 45), fill=(118, 136, 165, 255), width=2)
+    draw.text(((cards[1][0] + cards[1][2]) // 2, card_y1 + 106), update_time, font=F_CARD, fill=NAVY, anchor="mm")
+
+    # عدد الشموع.
+    _draw_rtl(draw, (cards[2][2] - 18, card_y1 + 31), "عدد الشموع", F_LABEL, TEXT)
+    draw.text(((cards[2][0] + cards[2][2]) // 2, card_y1 + 106), _rtl(f"{count} شمعة"), font=F_CARD, fill=NAVY, anchor="mm")
+
+    # السعر الحالي من الصورة.
+    _draw_rtl(draw, (cards[3][2] - 18, card_y1 + 31), "السعر الحالي", F_LABEL, TEXT)
+    draw.line((cards[3][0] + 32, card_y1 + 116, cards[3][0] + 50, card_y1 + 94, cards[3][0] + 66, card_y1 + 104, cards[3][0] + 85, card_y1 + 76), fill=GREEN, width=4)
+    draw.polygon([(cards[3][0] + 85, card_y1 + 76), (cards[3][0] + 73, card_y1 + 79), (cards[3][0] + 83, card_y1 + 89)], fill=GREEN)
+    draw.text((cards[3][2] - 18, card_y1 + 106), _fmt_price(current), font=F_CARD, fill=GREEN, anchor="rm")
+
+
+def _draw_signal(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    direction = str(analysis.get("direction") or "صاعد")
+    probability = int(analysis.get("trade_probability") or 50)
+    color = GREEN if direction == "صاعد" else RED
+    dark = GREEN_DARK if direction == "صاعد" else RED_DARK
+    side = "BUY" if direction == "صاعد" else "SELL"
+
+    x, y = 42, 410
+    draw.rounded_rectangle((x, y, x + 138, y + 66), radius=12, fill=color)
+    draw.text((x + 69, y + 33), side, font=F_BUY, fill=WHITE, anchor="mm")
+    draw.rounded_rectangle((x + 128, y, x + 247, y + 66), radius=12, fill=WHITE, outline=color, width=2)
+    draw.text((x + 188, y + 33), f"{probability}%", font=F_PERCENT, fill=color, anchor="mm")
+
+    state = str(analysis.get("draw_mode") or "conditional")
+    state_text = {"confirmed": "CONFIRMED", "conditional": "CONDITIONAL", "watch": "WATCH"}.get(state, "CONDITIONAL")
+    state_w = 157 if state_text == "CONDITIONAL" else 145
+    draw.rounded_rectangle((x + 273, y + 9, x + 273 + state_w, y + 57), radius=12, fill=WHITE, outline=color, width=2)
+    draw.text((x + 273 + state_w // 2, y + 33), state_text, font=F_STATUS, fill=dark, anchor="mm")
 
 
 def _draw_grid(draw: ImageDraw.ImageDraw, price_min: float, price_max: float) -> None:
-    px1, py1, px2, py2 = CHART_PANEL
+    draw.rounded_rectangle(CHART_CARD, radius=21, fill=WHITE, outline=BORDER, width=1)
     left, top, right, bottom = CHART
-    draw.rounded_rectangle(CHART_PANEL, radius=20, fill=(6, 12, 21, 255), outline=BORDER, width=2)
-    ticks = 9
+    ticks = 11
     for index in range(ticks):
         y = int(top + index * (bottom - top) / (ticks - 1))
         draw.line((left, y, right, y), fill=GRID, width=1)
         price = price_max - index * (price_max - price_min) / (ticks - 1)
-        draw.text((PRICE_AXIS_X, y), _fmt_price(price), font=AXIS_FONT, fill=GRAY, anchor="lm")
+        draw.text((PRICE_AXIS_X, y), _fmt_price(price), font=F_AXIS, fill=TEXT, anchor="lm")
     for index in range(7):
         x = int(left + index * (right - left) / 6)
         draw.line((x, top, x, bottom), fill=GRID, width=1)
-    draw.line((PRICE_AXIS_X - 12, top, PRICE_AXIS_X - 12, bottom), fill=(96, 112, 132, 100), width=1)
+    draw.line((right, top, right, bottom), fill=(167, 179, 197, 200), width=1)
 
 
-def _draw_candles(
-    draw: ImageDraw.ImageDraw,
-    candles: list[dict[str, Any]],
-    price_min: float,
-    price_max: float,
-) -> None:
+def _draw_candles(draw: ImageDraw.ImageDraw, candles: list[dict[str, Any]], price_min: float, price_max: float) -> tuple[float, int]:
     left, top, right, bottom = CHART
     count = max(1, len(candles))
-    slot = (right - left) / count
-    body_width = max(10, int(slot * 0.50))
+    # نترك مساحة يمين الشموع للسيناريو والأهداف مثل الصورة المرجعية.
+    candle_right = int(left + (right - left) * 0.68)
+    slot = (candle_right - left) / count
+    body_width = max(6, min(14, int(slot * 0.58)))
 
     for index, candle in enumerate(candles):
         x = int(left + slot * (index + 0.5))
@@ -406,117 +399,140 @@ def _draw_candles(
         low_y = _price_y(float(candle["low"]), price_min, price_max)
         bullish = float(candle["close"]) >= float(candle["open"])
         color = GREEN if bullish else RED
-        draw.line((x, high_y, x, low_y), fill=color, width=3)
+        draw.line((x, high_y, x, low_y), fill=color, width=2)
         y1, y2 = sorted((open_y, close_y))
-        if y2 - y1 < 4:
-            y2 = y1 + 4
+        if y2 - y1 < 3:
+            y2 = y1 + 3
         draw.rectangle((x - body_width // 2, y1, x + body_width // 2, y2), fill=color, outline=color)
 
-    indexes = list(range(0, count, 4))
-    if count - 1 not in indexes:
-        indexes.append(count - 1)
+    label_count = min(7, count)
+    indexes = sorted(set(round(i * (count - 1) / max(1, label_count - 1)) for i in range(label_count)))
     for index in indexes:
         x = int(left + slot * (index + 0.5))
-        label = str(candles[index].get("time") or "")[:5]
-        draw.text((x, bottom + 23), label, font=AXIS_FONT, fill=GRAY, anchor="ma")
+        draw.text((x, bottom + 64), _time_label(candles[index].get("time")), font=F_AXIS, fill=TEXT, anchor="ma")
+    return slot, candle_right
 
 
-def _level_label_y(y: int, used: list[int]) -> int:
-    candidate = y - 16
-    for other in used:
-        if abs(candidate - other) < 34:
-            candidate = other + 36
-    used.append(candidate)
-    return candidate
+def _detect_fvg(candles: list[dict[str, Any]]) -> list[tuple[int, float, float]]:
+    zones: list[tuple[int, float, float]] = []
+    for i in range(2, len(candles)):
+        a, c = candles[i - 2], candles[i]
+        if float(a["high"]) < float(c["low"]):
+            zones.append((i, float(a["high"]), float(c["low"])))
+        elif float(a["low"]) > float(c["high"]):
+            zones.append((i, float(c["high"]), float(a["low"])))
+    return zones[-1:]
 
 
-def _draw_levels(
-    draw: ImageDraw.ImageDraw,
-    analysis: dict[str, Any],
-    price_min: float,
-    price_max: float,
-) -> None:
+def _detect_order_blocks(candles: list[dict[str, Any]]) -> list[tuple[int, float, float, int]]:
+    if len(candles) < 5:
+        return []
+    bodies = [abs(float(c["close"]) - float(c["open"])) for c in candles]
+    baseline = max(0.01, median(bodies))
+    zones: list[tuple[int, float, float, int]] = []
+    for i in range(1, len(candles)):
+        prev, impulse = candles[i - 1], candles[i]
+        body = abs(float(impulse["close"]) - float(impulse["open"]))
+        prev_bull = float(prev["close"]) >= float(prev["open"])
+        impulse_bull = float(impulse["close"]) >= float(impulse["open"])
+        if body < baseline * 1.35 or prev_bull == impulse_bull:
+            continue
+        strength = min(100, int(58 + body / baseline * 12))
+        zones.append((i - 1, float(prev["low"]), float(prev["high"]), strength))
+    # إزالة المناطق المتقاربة جدًا.
+    selected: list[tuple[int, float, float, int]] = []
+    for zone in reversed(zones):
+        center = (zone[1] + zone[2]) / 2
+        if all(abs(center - (z[1] + z[2]) / 2) > max(0.25, abs(zone[2] - zone[1]) * 0.7) for z in selected):
+            selected.append(zone)
+        if len(selected) == 4:
+            break
+    return list(reversed(selected))
+
+
+def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
     left, top, right, bottom = CHART
-    used_labels: list[int] = []
-    for key, color, name in (
-        ("resistance_levels", RED, "مقاومة"),
-        ("support_levels", GREEN, "دعم"),
-    ):
-        levels = sorted(
-            analysis.get(key) or [],
-            key=lambda item: int(item.get("strength") or 0),
-            reverse=True,
-        )[:2]
-        for level in levels:
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+
+    for index, low, high, strength in _detect_order_blocks(candles):
+        if high < price_min or low > price_max:
+            continue
+        x1 = int(left + slot * max(0, index - 0.5))
+        x2 = min(right - 10, max(candle_right + 100, x1 + 250))
+        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+        alpha = 18 + max(0, min(34, (strength - 50) // 2))
+        ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(49, 128, 255, alpha), outline=(49, 128, 255, 80), width=1)
+        draw.text((x1 + 13, (y1 + y2) // 2), "ORDER BLOCK", font=F_ZONE, fill=BLUE, anchor="lm")
+
+    for index, low, high in _detect_fvg(candles):
+        if high < price_min or low > price_max:
+            continue
+        x1 = int(left + slot * max(0, index - 1.2))
+        x2 = min(right - 15, max(candle_right + 20, x1 + 220))
+        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+        if y2 - y1 < 18:
+            center = (y1 + y2) // 2
+            y1, y2 = center - 9, center + 9
+        ld.rounded_rectangle((x1, y1, x2, y2), radius=4, fill=CREAM, outline=(214, 155, 45, 105), width=1)
+        draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=F_ZONE, fill=(102, 73, 20, 255), anchor="mm")
+
+    image.alpha_composite(layer)
+
+
+def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    left, top, right, bottom = CHART
+    for key, color, name in (("resistance_levels", RED, "مقاومة"), ("support_levels", GREEN, "دعم")):
+        levels = sorted(analysis.get(key) or [], key=lambda item: int(item.get("strength") or 0), reverse=True)[:2]
+        for rank, level in enumerate(levels, start=1):
             price = _number(level.get("price"))
             if price is None or not (price_min <= price <= price_max):
                 continue
             strength = int(level.get("strength") or 50)
             y = _price_y(price, price_min, price_max)
-            width = _strength_width(strength)
-            draw.line((left, y, right, y), fill=color, width=width)
-            label_y = _level_label_y(y, used_labels)
-            label_y = max(top + 6, min(bottom - 34, label_y))
-            text = f"{name} {_strength_name(strength)} {_fmt_price(price)} - {strength}٪"
-            _rounded_label(
-                draw,
-                left + 8,
-                label_y,
-                text,
-                LEVEL_FONT,
-                BLACK_GLASS,
-                color,
-                padding_x=8,
-                padding_y=3,
-            )
+            draw.line((left, y, right - 18, y), fill=color, width=_strength_width(strength))
+            if key == "resistance_levels":
+                _rounded_label(draw, left - 34, y - 17, _fmt_price(price), F_LEVEL, fill=color, outline=color, text_fill=WHITE, rtl=False)
+                _rounded_label(draw, left + 53, y - 17, f"{name} {rank}", F_LEVEL, fill=WHITE, outline=color, text_fill=TEXT)
+                draw.text((right + 13, y), _fmt_price(price), font=F_LEVEL, fill=color, anchor="lm")
+            else:
+                _rounded_label(draw, left - 24, y - 17, f"{name} {_strength_name(strength)}  {_fmt_price(price)}", F_LEVEL, fill=WHITE, outline=color, text_fill=TEXT)
 
 
-def _draw_pattern(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    confidence = int(analysis.get("pattern_confidence") or 0)
-    if confidence < 75:
-        return
-    for line in analysis.get("pattern_lines") or []:
-        if isinstance(line, list) and len(line) == 4:
-            draw.line((_chart_point(line[:2]), _chart_point(line[2:])), fill=BLUE, width=5)
-    path = [
-        _chart_point(point)
-        for point in analysis.get("pattern_path") or []
-        if isinstance(point, list) and len(point) == 2
-    ]
-    if len(path) >= 2:
-        draw.line(path, fill=WHITE, width=3, joint="curve")
-
-
-def _spaced_label_positions(items: list[tuple[str, float, int]], min_gap: int = 42) -> dict[str, int]:
-    ordered = sorted(items, key=lambda item: item[2])
-    result: dict[str, int] = {}
+def _spaced_positions(items: list[tuple[str, int]], min_gap: int = 43) -> dict[str, int]:
+    ordered = sorted(items, key=lambda item: item[1])
+    positions: dict[str, int] = {}
     previous: int | None = None
-    for key, _, exact_y in ordered:
-        y = exact_y
-        if previous is not None and y - previous < min_gap:
-            y = previous + min_gap
-        result[key] = y
+    for key, exact in ordered:
+        y = exact if previous is None else max(exact, previous + min_gap)
+        positions[key] = y
         previous = y
-    bottom_limit = CHART[3] - 35
-    overflow = max(result.values(), default=0) - bottom_limit
+    max_y = CHART[3] - 24
+    overflow = max(positions.values(), default=max_y) - max_y
     if overflow > 0:
-        for key in result:
-            result[key] -= overflow
-    top_limit = CHART[1] + 4
-    underflow = top_limit - min(result.values(), default=top_limit)
+        positions = {key: y - overflow for key, y in positions.items()}
+    min_y = CHART[1] + 10
+    underflow = min_y - min(positions.values(), default=min_y)
     if underflow > 0:
-        for key in result:
-            result[key] += underflow
-    return result
+        positions = {key: y + underflow for key, y in positions.items()}
+    return positions
 
 
-def _draw_trade(
-    image: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    analysis: dict[str, Any],
-    price_min: float,
-    price_max: float,
-) -> None:
+def _draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], color) -> None:
+    sx, sy = start
+    ex, ey = end
+    mx = int(sx + (ex - sx) * 0.48)
+    my = int(sy + (ey - sy) * 0.58)
+    points = [(sx, sy), (mx, my), (ex, ey)]
+    draw.line(points, fill=color, width=4, joint="curve")
+    angle = math.atan2(ey - my, ex - mx)
+    size = 23
+    left = (ex - size * math.cos(angle - math.pi / 6), ey - size * math.sin(angle - math.pi / 6))
+    right = (ex - size * math.cos(angle + math.pi / 6), ey - size * math.sin(angle + math.pi / 6))
+    draw.polygon([(ex, ey), left, right], fill=color)
+
+
+def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int) -> None:
     left, top, right, bottom = CHART
     direction = str(analysis.get("direction") or "صاعد")
     color = GREEN if direction == "صاعد" else RED
@@ -529,215 +545,137 @@ def _draw_trade(
 
     entry_y = _price_y(entry, price_min, price_max)
     stop_y = _price_y(stop, price_min, price_max) if stop is not None else None
-    target_ys = [_price_y(value, price_min, price_max) for value in targets]
-    zone_left = int(left + (right - left) * 0.68)
+    target_ys = [_price_y(target, price_min, price_max) for target in targets]
+    zone_left = max(candle_right - 30, int(left + (right - left) * 0.58))
 
-    # Draw profit/loss zones on a separate transparent layer.
-    # Drawing RGBA colors directly onto the base image and later converting to RGB
-    # discards alpha and makes the rectangles look fully opaque.
-    zones = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    zones_draw = ImageDraw.Draw(zones)
-
-    if stop_y is not None:
-        zones_draw.rectangle(
-            (zone_left, min(entry_y, stop_y), right, max(entry_y, stop_y)),
-            fill=RED_FILL,
-        )
-
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
     if target_ys:
-        far_y = target_ys[-1]
-        zones_draw.rectangle(
-            (zone_left, min(entry_y, far_y), right, max(entry_y, far_y)),
-            fill=GREEN_FILL,
-        )
-
-    composed = Image.alpha_composite(image, zones)
-    image.paste(composed)
-
+        far_target_y = target_ys[-1]
+        ld.rounded_rectangle((zone_left, min(entry_y, far_target_y), right, max(entry_y, far_target_y)), radius=5, fill=GREEN_FILL, outline=(17, 183, 94, 145), width=2)
     if stop_y is not None:
-        _dash_line(draw, (zone_left, stop_y), (right, stop_y), RED, width=3)
+        ld.rounded_rectangle((zone_left, min(entry_y, stop_y), right, max(entry_y, stop_y)), radius=5, fill=RED_FILL, outline=(245, 63, 70, 135), width=2)
 
-    _dash_line(draw, (left, entry_y), (right, entry_y), WHITE, width=3)
+    # شريط دمج مستقل حول الدخول يربط المنطقة الخضراء والحمراء.
+    candle_ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in analysis.get("candles") or []]
+    atr = median(candle_ranges) if candle_ranges else 1.0
+    band = max(0.16, min(0.55, atr * 0.18))
+    band_top = _price_y(entry + band, price_min, price_max)
+    band_bottom = _price_y(entry - band, price_min, price_max)
+    ld.rounded_rectangle((zone_left, min(band_top, band_bottom), right, max(band_top, band_bottom)), radius=5, fill=(255, 255, 255, 145), outline=(128, 140, 160, 150), width=1)
+    image.alpha_composite(layer)
+
+    _dash_line(draw, (left, entry_y), (right, entry_y), (113, 132, 161, 210), width=2)
+    if stop_y is not None:
+        _dash_line(draw, (zone_left, stop_y), (right, stop_y), RED, width=2)
     for y in target_ys:
-        _dash_line(draw, (zone_left, y), (right, y), GREEN, width=3)
+        _dash_line(draw, (zone_left, y), (right, y), GREEN, width=2)
 
-    label_items: list[tuple[str, float, int]] = [("entry", entry, entry_y)]
-    if stop is not None and stop_y is not None:
-        label_items.append(("stop", stop, stop_y))
-    for index, (target, y) in enumerate(zip(targets, target_ys), start=1):
-        label_items.append((f"tp{index}", target, y))
-    positions = _spaced_label_positions(label_items)
+    label_items = [("entry", entry_y)]
+    if stop_y is not None:
+        label_items.append(("stop", stop_y))
+    label_items.extend((f"tp{i}", y) for i, y in enumerate(target_ys, start=1))
+    positions = _spaced_positions(label_items)
 
-    entry_prefix = "دخول" if analysis.get("draw_mode") == "confirmed" else "دخول محتمل"
-    entry_rect = _rounded_label(
-        draw,
-        1018,
-        positions["entry"] - 17,
-        f"{entry_prefix} {_fmt_price(entry)}",
-        TRADE_FONT,
-        (235, 240, 246, 245),
-        WHITE,
-        text_fill=(10, 17, 27, 255),
-        padding_x=9,
-        padding_y=4,
-        align_right=True,
-    )
-    if positions["entry"] != entry_y:
-        draw.line((right, entry_y, entry_rect[0], positions["entry"]), fill=WHITE, width=1)
+    entry_rect = _rounded_label(draw, right - 5, positions["entry"] - 18, "منطقة الدخول", F_TRADE, fill=(250, 251, 253, 255), outline=(140, 151, 169, 255), text_fill=TEXT, align_right=True)
+    _rounded_label(draw, right + 95, positions["entry"] - 18, _fmt_price(entry), F_TRADE_LATIN, fill=(250, 251, 253, 255), outline=(140, 151, 169, 255), text_fill=TEXT, rtl=False, align_right=True)
+    if abs(positions["entry"] - entry_y) > 3:
+        draw.line((right, entry_y, entry_rect[0], positions["entry"]), fill=(130, 142, 159, 255), width=1)
 
     if stop is not None and stop_y is not None:
-        stop_rect = _rounded_label(
-            draw,
-            1018,
-            positions["stop"] - 17,
-            f"وقف {_fmt_price(stop)}",
-            TRADE_FONT,
-            (126, 25, 34, 245),
-            RED,
-            padding_x=9,
-            padding_y=4,
-            align_right=True,
-        )
-        if positions["stop"] != stop_y:
-            draw.line((right, stop_y, stop_rect[0], positions["stop"]), fill=RED, width=1)
+        _draw_rtl(draw, (right - 76, stop_y - 4), "وقف الخسارة", F_SMALL_BOLD, RED)
+        _rounded_label(draw, right + 92, positions["stop"] - 18, _fmt_price(stop), F_TRADE_LATIN, fill=WHITE, outline=RED, text_fill=RED, rtl=False, align_right=True)
 
-    for index, (target, y) in enumerate(zip(targets, target_ys), start=1):
-        key = f"tp{index}"
-        rect = _rounded_label(
-            draw,
-            1018,
-            positions[key] - 17,
-            f"TP{index}  {_fmt_price(target)}",
-            TRADE_FONT,
-            (7, 82, 45, 244),
-            GREEN,
-            padding_x=9,
-            padding_y=4,
-            align_right=True,
-            rtl=False,
-        )
-        if positions[key] != y:
-            draw.line((right, y, rect[0], positions[key]), fill=GREEN, width=1)
+    for i, (target, exact_y) in enumerate(zip(targets, target_ys), start=1):
+        _rounded_label(draw, right - 7, positions[f"tp{i}"] - 18, f"TP{i}:  {_fmt_price(target)}", F_TRADE_LATIN, fill=(250, 255, 252, 255), outline=GREEN, text_fill=GREEN_DARK, rtl=False, align_right=True)
+        if abs(positions[f"tp{i}"] - exact_y) > 3:
+            draw.line((right, exact_y, right - 12, positions[f"tp{i}"]), fill=GREEN, width=1)
 
-    probability = int(analysis.get("trade_probability") or 50)
-    current_price = _number(analysis.get("current_price"))
-    start_price = entry if entry is not None else current_price
-    if start_price is None:
-        start_price = (price_min + price_max) / 2
-    start_y = _price_y(start_price, price_min, price_max)
+    end_y = target_ys[-1] if target_ys else (entry_y - 180 if direction == "صاعد" else entry_y + 180)
+    end_y = max(top + 35, min(bottom - 35, end_y))
+    _draw_arrow(draw, (zone_left + 28, entry_y), (zone_left + 145, end_y), color)
 
-    end_y = target_ys[-1] if target_ys else (start_y - 180 if direction == "صاعد" else start_y + 180)
-    end_y = max(top + 25, min(bottom - 25, end_y))
+    # خط البنية/إعادة الاختبار الرفيع.
+    draw.line((zone_left - 42, min(bottom - 8, entry_y + 180), zone_left + 65, entry_y - 45), fill=BLUE, width=2)
 
-    arrow_start_x = zone_left + 32
-    arrow_end_x = min(right - 42, zone_left + int((right - zone_left) * 0.48))
-    arrow_mid_x = min(right - 60, zone_left + int((right - zone_left) * 0.28))
-    arrow_mid_y = int(start_y + (end_y - start_y) * 0.48)
 
-    arrow_width = 7
-    if probability >= 85:
-        arrow_width = 17
-    elif probability >= 75:
-        arrow_width = 14
-    elif probability >= 65:
-        arrow_width = 12
-    elif probability >= 55:
-        arrow_width = 10
+def _parse_dt(value: Any) -> datetime | None:
+    text = str(value or "").strip().replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        pass
+    if len(text) >= 5 and text[2:3] == ":":
+        try:
+            return datetime(2000, 1, 1, int(text[:2]), int(text[3:5]))
+        except ValueError:
+            return None
+    return None
 
-    arrow_points = [
-        (arrow_start_x, start_y),
-        (arrow_mid_x, arrow_mid_y),
-        (arrow_end_x, end_y),
+
+def _draw_sessions(draw: ImageDraw.ImageDraw, candles: list[dict[str, Any]], slot: float) -> None:
+    if not candles:
+        return
+    left, top, right, bottom = CHART
+    candle_right = int(left + slot * len(candles))
+    sessions = [
+        ("London Session", 7, 12, BLUE, (242, 247, 255, 255)),
+        ("New York Session", 13, 17, GREEN, (244, 253, 247, 255)),
     ]
-    arrow_layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    arrow_draw = ImageDraw.Draw(arrow_layer)
-    # Dark outline keeps the arrow readable inside both green and red zones.
-    _arrow(
-        arrow_draw,
-        arrow_points,
-        (0, 0, 0, 230),
-        width=arrow_width + 6,
-        probability=95,
-    )
-    _arrow(
-        arrow_draw,
-        arrow_points,
-        color,
-        width=arrow_width,
-        probability=probability,
-    )
-    composed_arrow = Image.alpha_composite(image, arrow_layer)
-    image.paste(composed_arrow)
-
-    state = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(
-        str(analysis.get("draw_mode")), "مشروط"
-    )
-    side = str(analysis.get("trade_side") or ("شراء" if direction == "صاعد" else "بيع"))
-    _rounded_label(
-        draw,
-        left + 12,
-        top + 12,
-        f"{side} {probability}% - {state}",
-        TRADE_FONT,
-        BLACK_GLASS,
-        color,
-        padding_x=11,
-        padding_y=5,
-    )
+    drew = False
+    for label, start_hour, end_hour, color, fill in sessions:
+        indexes = []
+        for i, candle in enumerate(candles):
+            dt = _parse_dt(candle.get("time"))
+            if dt is not None and start_hour <= dt.hour < end_hour:
+                indexes.append(i)
+        if not indexes:
+            continue
+        x1 = int(left + slot * indexes[0])
+        x2 = int(left + slot * (indexes[-1] + 1))
+        if x2 - x1 < 70:
+            continue
+        y1, y2 = bottom + 19, bottom + 52
+        draw.rounded_rectangle((x1, y1, min(candle_right, x2), y2), radius=6, fill=fill, outline=color, width=1)
+        draw.text(((x1 + min(candle_right, x2)) // 2, (y1 + y2) // 2), label, font=F_AXIS, fill=color, anchor="mm")
+        drew = True
+    # في حال لم تتقاطع نافذة الشموع مع الجلسات، لا نضع جلسات وهمية.
+    if not drew:
+        return
 
 
 def _pattern_name(analysis: dict[str, Any]) -> str:
     name = str(analysis.get("pattern_type") or "لا يوجد")
-    if name == "قمتان":
-        return "نموذج M"
-    if name == "قاعان":
-        return "نموذج W"
-    return name
+    return {"قمتان": "نموذج M", "قاعان": "نموذج W"}.get(name, name)
 
 
-def _note_row(
-    draw: ImageDraw.ImageDraw,
-    y: int,
-    label: str,
-    value: str,
-    dot_color,
-) -> None:
+def _note_row(draw: ImageDraw.ImageDraw, y: int, label: str, value: str, dot_color) -> None:
     left, top, right, bottom = NOTES
-    draw.ellipse((right - 37, y + 8, right - 23, y + 22), fill=dot_color)
-    label_text = _rtl(label)
-    label_box = draw.textbbox((0, 0), label_text, font=NOTE_BOLD)
-    label_width = label_box[2] - label_box[0]
-    draw.text((right - 50, y), label_text, font=NOTE_BOLD, fill=GRAY, anchor="ra")
-    max_value_width = right - left - 240
-    fitted = _fit_text(draw, value, NOTE_FONT, max_value_width)
-    draw.text(
-        (right - 64 - label_width, y),
-        _rtl(fitted),
-        font=NOTE_FONT,
-        fill=WHITE,
-        anchor="ra",
-    )
-    draw.line((left + 30, y + 44, right - 30, y + 44), fill=(76, 91, 111, 70), width=1)
+    draw.ellipse((right - 48, y + 8, right - 32, y + 24), fill=dot_color)
+    _draw_rtl(draw, (right - 64, y + 1), label, F_NOTE_BOLD, NAVY)
+    label_width = _text_width(draw, label, F_NOTE_BOLD)
+    max_width = right - left - 280
+    fitted = _fit_text(draw, value, F_NOTE_MIXED, max_width)
+    _draw_rtl(draw, (right - 82 - label_width, y + 1), fitted, F_NOTE_MIXED, TEXT)
+    draw.line((left + 28, y + 48, right - 28, y + 48), fill=BORDER, width=1)
 
 
 def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     left, top, right, bottom = NOTES
-    draw.rounded_rectangle(NOTES, radius=24, fill=PANEL, outline=(GOLD[0], GOLD[1], GOLD[2], 190), width=2)
-    _draw_rtl(draw, (right - 30, top + 31), "ملاحظات التحليل", NOTE_TITLE, GOLD)
-    draw.line((left + 28, top + 82, right - 28, top + 82), fill=(GOLD[0], GOLD[1], GOLD[2], 110), width=2)
+    draw.rounded_rectangle(NOTES, radius=20, fill=WHITE, outline=BORDER, width=1)
+    _draw_rtl(draw, (right - 72, top + 38), "ملاحظات التحليل", F_NOTE_TITLE, NAVY)
+    # أيقونة clipboard مبسطة.
+    draw.rounded_rectangle((right - 47, top + 20, right - 19, top + 53), radius=4, outline=MUTED, width=2)
+    draw.rounded_rectangle((right - 41, top + 15, right - 25, top + 24), radius=3, outline=MUTED, width=2)
+    draw.line((left + 24, top + 70, right - 24, top + 70), fill=BORDER, width=1)
 
     direction = str(analysis.get("direction") or "غير واضح")
     probability = int(analysis.get("trade_probability") or 50)
     frame_directions = analysis.get("frame_directions") or {}
-    arrow_by_direction = {
-        "صاعد": "↑",
-        "هابط": "↓",
-        "عرضي": "↔",
-        "غير واضح": "?",
-    }
+    arrows = {"صاعد": "↑", "هابط": "↓", "عرضي": "↔", "غير واضح": "?"}
     frame_text = " ".join(
-        f"{frame}{arrow_by_direction.get(str((frame_directions.get(frame) or {}).get('direction')), '?')}"
-        for frame in ("H4", "H1", "M15")
+        f"{frame} {arrows.get(str((frame_directions.get(frame) or {}).get('direction')), '?')}"
+        for frame in ("M15", "H1", "H4")
         if isinstance(frame_directions, dict)
     )
     pattern = _pattern_name(analysis)
@@ -749,21 +687,13 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     stop_reason = str(analysis.get("stop_reason") or "خلف منطقة إبطال السيناريو")
     scenario = str(analysis.get("scenario") or analysis.get("note") or "مراقبة مستوى التفعيل")
 
-    pattern_value = (
-        f"{pattern} - ثقة {pattern_confidence}٪"
-        if pattern != "لا يوجد"
-        else "لا يوجد نموذج مكتمل؛ الاعتماد على البنية والمستويات"
-    )
-    entry_value = f"{_fmt_price(entry)} - {confirmation}" if entry is not None else confirmation
-    stop_value = f"{_fmt_price(stop)} - {stop_reason}" if stop is not None else stop_reason
-    target_value = " | ".join(
-        f"TP{index}: {_fmt_price(value)}"
-        for index, value in enumerate(targets, start=1)
-        if value is not None
-    )
     direction_value = f"{direction} - احتمال فني {probability}٪"
     if frame_text:
-        direction_value += f" | {frame_text}"
+        direction_value += f"  |  {frame_text}"
+    pattern_value = f"{pattern} - ثقة {pattern_confidence}٪" if pattern != "لا يوجد" else "لا يوجد نموذج مكتمل؛ الاعتماد على البنية والمستويات"
+    entry_value = f"{_fmt_price(entry)} - {confirmation}" if entry is not None else confirmation
+    stop_value = f"{_fmt_price(stop)} - {stop_reason}" if stop is not None else stop_reason
+    target_value = " | ".join(f"TP{i}: {_fmt_price(value)}" for i, value in enumerate(targets, start=1) if value is not None)
 
     rows = [
         ("الاتجاه:", direction_value, GREEN if direction == "صاعد" else RED),
@@ -771,45 +701,57 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         ("شرط الدخول:", entry_value, GREEN),
         ("وقف الخسارة:", stop_value, RED),
         ("الأهداف:", target_value, GREEN),
-        ("أقرب سيناريو:", scenario, GOLD),
+        ("أقرب سيناريو:", scenario, ORANGE),
     ]
-
-    y = top + 104
+    y = top + 83
     for label, value, color in rows:
         _note_row(draw, y, label, value, color)
-        y += 62
+        y += 52
 
-    _draw_rtl(
-        draw,
-        (right - 28, bottom - 35),
-        "هذا تحليل فني تعليمي وليس توصية استثمارية. إدارة المخاطر مسؤوليتك.",
-        FOOTER_FONT,
-        GRAY,
-    )
+    _draw_rtl(draw, (right - 28, bottom - 28), "هذا التحليل لأغراض تعليمية فقط. يرجى إدارة المخاطر قبل الدخول في أي صفقة.", F_DISCLAIMER, (145, 156, 174, 255))
+
+
+def _draw_buttons(draw: ImageDraw.ImageDraw) -> None:
+    y1, y2 = 1762, 1870
+    draw.rounded_rectangle((42, y1, 468, y2), radius=17, fill=(66, 78, 99, 255))
+    draw.rounded_rectangle((484, y1, 1038, y2), radius=17, fill=GREEN)
+    _draw_rtl(draw, (300, (y1 + y2) // 2), "مشاركة", F_BUTTON, WHITE, anchor="mm")
+    _draw_rtl(draw, (770, (y1 + y2) // 2), "حفظ في الاستديو", F_BUTTON, WHITE, anchor="mm")
+    # رموز مشاركة وحفظ بسيطة.
+    draw.line((213, 1819, 213, 1788), fill=WHITE, width=3)
+    draw.line((200, 1800, 213, 1787, 226, 1800), fill=WHITE, width=3)
+    draw.rectangle((194, 1807, 232, 1840), outline=WHITE, width=3)
+    draw.line((914, 1788, 914, 1825), fill=WHITE, width=3)
+    draw.line((901, 1813, 914, 1826, 927, 1813), fill=WHITE, width=3)
+    draw.line((896, 1837, 932, 1837), fill=WHITE, width=3)
 
 
 def render_result(analysis: dict[str, Any]) -> bytes:
-    image = Image.new("RGBA", (WIDTH, HEIGHT), BG_TOP)
+    image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(image)
 
-    for y in range(HEIGHT):
-        ratio = y / max(1, HEIGHT - 1)
-        color = tuple(
-            int(BG_TOP[index] + (BG_BOTTOM[index] - BG_TOP[index]) * ratio)
-            for index in range(3)
-        ) + (255,)
-        draw.line((0, y, WIDTH, y), fill=color)
+    _draw_status(draw)
+    _shadow_card(image, MAIN_CARD, 24, 6)
+    draw = ImageDraw.Draw(image)
+    _draw_header(draw, analysis)
+    _draw_signal(draw, analysis)
 
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
-    _draw_header(draw, analysis)
     _draw_grid(draw, price_min, price_max)
+    count = max(1, len(candles))
+    candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)
+    slot = (candle_right - CHART[0]) / count
+    _draw_market_zones(image, draw, candles, slot, candle_right, price_min, price_max)
+    draw = ImageDraw.Draw(image)
     _draw_candles(draw, candles, price_min, price_max)
     _draw_levels(draw, analysis, price_min, price_max)
-    _draw_pattern(draw, analysis)
-    _draw_trade(image, draw, analysis, price_min, price_max)
+    _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
+    draw = ImageDraw.Draw(image)
+    _draw_sessions(draw, candles, slot)
     _draw_notes(draw, analysis)
+    _draw_buttons(draw)
 
     output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG", quality=96, optimize=True)
+    image.convert("RGB").save(output, format="PNG", optimize=True)
     return output.getvalue()

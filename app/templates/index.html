@@ -25,7 +25,7 @@
             <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
           </span>
           <strong>ارفع صورة الشارت</strong>
-          <small>ارفع شارت الذهب XAUUSD على فريم خمس دقائق، مع إظهار آخر ساعتين ومحور الأسعار</small>
+          <small>ارفع شارت الذهب XAUUSD على فريم خمس دقائق، مع إظهار السعر الحالي ومحور الأسعار بوضوح</small>
           <span class="primary-button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
             اختيار صورة
@@ -76,7 +76,7 @@
 
     <section class="card notice">
       <span class="notice-icon">💡</span>
-      <p>يقرأ التطبيق آخر ساعتين من الذهب <b>XAUUSD</b> على فريم <b>خمس دقائق</b>، ثم يعيد رسم 24 شمعة مع الدعم والمقاومة والسيناريو والأهداف.</p>
+      <p>يأخذ التطبيق السعر الحالي من صورة شارت <b>XAUUSD</b>، ويجلب الشموع والتوقيتات والمستويات من بيانات السوق، ثم يرسم السيناريو والأهداف بصورة واضحة.</p>
     </section>
 
     {% if error %}
@@ -86,7 +86,7 @@
     {% if result %}
     <section class="card result-card" id="result-card">
       <div class="result-heading"><div><span>اكتمل التحليل</span><h3>تحليل SaleeM</h3></div><span class="done-mark">✓</span></div>
-      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه لآخر ساعتين مع السيناريو الفني">
+      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه من بيانات السوق مع السيناريو الفني">
       <div class="result-actions">
         <button class="result-action save-button" id="save-image-button" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 18v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>

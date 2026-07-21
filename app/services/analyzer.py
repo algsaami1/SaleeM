@@ -8,6 +8,7 @@ import random
 import statistics
 import time
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -80,7 +81,7 @@ ANALYSIS_SCHEMA = {
     "additionalProperties": False,
     "properties": {
         "chart_readable": {"type": "boolean"},
-        "candles": {"type": "array", "items": CANDLE, "minItems": 0, "maxItems": 24},
+        "candles": {"type": "array", "items": CANDLE, "minItems": 0, "maxItems": 60},
         "direction": {"type": "string", "enum": ["صاعد", "هابط", "عرضي", "غير واضح"]},
         "buy_probability": {"type": "integer", "minimum": 5, "maximum": 95},
         "sell_probability": {"type": "integer", "minimum": 5, "maximum": 95},
@@ -144,7 +145,24 @@ def _number(value: Any) -> float | None:
 
 
 
+def _normalize_candle_time(value: Any, index: int) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return f"شمعة {index + 1}"
+    normalized = text.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.isoformat()
+    except ValueError:
+        return text[:32]
+
+
 def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
+    """تنظيف شموع السوق دون فرض عدد ثابت.
+
+    الشموع المعروضة تأتي من مزود السوق، لذلك يقبل المحرك أي نافذة مفيدة
+    متاحة ويكتفي بحد أعلى لحماية الرسم من الازدحام.
+    """
     candles: list[dict[str, Any]] = []
     for index, item in enumerate(raw if isinstance(raw, list) else []):
         if not isinstance(item, dict):
@@ -159,7 +177,7 @@ def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
             continue
         candles.append(
             {
-                "time": str(item.get("time") or f"-{(23 - index) * 5}m")[:8],
+                "time": _normalize_candle_time(item.get("time"), index),
                 "open": round(open_, 2),
                 "high": round(true_high, 2),
                 "low": round(true_low, 2),
@@ -167,23 +185,22 @@ def _normalize_candles(raw: Any) -> list[dict[str, Any]]:
             }
         )
 
-    candles = candles[-24:]
-    if len(candles) != 24:
-        raise RuntimeError("يجب أن تظهر 24 شمعة كاملة لآخر ساعتين على فريم خمس دقائق.")
+    candles = candles[-60:]
+    if len(candles) < 6:
+        raise RuntimeError("بيانات السوق المتاحة لا تكفي لرسم شارت واضح حاليًا.")
 
     ranges = [max(0.01, c["high"] - c["low"]) for c in candles]
     median_range = statistics.median(ranges)
     if median_range <= 0:
-        raise RuntimeError("تعذر معايرة حركة الشموع من الصورة.")
+        raise RuntimeError("تعذر معايرة حركة شموع السوق.")
 
-    # رفض الأخطاء الكبيرة الناتجة عن قراءة رقم من المحور على أنه شمعة.
-    for index, candle in enumerate(candles):
-        if candle["high"] - candle["low"] > median_range * 8:
-            raise RuntimeError("توجد شمعة غير مقروءة بدقة. قرّب الشارت وأظهر محور السعر.")
-        if index:
-            previous_close = candles[index - 1]["close"]
-            if abs(candle["open"] - previous_close) > median_range * 6:
-                raise RuntimeError("تعذر تتبع تسلسل الشموع بسبب عدم وضوح الصورة.")
+    # تجاهل شمعة شاذة بدل إسقاط التحليل بالكامل إذا كانت بقية بيانات المزود سليمة.
+    filtered: list[dict[str, Any]] = []
+    for candle in candles:
+        if candle["high"] - candle["low"] <= median_range * 12:
+            filtered.append(candle)
+    if len(filtered) >= 6:
+        candles = filtered
 
     return candles
 
@@ -563,7 +580,9 @@ def _validate_analysis(
     if data.get("chart_readable") is False:
         raise RuntimeError("الصورة أو محور الأسعار غير واضحين بما يكفي للتحليل.")
     candles = _normalize_candles(data.get("candles"))
-    current = float(candles[-1]["close"])
+    market_close = float(candles[-1]["close"])
+    image_current = _number(data.get("current_price"))
+    current = float(image_current) if image_current is not None else market_close
     buy, sell = _normalize_probabilities(data)
     direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
     probability = buy if direction == "صاعد" else sell
@@ -592,6 +611,8 @@ def _validate_analysis(
             "chart_readable": True,
             "candles": candles,
             "current_price": round(current, 2),
+            "current_price_source": "chart_image" if image_current is not None else "market_fallback",
+            "market_last_close": round(market_close, 2),
             "buy_probability": buy,
             "sell_probability": sell,
             "direction": direction,
@@ -612,6 +633,7 @@ def _validate_analysis(
             "note": " ".join(str(data.get("note") or "").split())[:90],
             "market_data_source": (market_summary or {}).get("source"),
             "market_data_fetched_at": (market_summary or {}).get("fetched_at"),
+            "market_latest_candle_time": (market_summary or {}).get("latest_candle_time"),
             "market_direction": (market_summary or {}).get("direction", "غير واضح"),
             "frame_alignment": int((market_summary or {}).get("alignment") or 0),
             "frame_directions": (market_summary or {}).get("frames", {}),
@@ -634,11 +656,11 @@ def _analyze(path: Path) -> dict[str, Any]:
             market_data,
             candles_per_frame=context_candles,
         )
-        # صورة M5 هي المرجع التنفيذي، لذلك نكتفي بآخر 24 شمعة خارجية له
-        # ونحتفظ بسياق أكبر قليلًا للفريمات العليا فقط.
+        # نرسل نافذة سوق مرنة لـ M5؛ الرسم النهائي سيستخدم بيانات المزود نفسها.
         market_frames = market_context.get("frames", {})
         if isinstance(market_frames, dict) and isinstance(market_frames.get("M5"), list):
-            market_frames["M5"] = market_frames["M5"][-24:]
+            prompt_m5_count = max(20, min(60, int(os.getenv("PROMPT_M5_CANDLES", "40"))))
+            market_frames["M5"] = market_frames["M5"][-prompt_m5_count:]
         market_summary = _build_market_summary(market_data)
     except MarketDataError as exc:
         raise RuntimeError(f"تعذر جلب بيانات الفريمات: {exc}") from exc
@@ -662,16 +684,16 @@ def _analyze(path: Path) -> dict[str, Any]:
 قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
 إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
 
-اقرأ صورة الشارت المرفوعة، ثم أعد بناء آخر ساعتين فقط: آخر 24 شمعة M5 من أقصى يمين الشارت، مرتبة من الأقدم إلى الأحدث.
-استخرج OHLC لكل شمعة اعتمادًا على جسم الشمعة وذيولها ومحور الأسعار. استخدم السعر الحالي من إغلاق آخر شمعة.
-إذا كانت بعض القيم غير مطبوعة حرفيًا، قدّرها بدقة من محور السعر، لكن لا تغيّر ترتيب واتجاه الشموع.
-اجعل chart_readable=false فقط إذا كانت الشموع أو محور الأسعار غير قابلين للقراءة إطلاقًا، وفي هذه الحالة أعد candles=[] ولا تخترع شموعًا.
+اقرأ صورة الشارت المرفوعة لاستخراج السعر الحالي الظاهر على محور السعر وفهم موضع الحركة فقط.
+لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
+السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
+اجعل chart_readable=false فقط إذا تعذر قراءة السعر الحالي أو كانت الصورة غير صالحة للتحليل إطلاقًا.
 
 التحليل المطلوب:
 - اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
 - BUY وSELL مجموعهما 100، ولا تستخدم 0 أو 100.
 - عند ضعف التأكيد، لا تقل لا توجد صفقة؛ أعطِ أقرب نقطة تفعيل مشروطة مع اتجاه متوقع.
-- حدد أقرب دعمين وأقرب مقاومتين مهمين خلال آخر 24 شمعة.
+- حدد أقرب دعمين وأقرب مقاومتين مهمين اعتمادًا على بيانات السوق المرفقة وموضع السعر الظاهر في الصورة.
 - strength من 0 إلى 100 حسب عدد اللمسات، قوة الرفض، حداثة المستوى، وتوافقه مع بنية السوق.
 - touches عدد اللمسات أو الاختبارات الواضحة.
 - اجمع المستويات المتقاربة، ولا تعد المستوى نفسه مرتين.
@@ -684,7 +706,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها كصورة جديدة: 24 شمعة، دعم ومقاومة، سهم واحد، دخول، وقف، ثلاثة أهداف، وملاحظات أسفل الشارت.
+النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق: دعم ومقاومة، Order Block، FVG، جلسات السوق، سهم واحد، منطقة دخول مدمجة، وقف، ثلاثة أهداف، وملاحظات أسفل الشارت.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
@@ -778,10 +800,34 @@ def _analyze(path: Path) -> dict[str, Any]:
         raise RuntimeError(
             f"خطأ خدمة التحليل ({response.status_code}): {detail}."
         )
-    return _validate_analysis(
-        json.loads(_text(response.json())),
-        market_summary=market_summary,
-    )
+    model_data = json.loads(_text(response.json()))
+
+    # السعر الحالي يؤخذ من صورة المستخدم، بينما الشموع والتوقيتات من مزود السوق.
+    image_current = _number(model_data.get("current_price"))
+    market_m5 = []
+    raw_frames = market_data.get("frames") if isinstance(market_data, dict) else None
+    if isinstance(raw_frames, dict) and isinstance(raw_frames.get("M5"), list):
+        display_count = max(12, min(48, int(os.getenv("CHART_CANDLE_COUNT", "30"))))
+        market_m5 = raw_frames["M5"][-display_count:]
+
+    normalized_market = _normalize_candles(market_m5)
+    market_last = float(normalized_market[-1]["close"])
+    offset = (float(image_current) - market_last) if image_current is not None else 0.0
+
+    # مواءمة سعر مزود السوق مع سعر وسيط المستخدم دون تغيير شكل الحركة.
+    if abs(offset) > 0.001:
+        for candle in normalized_market:
+            for key_name in ("open", "high", "low", "close"):
+                candle[key_name] = round(float(candle[key_name]) + offset, 2)
+
+    model_data["candles"] = normalized_market
+    model_data["current_price"] = image_current if image_current is not None else normalized_market[-1]["close"]
+    # الدعم والمقاومة في الصورة النهائية تُشتق من شموع مزود السوق بعد المواءمة.
+    model_data["support_levels"] = []
+    model_data["resistance_levels"] = []
+    model_data["market_price_offset"] = round(offset, 3)
+
+    return _validate_analysis(model_data, market_summary=market_summary)
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
@@ -791,6 +837,6 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         **analysis,
         "symbol": "XAUUSD",
         "timeframe": "M5",
-        "window": "آخر ساعتين",
+        "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
     }

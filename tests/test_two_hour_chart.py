@@ -49,9 +49,9 @@ def test_strength_width_matches_spec():
     assert _strength_width(60) == 4
 
 
-def test_validation_keeps_24_candles_and_three_targets():
+def test_validation_accepts_flexible_candles_and_three_targets():
     result = _validate_analysis(sample_analysis())
-    assert len(result["candles"]) == 24
+    assert len(result["candles"]) == len(sample_analysis()["candles"])
     assert result["target_1"] < result["target_2"] < result["target_3"]
     assert len(result["support_levels"]) <= 2
     assert len(result["resistance_levels"]) <= 2

@@ -24,7 +24,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="2.5.1",
+    version="2.8.0",
     description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
@@ -63,13 +63,13 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "2.5.1",
+        "version": "2.8.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
-        "window": "2h / 24 candles",
+        "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-fixed-poster-v2.1-close-stop",
+        "renderer": "saleem-white-realistic-v2.8",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
@@ -81,7 +81,7 @@ async def health():
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
-        "title": "تحليل SaleeM - XAUUSD - M5 - آخر ساعتين",
+        "title": "تحليل SaleeM - XAUUSD - M5",
     }
 
 
@@ -174,8 +174,8 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
             error_message = technical_message
         else:
             error_message = (
-                "تعذر إنشاء التحليل بدقة. اعرض 24 شمعة كاملة على M5 "
-                "مع محور الأسعار واضحًا، ثم حاول مرة أخرى."
+                "تعذر إنشاء التحليل بدقة. تأكد من ظهور السعر الحالي ومحور الأسعار "
+                "بوضوح في صورة شارت M5، ثم حاول مرة أخرى."
             )
         return templates.TemplateResponse(
             "index.html",
