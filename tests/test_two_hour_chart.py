@@ -5,7 +5,7 @@ from app.services.analyzer import _validate_analysis
 def sample_analysis():
     candles = []
     price = 4000.0
-    for index in range(24):
+    for index in range(30):
         open_ = price
         close = price + (0.7 if index % 3 != 0 else -0.45)
         high = max(open_, close) + 0.35

@@ -40,11 +40,11 @@ GOLD = (245, 158, 11, 255)
 CREAM = (244, 194, 91, 30)
 ORANGE = (249, 115, 22, 255)
 
-MAIN_CARD = (24, 150, 1056, 1892)
+MAIN_CARD = (24, 150, 1056, 1868)
 CHART_CARD = (40, 505, 1040, 1320)
 CHART = (72, 555, 912, 1194)
 PRICE_AXIS_X = 934
-NOTES = (40, 1338, 1040, 1738)
+NOTES = (40, 1338, 1040, 1844)
 
 _FONT_CACHE: dict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
@@ -362,10 +362,10 @@ def _draw_signal(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     draw.text((x + 188, y + 33), f"{probability}%", font=F_PERCENT, fill=color, anchor="mm")
 
     state = str(analysis.get("draw_mode") or "conditional")
-    state_text = {"confirmed": "CONFIRMED", "conditional": "CONDITIONAL", "watch": "WATCH"}.get(state, "CONDITIONAL")
-    state_w = 157 if state_text == "CONDITIONAL" else 145
+    state_text = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مشروط")
+    state_w = max(126, _text_width(draw, state_text, F_CARD, rtl=True) + 44)
     draw.rounded_rectangle((x + 273, y + 9, x + 273 + state_w, y + 57), radius=12, fill=WHITE, outline=color, width=2)
-    draw.text((x + 273 + state_w // 2, y + 33), state_text, font=F_STATUS, fill=dark, anchor="mm")
+    draw.text((x + 273 + state_w // 2, y + 33), _rtl(state_text), font=F_CARD, fill=dark, anchor="mm")
 
 
 def _draw_grid(draw: ImageDraw.ImageDraw, price_min: float, price_max: float) -> None:
@@ -494,7 +494,7 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
             if key == "resistance_levels":
                 _rounded_label(draw, left - 34, y - 17, _fmt_price(price), F_LEVEL, fill=color, outline=color, text_fill=WHITE, rtl=False)
                 _rounded_label(draw, left + 53, y - 17, f"{name} {rank}", F_LEVEL, fill=WHITE, outline=color, text_fill=TEXT)
-                draw.text((right + 13, y), _fmt_price(price), font=F_LEVEL, fill=color, anchor="lm")
+                _rounded_label(draw, right + 94, y - 17, _fmt_price(price), F_TRADE_LATIN, fill=WHITE, outline=color, text_fill=color, rtl=False, align_right=True)
             else:
                 _rounded_label(draw, left - 24, y - 17, f"{name} {_strength_name(strength)}  {_fmt_price(price)}", F_LEVEL, fill=WHITE, outline=color, text_fill=TEXT)
 
@@ -552,17 +552,22 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     ld = ImageDraw.Draw(layer)
     if target_ys:
         far_target_y = target_ys[-1]
-        ld.rounded_rectangle((zone_left, min(entry_y, far_target_y), right, max(entry_y, far_target_y)), radius=5, fill=GREEN_FILL, outline=(17, 183, 94, 145), width=2)
+        ld.rounded_rectangle((zone_left, min(entry_y, far_target_y), right, max(entry_y, far_target_y)), radius=5, fill=(17, 183, 94, 44), outline=(17, 183, 94, 145), width=2)
     if stop_y is not None:
-        ld.rounded_rectangle((zone_left, min(entry_y, stop_y), right, max(entry_y, stop_y)), radius=5, fill=RED_FILL, outline=(245, 63, 70, 135), width=2)
+        ld.rounded_rectangle((zone_left, min(entry_y, stop_y), right, max(entry_y, stop_y)), radius=5, fill=(245, 63, 70, 42), outline=(245, 63, 70, 135), width=2)
 
-    # شريط دمج مستقل حول الدخول يربط المنطقة الخضراء والحمراء.
+    # شريط دمج واضح حول الدخول يربط المنطقة الخضراء والحمراء.
     candle_ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in analysis.get("candles") or []]
     atr = median(candle_ranges) if candle_ranges else 1.0
-    band = max(0.16, min(0.55, atr * 0.18))
+    band = max(0.18, min(0.65, atr * 0.22))
     band_top = _price_y(entry + band, price_min, price_max)
     band_bottom = _price_y(entry - band, price_min, price_max)
-    ld.rounded_rectangle((zone_left, min(band_top, band_bottom), right, max(band_top, band_bottom)), radius=5, fill=(255, 255, 255, 145), outline=(128, 140, 160, 150), width=1)
+    blend_top = min(band_top, band_bottom)
+    blend_bottom = max(band_top, band_bottom)
+    blend_mid = (blend_top + blend_bottom) // 2
+    ld.rounded_rectangle((zone_left, blend_top, right, blend_mid), radius=5, fill=(245, 63, 70, 48))
+    ld.rounded_rectangle((zone_left, blend_mid, right, blend_bottom), radius=5, fill=(17, 183, 94, 48))
+    ld.rounded_rectangle((zone_left, blend_top, right, blend_bottom), radius=5, outline=(128, 140, 160, 150), width=1)
     image.alpha_composite(layer)
 
     _dash_line(draw, (left, entry_y), (right, entry_y), (113, 132, 161, 210), width=2)
@@ -614,34 +619,22 @@ def _parse_dt(value: Any) -> datetime | None:
 
 
 def _draw_sessions(draw: ImageDraw.ImageDraw, candles: list[dict[str, Any]], slot: float) -> None:
-    if not candles:
-        return
     left, top, right, bottom = CHART
-    candle_right = int(left + slot * len(candles))
+    y1, y2 = bottom + 18, bottom + 60
+    gap = 10
+    total_width = right - left
+    box_w = int((total_width - gap * 2) / 3)
     sessions = [
-        ("London Session", 7, 12, BLUE, (242, 247, 255, 255)),
-        ("New York Session", 13, 17, GREEN, (244, 253, 247, 255)),
+        ("Asian Session", "17:00 - 01:00", (237, 228, 197, 255), (255, 249, 234, 255)),
+        ("London Session", "13:00 - 17:00", BLUE, (242, 247, 255, 255)),
+        ("New York Session", "17:00 - 22:00", (126, 92, 235, 255), (246, 241, 255, 255)),
     ]
-    drew = False
-    for label, start_hour, end_hour, color, fill in sessions:
-        indexes = []
-        for i, candle in enumerate(candles):
-            dt = _parse_dt(candle.get("time"))
-            if dt is not None and start_hour <= dt.hour < end_hour:
-                indexes.append(i)
-        if not indexes:
-            continue
-        x1 = int(left + slot * indexes[0])
-        x2 = int(left + slot * (indexes[-1] + 1))
-        if x2 - x1 < 70:
-            continue
-        y1, y2 = bottom + 19, bottom + 52
-        draw.rounded_rectangle((x1, y1, min(candle_right, x2), y2), radius=6, fill=fill, outline=color, width=1)
-        draw.text(((x1 + min(candle_right, x2)) // 2, (y1 + y2) // 2), label, font=F_AXIS, fill=color, anchor="mm")
-        drew = True
-    # في حال لم تتقاطع نافذة الشموع مع الجلسات، لا نضع جلسات وهمية.
-    if not drew:
-        return
+    for idx, (label, timing, color, fill) in enumerate(sessions):
+        x1 = left + idx * (box_w + gap)
+        x2 = x1 + box_w
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=7, fill=fill, outline=color, width=1)
+        draw.text(((x1 + x2) // 2, y1 + 13), label, font=F_AXIS, fill=color, anchor="mm")
+        draw.text(((x1 + x2) // 2, y1 + 31), timing, font=F_AXIS, fill=color, anchor="mm")
 
 
 def _pattern_name(analysis: dict[str, Any]) -> str:
@@ -652,22 +645,24 @@ def _pattern_name(analysis: dict[str, Any]) -> str:
 def _note_row(draw: ImageDraw.ImageDraw, y: int, label: str, value: str, dot_color) -> None:
     left, top, right, bottom = NOTES
     draw.ellipse((right - 48, y + 8, right - 32, y + 24), fill=dot_color)
-    _draw_rtl(draw, (right - 64, y + 1), label, F_NOTE_BOLD, NAVY)
+    _draw_rtl(draw, (right - 64, y + 1), label, F_NOTE_BOLD, WHITE)
     label_width = _text_width(draw, label, F_NOTE_BOLD)
     max_width = right - left - 280
     fitted = _fit_text(draw, value, F_NOTE_MIXED, max_width)
-    _draw_rtl(draw, (right - 82 - label_width, y + 1), fitted, F_NOTE_MIXED, TEXT)
-    draw.line((left + 28, y + 48, right - 28, y + 48), fill=BORDER, width=1)
+    _draw_rtl(draw, (right - 82 - label_width, y + 1), fitted, F_NOTE_MIXED, (232, 238, 249, 255))
+    draw.line((left + 28, y + 48, right - 28, y + 48), fill=(56, 78, 114, 255), width=1)
 
 
 def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     left, top, right, bottom = NOTES
-    draw.rounded_rectangle(NOTES, radius=20, fill=WHITE, outline=BORDER, width=1)
-    _draw_rtl(draw, (right - 72, top + 38), "ملاحظات التحليل", F_NOTE_TITLE, NAVY)
+    note_fill = (8, 25, 58, 255)
+    note_border = (224, 170, 52, 255)
+    draw.rounded_rectangle(NOTES, radius=20, fill=note_fill, outline=note_border, width=2)
+    _draw_rtl(draw, (right - 72, top + 38), "ملاحظات التحليل", F_NOTE_TITLE, (245, 184, 48, 255))
     # أيقونة clipboard مبسطة.
-    draw.rounded_rectangle((right - 47, top + 20, right - 19, top + 53), radius=4, outline=MUTED, width=2)
-    draw.rounded_rectangle((right - 41, top + 15, right - 25, top + 24), radius=3, outline=MUTED, width=2)
-    draw.line((left + 24, top + 70, right - 24, top + 70), fill=BORDER, width=1)
+    draw.rounded_rectangle((right - 47, top + 20, right - 19, top + 53), radius=4, outline=note_border, width=2)
+    draw.rounded_rectangle((right - 41, top + 15, right - 25, top + 24), radius=3, outline=note_border, width=2)
+    draw.line((left + 24, top + 70, right - 24, top + 70), fill=note_border, width=1)
 
     direction = str(analysis.get("direction") or "غير واضح")
     probability = int(analysis.get("trade_probability") or 50)
@@ -708,7 +703,7 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         _note_row(draw, y, label, value, color)
         y += 52
 
-    _draw_rtl(draw, (right - 28, bottom - 28), "هذا التحليل لأغراض تعليمية فقط. يرجى إدارة المخاطر قبل الدخول في أي صفقة.", F_DISCLAIMER, (145, 156, 174, 255))
+    _draw_rtl(draw, (right - 28, bottom - 28), "هذا التحليل لأغراض تعليمية فقط. يرجى إدارة المخاطر قبل الدخول في أي صفقة.", F_DISCLAIMER, (214, 221, 234, 255))
 
 
 def _draw_buttons(draw: ImageDraw.ImageDraw) -> None:
@@ -750,7 +745,6 @@ def render_result(analysis: dict[str, Any]) -> bytes:
     draw = ImageDraw.Draw(image)
     _draw_sessions(draw, candles, slot)
     _draw_notes(draw, analysis)
-    _draw_buttons(draw)
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
