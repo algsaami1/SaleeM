@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2.6.0">
+  <link rel="stylesheet" href="/static/style.css?v=2.6.1">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
@@ -39,11 +39,16 @@
 
     <section class="card processing-card" id="processing-card" hidden aria-live="polite">
       <div class="progress-column">
-        <div class="progress-ring" id="progress-ring" style="--progress:0">
+        <div class="progress-ring" id="progress-ring">
+          <svg class="progress-svg" viewBox="0 0 180 180" aria-hidden="true">
+            <circle class="progress-track" cx="90" cy="90" r="76"></circle>
+            <circle class="progress-indicator" id="progress-circle" cx="90" cy="90" r="76" pathLength="100"></circle>
+          </svg>
           <div class="progress-inner">
             <strong id="progress-value">0%</strong>
             <span>جاري المعالجة</span>
           </div>
+          <span class="progress-moving-dot" aria-hidden="true"></span>
         </div>
         <small class="eta">الوقت المتوقع: 15 - 30 ثانية</small>
       </div>
@@ -116,10 +121,10 @@
         <fieldset class="trade-fieldset">
           <legend>اختر نتيجة الصفقة المرتبطة بالتحليل السابق</legend>
           <div class="trade-result-grid" id="trade-result-grid">
-            <button type="button" class="trade-result-option success" data-result="win">نجحت الصفقة</button>
-            <button type="button" class="trade-result-option danger" data-result="loss">فشلت الصفقة</button>
-            <button type="button" class="trade-result-option neutral" data-result="no_trade">لم أدخل الصفقة</button>
-            <button type="button" class="trade-result-option neutral" data-result="open">الصفقة ما زالت مفتوحة</button>
+            <button type="button" class="trade-result-option success" data-result="win"><span class="option-icon">✓</span><span>نجحت الصفقة</span></button>
+            <button type="button" class="trade-result-option danger" data-result="loss"><span class="option-icon">×</span><span>فشلت الصفقة</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="no_trade"><span class="option-icon">−</span><span>لم أدخل الصفقة</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="open"><span class="option-icon">◷</span><span>الصفقة ما زالت مفتوحة</span></button>
           </div>
           <input id="trade-result-value" type="hidden" value="">
         </fieldset>
@@ -208,6 +213,6 @@
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=2.6.0" defer></script>
+  <script src="/static/app.js?v=2.6.1" defer></script>
 </body>
 </html>

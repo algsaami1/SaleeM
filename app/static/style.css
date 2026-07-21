@@ -37,12 +37,19 @@ button{font-family:inherit}
 .processing-card{padding:22px;display:flex;align-items:center;gap:28px}
 .processing-card[hidden]{display:none}
 .progress-column{text-align:center}
-.progress-ring{--progress:0;width:174px;height:174px;border-radius:50%;display:grid;place-items:center;position:relative;isolation:isolate;background:conic-gradient(var(--purple) calc(var(--progress)*1%),#e6f5eb 0);box-shadow:0 0 28px rgba(87,201,122,.12);transition:background .35s ease}
-.progress-ring:before{content:"";position:absolute;inset:11px;border-radius:50%;background:#fff;z-index:1}
-.progress-ring:after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1px solid rgba(87,201,122,.14);animation:ringPulse 2s ease-in-out infinite;z-index:0}
-.progress-inner{position:absolute;inset:11px;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:50%;background:#fff}
+.progress-ring{width:174px;height:174px;border-radius:50%;display:grid;place-items:center;position:relative;isolation:isolate;background:#fff;box-shadow:0 0 28px rgba(87,201,122,.14)}
+.progress-svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);overflow:visible}
+.progress-track,.progress-indicator{fill:none;stroke-width:13;stroke-linecap:round}
+.progress-track{stroke:#e6f5eb}
+.progress-indicator{stroke:var(--purple);stroke-dasharray:100;stroke-dashoffset:100;transition:stroke-dashoffset .32s linear;filter:drop-shadow(0 0 5px rgba(87,201,122,.28))}
+.progress-ring:after{content:"";position:absolute;inset:-5px;border-radius:50%;border:1px solid rgba(87,201,122,.16);animation:ringPulse 1.35s ease-in-out infinite;z-index:0}
+.progress-inner{position:absolute;inset:17px;z-index:4;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border-radius:50%;background:#fff}
 .progress-inner strong{display:block;color:#17172b!important;font-size:38px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
 .progress-inner span{font-size:11px;color:var(--muted)}
+.progress-moving-dot{position:absolute;z-index:6;top:3px;left:50%;margin-left:-5px;width:10px;height:10px;border-radius:50%;background:var(--purple);box-shadow:0 0 0 5px rgba(87,201,122,.14),0 0 12px rgba(87,201,122,.45);transform-origin:5px 84px;animation:orbitDot 1.7s linear infinite}
+.processing-card.is-running .progress-ring{animation:ringBreath 1.8s ease-in-out infinite}
+@keyframes orbitDot{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes ringBreath{0%,100%{box-shadow:0 0 22px rgba(87,201,122,.12)}50%{box-shadow:0 0 42px rgba(87,201,122,.28)}}
 .eta{display:inline-block;margin-top:13px;padding:6px 11px;border:1px solid #d7f2df;border-radius:999px;color:var(--purple);background:#f5fff8;font-size:9px;font-weight:500}
 @keyframes ringPulse{0%,100%{transform:scale(.98);opacity:.25}50%{transform:scale(1.04);opacity:.7}}
 .processing-copy{flex:1}
@@ -98,12 +105,19 @@ button{font-family:inherit}
 .trade-fieldset,.rating-fieldset{border:0;padding:0;margin:0 0 18px}
 .trade-fieldset legend,.rating-fieldset legend,.feedback-label{font-size:12px;font-weight:600;margin-bottom:10px;display:block}
 .trade-result-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.trade-result-option{appearance:none;border:1px solid #dceee2;background:#fff;border-radius:15px;padding:14px 10px;text-align:center;font-size:12px;font-weight:600;color:var(--ink);cursor:pointer;transition:.18s ease}
-.trade-result-option.success{border-color:#bfe6cc;color:#27824a;background:#f7fff9}
-.trade-result-option.danger{border-color:#f5c5c5;color:#d64a4a;background:var(--danger-soft)}
-.trade-result-option.neutral{color:var(--neutral);background:#fbfcff}
-.trade-result-option.selected{box-shadow:0 0 0 3px rgba(87,201,122,.12);transform:translateY(-1px)}
-.trade-result-option.danger.selected{box-shadow:0 0 0 3px rgba(242,92,92,.12)}
+.trade-result-option{appearance:none;border:2px solid #dceee2;background:#fff;border-radius:15px;padding:13px 10px;text-align:center;font-size:12px;font-weight:700;color:var(--ink);cursor:pointer;transition:.18s ease;display:flex;align-items:center;justify-content:center;gap:8px;position:relative}
+.trade-result-option .option-icon{width:26px;height:26px;display:grid;place-items:center;border-radius:50%;border:1px solid currentColor;font-size:16px;line-height:1;background:rgba(255,255,255,.72)}
+.trade-result-option.success{border-color:#9eddb2;color:#27824a;background:#f2fff6}
+.trade-result-option.danger{border-color:#f0aaaa;color:#d64a4a;background:var(--danger-soft)}
+.trade-result-option.neutral{border-color:#cbd2dc;color:#596579;background:#f7f9fc}
+.trade-result-option.selected{color:#fff!important;border-color:transparent!important;box-shadow:0 8px 22px rgba(40,130,74,.28),0 0 0 4px rgba(87,201,122,.20);transform:translateY(-2px) scale(1.015)}
+.trade-result-option.success.selected{background:linear-gradient(135deg,#68d98a,#38aa60)}
+.trade-result-option.danger.selected{background:linear-gradient(135deg,#ff7777,#e24444);box-shadow:0 8px 22px rgba(226,68,68,.24),0 0 0 4px rgba(242,92,92,.18)}
+.trade-result-option.neutral.selected{background:linear-gradient(135deg,#7c899e,#536075);box-shadow:0 8px 22px rgba(83,96,117,.24),0 0 0 4px rgba(83,96,117,.14)}
+.trade-result-option.selected .option-icon{background:rgba(255,255,255,.18);color:#fff;border-color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.trade-result-option.selected:after{content:"تم الاختيار";position:absolute;top:-10px;left:10px;padding:3px 7px;border-radius:999px;background:#fff;color:#27824a;border:1px solid #bfe6cc;font-size:8px;font-weight:700}
+.trade-result-option.danger.selected:after{color:#d64a4a;border-color:#f0b6b6}
+.trade-result-option.neutral.selected:after{color:#536075;border-color:#cbd2dc}
 .rating-stars{display:flex;direction:ltr;justify-content:center;gap:7px}
 .rating-star{appearance:none;border:0;background:transparent;color:#b9c8bd;font-size:38px;line-height:1;cursor:pointer;padding:3px;transition:transform .15s ease,color .15s ease}
 .rating-star:hover,.rating-star:focus-visible{transform:scale(1.1);outline:none}
@@ -205,3 +219,6 @@ button{font-family:inherit}
 }
 @media(max-width:390px){.app-shell{width:100%;padding:0 6px 18px}.features-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:360px){.result-actions{grid-template-columns:1fr}.result-action{font-size:12px}}
+
+.analyze-button:disabled,.feedback-submit:disabled{opacity:.72;cursor:wait;transform:none!important}
+.processing-error{width:100%;margin:4px 0 0;text-align:center;color:#d64a4a;font-size:11px}

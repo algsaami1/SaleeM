@@ -5,7 +5,9 @@
   const dropZone = document.getElementById('drop-zone');
   const processingCard = document.getElementById('processing-card');
   const progressRing = document.getElementById('progress-ring');
+  const progressCircle = document.getElementById('progress-circle');
   const progressValue = document.getElementById('progress-value');
+  const analyzeButton = document.getElementById('analyze-button');
   const steps = processingCard ? [...processingCard.querySelectorAll('.steps span')] : [];
   const resultImage = document.getElementById('result-image');
   const saveImageButton = document.getElementById('save-image-button');
@@ -77,9 +79,21 @@
     });
   };
 
-  form?.addEventListener('submit', (event) => {
+  const setProgress = (progress) => {
+    const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+    if (progressCircle) {
+      progressCircle.style.strokeDashoffset = String(100 - safeProgress);
+    }
+    if (progressValue) progressValue.textContent = `${Math.round(safeProgress)}%`;
+    updateProcessingSteps(safeProgress);
+  };
+
+  const wait = (milliseconds) => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+  form?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
     if (!fileInput?.files?.length) {
-      event.preventDefault();
       dropZone?.animate(
         [
           { transform: 'translateX(0)' },
@@ -92,23 +106,65 @@
       return;
     }
 
-    if (!processingCard || !progressRing || !progressValue) return;
+    if (!processingCard || !progressValue) {
+      form.submit();
+      return;
+    }
+
     processingCard.hidden = false;
+    processingCard.classList.add('is-running');
+    if (analyzeButton) {
+      analyzeButton.disabled = true;
+      analyzeButton.textContent = 'جاري التحليل...';
+    }
+
+    setProgress(1);
+    // نمنح Safari إطارين للرسم قبل بدء الطلب حتى تظهر الحركة فورًا.
+    await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
     processingCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     let progress = 1;
-    progressRing.style.setProperty('--progress', '1');
-    progressValue.textContent = '1%';
-    updateProcessingSteps(progress);
-
     const timer = window.setInterval(() => {
-      const increment = progress < 25 ? 3 : progress < 50 ? 4 : progress < 80 ? 3 : 1;
+      let increment = 1;
+      if (progress < 18) increment = 2.8;
+      else if (progress < 42) increment = 2.2;
+      else if (progress < 68) increment = 1.5;
+      else if (progress < 88) increment = 0.8;
       progress = Math.min(96, progress + increment);
-      progressRing.style.setProperty('--progress', String(progress));
-      progressValue.textContent = `${progress}%`;
-      updateProcessingSteps(progress);
-      if (progress >= 96) window.clearInterval(timer);
-    }, 320);
+      setProgress(progress);
+    }, 260);
+
+    try {
+      const response = await fetch(form.action || '/analyze', {
+        method: 'POST',
+        body: new FormData(form),
+        headers: { 'X-Requested-With': 'fetch' },
+      });
+      const html = await response.text();
+      window.clearInterval(timer);
+      setProgress(100);
+      steps.forEach((step) => {
+        step.classList.remove('current');
+        step.classList.add('done');
+      });
+      await wait(420);
+
+      // استبدال الصفحة بنتيجة الخادم بعد اكتمال الحركة، مع بقاء الرابط الرئيسي.
+      document.open();
+      document.write(html);
+      document.close();
+    } catch (error) {
+      window.clearInterval(timer);
+      processingCard.classList.remove('is-running');
+      if (analyzeButton) {
+        analyzeButton.disabled = false;
+        analyzeButton.textContent = 'بدء التحليل';
+      }
+      const message = document.createElement('p');
+      message.className = 'processing-error';
+      message.textContent = 'تعذر الاتصال بالخادم. تحقق من الإنترنت ثم حاول مرة أخرى.';
+      processingCard.appendChild(message);
+    }
   });
 
   const imageFile = () => {
