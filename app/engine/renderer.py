@@ -172,18 +172,17 @@ def _draw_mixed_rtl(
     fill=TEXT,
     anchor: str = "ra",
 ) -> None:
-    """رسم عربي مختلط بالأرقام والإنجليزية باستخدام libraqm عند توفره."""
-    try:
-        draw.text(xy, str(text), font=font, fill=fill, anchor=anchor, direction="rtl", language="ar")
-    except (TypeError, ValueError):
-        draw.text(xy, _rtl(str(text)), font=font, fill=fill, anchor=anchor)
+    """رسم النص العربي المختلط من دون الاعتماد على libraqm.
+
+    يعالج ``arabic-reshaper`` و``python-bidi`` اتجاه الحروف والأجزاء
+    اللاتينية قبل تمرير النص إلى Pillow؛ لذلك لا نستخدم معاملات
+    ``direction`` أو ``language`` التي قد لا تتوفر في بيئة Railway.
+    """
+    draw.text(xy, _rtl(str(text)), font=font, fill=fill, anchor=anchor)
 
 
 def _mixed_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
-    try:
-        box = draw.textbbox((0, 0), str(text), font=font, direction="rtl", language="ar")
-    except (TypeError, ValueError):
-        box = draw.textbbox((0, 0), _rtl(str(text)), font=font)
+    box = draw.textbbox((0, 0), _rtl(str(text)), font=font)
     return box[2] - box[0]
 
 
@@ -876,7 +875,7 @@ def _note_row(draw: ImageDraw.ImageDraw, y: int, label: str, value: str, dot_col
     max_width = mid_x - left - 42
     if ltr_value:
         fitted = _fit_text(draw, value, F_NOTE_MIXED, max_width, rtl=False)
-        draw.text((mid_x - 18, y + 2), fitted, font=F_NOTE_MIXED, fill=(232, 238, 249, 255), anchor="ra", direction="ltr")
+        draw.text((mid_x - 18, y + 2), fitted, font=F_NOTE_MIXED, fill=(232, 238, 249, 255), anchor="ra")
     else:
         fitted = _fit_mixed_rtl(draw, value, F_NOTE_MIXED, max_width)
         _draw_mixed_rtl(draw, (mid_x - 18, y + 2), fitted, F_NOTE_MIXED, (232, 238, 249, 255), anchor="ra")

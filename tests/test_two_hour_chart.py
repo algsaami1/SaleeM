@@ -120,3 +120,28 @@ def test_order_block_is_only_selected_on_invalidation_side():
 
     assert bullish == zones[0]
     assert bearish == zones[1]
+
+
+def test_renderer_does_not_require_libraqm(monkeypatch):
+    """يجب ألا يمرر الرسم معاملات RAQM إلى Pillow في Railway."""
+    from PIL import ImageDraw
+
+    original_text = ImageDraw.ImageDraw.text
+    original_textbbox = ImageDraw.ImageDraw.textbbox
+
+    def guarded_text(self, *args, **kwargs):
+        forbidden = {"direction", "language", "features"}.intersection(kwargs)
+        assert not forbidden, f"RAQM-only kwargs used: {forbidden}"
+        return original_text(self, *args, **kwargs)
+
+    def guarded_textbbox(self, *args, **kwargs):
+        forbidden = {"direction", "language", "features"}.intersection(kwargs)
+        assert not forbidden, f"RAQM-only kwargs used: {forbidden}"
+        return original_textbbox(self, *args, **kwargs)
+
+    monkeypatch.setattr(ImageDraw.ImageDraw, "text", guarded_text)
+    monkeypatch.setattr(ImageDraw.ImageDraw, "textbbox", guarded_textbbox)
+
+    result = _validate_analysis(sample_analysis())
+    png = render_result(result)
+    assert png.startswith(b"\x89PNG")
