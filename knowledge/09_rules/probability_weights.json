@@ -1,0 +1,66 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "probability_weights",
+  "method": "weighted_confluence",
+  "base_buy": 50,
+  "base_sell": 50,
+  "weights": [
+    {
+      "factor": "توافق 4H و1H و15M مع اتجاه السيناريو",
+      "points": 18
+    },
+    {
+      "factor": "BOS أو CHOCH مؤكد",
+      "points": 12
+    },
+    {
+      "factor": "دعم أو مقاومة قوية",
+      "points": 10
+    },
+    {
+      "factor": "إعادة اختبار ناجحة",
+      "points": 10
+    },
+    {
+      "factor": "سحب سيولة مع استعادة",
+      "points": 10
+    },
+    {
+      "factor": "FVG أو Order Block متوافق",
+      "points": 7
+    },
+    {
+      "factor": "شمعة تأكيد في الموقع الصحيح",
+      "points": 6
+    },
+    {
+      "factor": "زخم أو مؤشر ظاهر متوافق",
+      "points": 4
+    },
+    {
+      "factor": "تعارض فريم أكبر",
+      "points": -15
+    },
+    {
+      "factor": "سوق عرضي أو ضغط غير محسوم",
+      "points": -8
+    },
+    {
+      "factor": "الصورة أو الأسعار غير واضحة",
+      "points": -10
+    },
+    {
+      "factor": "المستوى اختُبر مرات كثيرة",
+      "points": -6
+    }
+  ],
+  "limits": {
+    "minimum": 5,
+    "maximum": 95,
+    "preferred_maximum": 90
+  },
+  "normalization": "تُحوّل النقاط إلى BUY وSELL بحيث يكون المجموع 100، مع منع 0 و100."
+}

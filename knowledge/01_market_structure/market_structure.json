@@ -1,0 +1,232 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "market_structure",
+  "items": [
+    {
+      "id": "hh",
+      "name_ar": "قمة أعلى HH",
+      "name_en": "Higher High",
+      "direction": "bullish",
+      "definition": "قمة جديدة أعلى من القمة السابقة ضمن تسلسل صاعد.",
+      "conditions": [
+        "القمة الحالية أعلى بوضوح من القمة السابقة",
+        "يفضل وجود قاع أعلى قبلها أو بعدها"
+      ],
+      "confirmation": [
+        "إغلاق أو تداول ثابت أعلى القمة السابقة"
+      ],
+      "invalid_if": [
+        "الاختراق مجرد ذيل ثم إغلاق سريع أسفل القمة"
+      ],
+      "tags": [
+        "HH",
+        "bullish",
+        "structure"
+      ]
+    },
+    {
+      "id": "hl",
+      "name_ar": "قاع أعلى HL",
+      "name_en": "Higher Low",
+      "direction": "bullish",
+      "definition": "قاع تصحيحي أعلى من القاع السابق، ويدعم استمرار الاتجاه الصاعد.",
+      "conditions": [
+        "التصحيح لا يكسر القاع الهيكلي السابق",
+        "ظهور طلب أو رفض قرب دعم"
+      ],
+      "confirmation": [
+        "استئناف الصعود وكسر قمة محلية"
+      ],
+      "invalid_if": [
+        "إغلاق واضح أسفل القاع السابق"
+      ],
+      "tags": [
+        "HL",
+        "bullish",
+        "pullback"
+      ]
+    },
+    {
+      "id": "lh",
+      "name_ar": "قمة أدنى LH",
+      "name_en": "Lower High",
+      "direction": "bearish",
+      "definition": "قمة تصحيحية أدنى من القمة السابقة، ويدعم استمرار الاتجاه الهابط.",
+      "conditions": [
+        "فشل السعر في تجاوز القمة السابقة",
+        "رفض أو عرض قرب مقاومة"
+      ],
+      "confirmation": [
+        "كسر قاع محلي بعد القمة الأدنى"
+      ],
+      "invalid_if": [
+        "إغلاق واضح أعلى القمة السابقة"
+      ],
+      "tags": [
+        "LH",
+        "bearish",
+        "pullback"
+      ]
+    },
+    {
+      "id": "ll",
+      "name_ar": "قاع أدنى LL",
+      "name_en": "Lower Low",
+      "direction": "bearish",
+      "definition": "قاع جديد أدنى من القاع السابق ضمن تسلسل هابط.",
+      "conditions": [
+        "القاع الحالي أدنى بوضوح من القاع السابق"
+      ],
+      "confirmation": [
+        "إغلاق أو ثبات أسفل القاع السابق"
+      ],
+      "invalid_if": [
+        "كسر بالذيل ثم عودة سريعة فوق القاع"
+      ],
+      "tags": [
+        "LL",
+        "bearish",
+        "structure"
+      ]
+    },
+    {
+      "id": "bos_bullish",
+      "name_ar": "كسر بنية صاعد BOS",
+      "name_en": "Bullish Break of Structure",
+      "direction": "bullish",
+      "definition": "كسر قمة بنيوية في اتجاه صاعد أو بعد تكوين قاع أعلى.",
+      "conditions": [
+        "وجود قمة بنيوية واضحة",
+        "إغلاق جسم شمعة فوقها أفضل من اختراق الذيل"
+      ],
+      "confirmation": [
+        "إعادة اختبار ناجحة أو استمرار زخم الشراء"
+      ],
+      "invalid_if": [
+        "عودة الإغلاق أسفل مستوى الكسر مباشرة"
+      ],
+      "priority": 10,
+      "tags": [
+        "BOS",
+        "breakout",
+        "bullish"
+      ]
+    },
+    {
+      "id": "bos_bearish",
+      "name_ar": "كسر بنية هابط BOS",
+      "name_en": "Bearish Break of Structure",
+      "direction": "bearish",
+      "definition": "كسر قاع بنيوي في اتجاه هابط أو بعد تكوين قمة أدنى.",
+      "conditions": [
+        "وجود قاع بنيوي واضح",
+        "إغلاق جسم شمعة تحته أفضل من اختراق الذيل"
+      ],
+      "confirmation": [
+        "إعادة اختبار فاشلة من أسفل أو استمرار الزخم الهابط"
+      ],
+      "invalid_if": [
+        "عودة الإغلاق فوق مستوى الكسر مباشرة"
+      ],
+      "priority": 10,
+      "tags": [
+        "BOS",
+        "breakout",
+        "bearish"
+      ]
+    },
+    {
+      "id": "choch_bullish",
+      "name_ar": "تغير سلوك صاعد CHOCH",
+      "name_en": "Bullish Change of Character",
+      "direction": "bullish",
+      "definition": "أول كسر معتبر لقمة محلية بعد سلسلة هابطة، وقد يشير إلى بداية انعكاس.",
+      "conditions": [
+        "وجود سلسلة LH وLL قبل التغير",
+        "كسر آخر LH واضح"
+      ],
+      "confirmation": [
+        "تكوين HL ثم استمرار أعلى مستوى الكسر"
+      ],
+      "invalid_if": [
+        "كسر القاع الأخير بعد الإشارة"
+      ],
+      "priority": 9,
+      "tags": [
+        "CHOCH",
+        "reversal",
+        "bullish"
+      ]
+    },
+    {
+      "id": "choch_bearish",
+      "name_ar": "تغير سلوك هابط CHOCH",
+      "name_en": "Bearish Change of Character",
+      "direction": "bearish",
+      "definition": "أول كسر معتبر لقاع محلي بعد سلسلة صاعدة، وقد يشير إلى بداية انعكاس.",
+      "conditions": [
+        "وجود سلسلة HH وHL قبل التغير",
+        "كسر آخر HL واضح"
+      ],
+      "confirmation": [
+        "تكوين LH ثم استمرار أسفل مستوى الكسر"
+      ],
+      "invalid_if": [
+        "كسر القمة الأخيرة بعد الإشارة"
+      ],
+      "priority": 9,
+      "tags": [
+        "CHOCH",
+        "reversal",
+        "bearish"
+      ]
+    },
+    {
+      "id": "range",
+      "name_ar": "هيكل عرضي",
+      "name_en": "Range Structure",
+      "direction": "neutral",
+      "definition": "تحرك السعر بين دعم ومقاومة مع غياب تسلسل قمم وقيعان واضح.",
+      "conditions": [
+        "ارتداد متكرر من حدين أفقيين",
+        "اختراقات قصيرة تعود داخل النطاق"
+      ],
+      "confirmation": [
+        "بقاء الإغلاقات داخل النطاق"
+      ],
+      "invalid_if": [
+        "إغلاق مؤكد وإعادة اختبار خارج النطاق"
+      ],
+      "priority": 6,
+      "tags": [
+        "range",
+        "sideways"
+      ]
+    },
+    {
+      "id": "compression",
+      "name_ar": "ضغط سعري",
+      "name_en": "Price Compression",
+      "direction": "contextual",
+      "definition": "تقارب القمم والقيعان أو دفع متدرج نحو مستوى مهم، وقد يسبق اختراقًا أو سحب سيولة.",
+      "conditions": [
+        "تضيق النطاق",
+        "تكرار لمس مستوى واحد مع ارتدادات أضعف"
+      ],
+      "confirmation": [
+        "كسر واضح مع زخم أو رفض قوي بعد سحب السيولة"
+      ],
+      "invalid_if": [
+        "اتساع عشوائي دون اتجاه"
+      ],
+      "priority": 7,
+      "tags": [
+        "compression",
+        "breakout"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,176 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "support_resistance",
+  "items": [
+    {
+      "id": "horizontal_support",
+      "name_ar": "دعم أفقي",
+      "type": "support",
+      "definition": "مستوى ارتد منه السعر صعودًا أكثر من مرة أو انطلق منه دفع واضح.",
+      "strength_factors": [
+        "تكرار الارتداد",
+        "وضوح رد الفعل",
+        "توافقه مع قاع بنيوي",
+        "ظهوره على فريم أكبر"
+      ],
+      "weakness_factors": [
+        "كثرة الاختبارات المتقاربة",
+        "اختراقات وإغلاقات تحته",
+        "ردود فعل ضعيفة"
+      ],
+      "drawing": "خط أزرق رفيع عند مستوى واحد وليس مستطيلاً عريضًا",
+      "tags": [
+        "support",
+        "horizontal"
+      ]
+    },
+    {
+      "id": "horizontal_resistance",
+      "name_ar": "مقاومة أفقية",
+      "type": "resistance",
+      "definition": "مستوى ارتد منه السعر هبوطًا أكثر من مرة أو بدأ منه دفع هابط واضح.",
+      "strength_factors": [
+        "تكرار الرفض",
+        "وضوح الذيل أو الإغلاق الهابط",
+        "توافقه مع قمة بنيوية",
+        "ظهوره على فريم أكبر"
+      ],
+      "weakness_factors": [
+        "كثرة الاختبارات المتقاربة",
+        "إغلاقات فوقه",
+        "ضعف رد الفعل"
+      ],
+      "drawing": "خط برتقالي رفيع عند مستوى واحد وليس مستطيلاً عريضًا",
+      "tags": [
+        "resistance",
+        "horizontal"
+      ]
+    },
+    {
+      "id": "flipped_support",
+      "name_ar": "مقاومة مكسورة تحولت إلى دعم",
+      "type": "support",
+      "definition": "مستوى مقاومة تم اختراقه ثم اختباره من الأعلى بنجاح.",
+      "conditions": [
+        "إغلاق واضح فوق المستوى",
+        "عودة منظمة للمستوى",
+        "رفض صاعد أو استمرار"
+      ],
+      "invalid_if": [
+        "إغلاق واضح تحته"
+      ],
+      "priority": 10,
+      "tags": [
+        "flip",
+        "retest",
+        "bullish"
+      ]
+    },
+    {
+      "id": "flipped_resistance",
+      "name_ar": "دعم مكسور تحول إلى مقاومة",
+      "type": "resistance",
+      "definition": "مستوى دعم تم كسره ثم اختباره من الأسفل وفشل السعر في استعادته.",
+      "conditions": [
+        "إغلاق واضح أسفل المستوى",
+        "عودة منظمة للمستوى",
+        "رفض هابط أو استمرار"
+      ],
+      "invalid_if": [
+        "إغلاق واضح فوقه"
+      ],
+      "priority": 10,
+      "tags": [
+        "flip",
+        "retest",
+        "bearish"
+      ]
+    },
+    {
+      "id": "dynamic_support",
+      "name_ar": "دعم متحرك",
+      "type": "support",
+      "definition": "دعم يتكون من خط اتجاه أو متوسط متحرك ظاهر على الشارت.",
+      "conditions": [
+        "تكرار احترام الخط",
+        "توافقه مع بنية صاعدة"
+      ],
+      "caution": "لا يعتمد وحده دون مستوى سعري أو سلوك شموع.",
+      "tags": [
+        "dynamic",
+        "trendline",
+        "EMA"
+      ]
+    },
+    {
+      "id": "dynamic_resistance",
+      "name_ar": "مقاومة متحركة",
+      "type": "resistance",
+      "definition": "مقاومة تتكون من خط اتجاه أو متوسط متحرك ظاهر على الشارت.",
+      "conditions": [
+        "تكرار احترام الخط",
+        "توافقه مع بنية هابطة"
+      ],
+      "caution": "لا يعتمد وحده دون مستوى سعري أو سلوك شموع.",
+      "tags": [
+        "dynamic",
+        "trendline",
+        "EMA"
+      ]
+    },
+    {
+      "id": "strong_level",
+      "name_ar": "مستوى قوي",
+      "type": "grading",
+      "definition": "مستوى يجمع أكثر من عامل: فريم أكبر، تكرار رد الفعل، بنية، وسيولة أو FVG.",
+      "score_hint": 90,
+      "tags": [
+        "confluence",
+        "strong"
+      ]
+    },
+    {
+      "id": "weak_level",
+      "name_ar": "مستوى ضعيف",
+      "type": "grading",
+      "definition": "مستوى قائم على لمسة واحدة أو ذيل منفرد دون بنية أو رد فعل واضح.",
+      "score_hint": 45,
+      "tags": [
+        "weak"
+      ]
+    },
+    {
+      "id": "true_breakout",
+      "name_ar": "اختراق حقيقي",
+      "type": "event",
+      "definition": "إغلاق واضح خارج المستوى يتبعه ثبات أو إعادة اختبار ناجحة.",
+      "conditions": [
+        "جسم شمعة واضح خارج المستوى",
+        "زخم أو توسع في المدى",
+        "عدم العودة الفورية للنطاق"
+      ],
+      "tags": [
+        "breakout",
+        "confirmed"
+      ]
+    },
+    {
+      "id": "false_breakout_level",
+      "name_ar": "كسر كاذب للمستوى",
+      "type": "event",
+      "definition": "اختراق مؤقت ثم إغلاق أو عودة داخل النطاق، وغالبًا يرتبط بسحب سيولة.",
+      "conditions": [
+        "ذيل خارج المستوى أو جسم ضعيف",
+        "عودة سريعة داخل النطاق",
+        "تأكيد معاكس لاحق"
+      ],
+      "tags": [
+        "fake_breakout",
+        "liquidity"
+      ]
+    }
+  ]
+}
