@@ -3,6 +3,11 @@
   const fileInput = document.getElementById('image-input');
   const fileName = document.getElementById('file-name');
   const dropZone = document.getElementById('drop-zone');
+  const autoscaleModal = document.getElementById('autoscale-modal');
+  const autoscaleConfirmButton = document.getElementById('autoscale-confirm');
+  const autoscaleCancelButton = document.getElementById('autoscale-cancel');
+  const autoscaleConfirmedInput = document.getElementById('autoscale-confirmed');
+  const autoscaleStatus = document.getElementById('autoscale-status');
   const processingCard = document.getElementById('processing-card');
   const progressRing = document.getElementById('progress-ring');
   const progressCircle = document.getElementById('progress-circle');
@@ -38,11 +43,59 @@
   const summaryOpenTrades = document.getElementById('summary-open-trades');
   const summaryStars = document.getElementById('summary-stars');
 
+  let autoscaleAccepted = false;
+  let modalReturnFocus = null;
+
   const updateFileName = () => {
     if (fileName) fileName.textContent = fileInput?.files?.[0]?.name || 'لم يتم اختيار صورة';
   };
 
-  fileInput?.addEventListener('change', updateFileName);
+  const setAutoscaleAccepted = (accepted) => {
+    autoscaleAccepted = Boolean(accepted);
+    if (autoscaleConfirmedInput) autoscaleConfirmedInput.value = autoscaleAccepted ? 'yes' : '';
+    if (autoscaleStatus) {
+      autoscaleStatus.classList.toggle('confirmed', autoscaleAccepted);
+      autoscaleStatus.textContent = autoscaleAccepted
+        ? 'تم التأكيد: Auto-scale مفعّل ومحور الأسعار ظاهر'
+        : 'قبل كل رفع: فعّل Auto-scale لمحور الأسعار';
+    }
+  };
+
+  const openAutoscaleModal = () => {
+    if (!autoscaleModal || !fileInput?.files?.length) return;
+    modalReturnFocus = document.activeElement;
+    autoscaleModal.hidden = false;
+    document.body.classList.add('modal-open');
+    window.requestAnimationFrame(() => autoscaleConfirmButton?.focus());
+  };
+
+  const closeAutoscaleModal = () => {
+    if (!autoscaleModal) return;
+    autoscaleModal.hidden = true;
+    document.body.classList.remove('modal-open');
+    if (modalReturnFocus instanceof HTMLElement) modalReturnFocus.focus();
+  };
+
+  const handleSelectedFile = () => {
+    updateFileName();
+    setAutoscaleAccepted(false);
+    if (fileInput?.files?.length) openAutoscaleModal();
+  };
+
+  fileInput?.addEventListener('change', handleSelectedFile);
+
+  autoscaleConfirmButton?.addEventListener('click', () => {
+    setAutoscaleAccepted(true);
+    closeAutoscaleModal();
+  });
+
+  autoscaleCancelButton?.addEventListener('click', () => {
+    if (fileInput) fileInput.value = '';
+    updateFileName();
+    setAutoscaleAccepted(false);
+    closeAutoscaleModal();
+    fileInput?.click();
+  });
 
   if (dropZone) {
     ['dragenter', 'dragover'].forEach((eventName) => {
@@ -65,7 +118,7 @@
       const dt = new DataTransfer();
       dt.items.add(files[0]);
       fileInput.files = dt.files;
-      updateFileName();
+      handleSelectedFile();
     });
   }
 
@@ -103,6 +156,12 @@
         ],
         { duration: 340 }
       );
+      return;
+    }
+
+    if (!autoscaleAccepted) {
+      if (autoscaleStatus) autoscaleStatus.textContent = 'أكد تفعيل Auto-scale قبل بدء التحليل.';
+      openAutoscaleModal();
       return;
     }
 

@@ -277,16 +277,36 @@ def _strength_name(strength: int) -> str:
 
 
 def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
+    """حساب Auto-scale ذكي للشارت المعاد رسمه.
+
+    يعتمد على شموع السوق بعد مواءمتها مع سعر الصورة، وعلى السعر الحالي وأعلى
+    وأدنى سعر ظاهرين في الصورة. في الصفقة النشطة نمنح جهة الهدف الخضراء
+    مساحة أكبر من جهة الوقف، ثم نضيف هامشًا واضحًا أعلى وأسفل المحور.
+    """
     candles = analysis.get("candles") or []
     candle_values: list[float] = []
+    candle_ranges: list[float] = []
     for candle in candles:
         high = _number(candle.get("high"))
         low = _number(candle.get("low"))
         if high is not None and low is not None:
             candle_values.extend((high, low))
+            candle_ranges.append(max(0.01, high - low))
 
-    trade_keys = ("current_price",) if str(analysis.get("draw_mode") or "watch") == "watch" else ("entry", "stop_loss", "target_1", "target_2", "target_3", "current_price")
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    trade_keys = (
+        ("current_price",)
+        if draw_mode == "watch"
+        else ("entry", "stop_loss", "target_1", "target_2", "target_3", "current_price")
+    )
     trade_values = [_number(analysis.get(key)) for key in trade_keys]
+    trade_values = [value for value in trade_values if value is not None]
+
+    # حدود الصورة المرفوعة جزء أساسي من المعايرة، وليست مجرد مستويات اختيارية.
+    image_high = _number(analysis.get("image_price_high"))
+    image_low = _number(analysis.get("image_price_low"))
+    image_values = [value for value in (image_high, image_low) if value is not None]
+
     level_values: list[float] = []
     for key in ("support_levels", "resistance_levels"):
         for level in analysis.get(key) or []:
@@ -294,26 +314,59 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
             if price is not None:
                 level_values.append(price)
 
-    values = candle_values + [v for v in trade_values if v is not None] + level_values
-    if not values:
+    mandatory_values = candle_values + trade_values + image_values
+    if not mandatory_values:
         return 0.0, 1.0
 
-    # تجاهل مستوى بعيد جدًا يمنع ضغط الشموع، مع الاحتفاظ بالصفقة الحالية.
-    center = _number(analysis.get("current_price"))
+    center = _number(analysis.get("entry")) if draw_mode != "watch" else None
+    if center is None:
+        center = _number(analysis.get("current_price"))
     if center is None and candles:
         center = _number(candles[-1].get("close"))
-    if center is not None and candle_values:
-        ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles]
-        atr = median(ranges) if ranges else 1.0
-        max_distance = max(atr * 14, 8.0)
-        nearby = [value for value in values if abs(value - center) <= max_distance]
-        if len(nearby) >= max(6, len(candle_values) // 2):
-            values = nearby
 
-    low, high = min(values), max(values)
-    spread = max(1.0, high - low)
-    padding = max(0.65, spread * 0.07)
-    return low - padding, high + padding
+    # مستويات بعيدة جدًا لا تضغط الشموع، لكن الشموع والصفقة وحدود الصورة تبقى دائمًا.
+    optional_levels = level_values
+    if center is not None and candle_ranges:
+        atr = median(candle_ranges)
+        far_trade = max((abs(value - center) for value in trade_values), default=0.0)
+        max_distance = max(atr * 18, far_trade * 1.35, 10.0)
+        optional_levels = [value for value in level_values if abs(value - center) <= max_distance]
+
+    values = mandatory_values + optional_levels
+    raw_low, raw_high = min(values), max(values)
+    raw_span = max(1.0, raw_high - raw_low)
+
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    active_trade = draw_mode != "watch" and direction in {"صاعد", "هابط"} and center is not None
+    if not active_trade:
+        padding = max(0.75, raw_span * 0.09)
+        return raw_low - padding, raw_high + padding
+
+    # لا نقص أي عنصر؛ نوسع فقط جهة الربح حتى تكون هي المساحة الأكبر بصريًا.
+    above = max(0.0, raw_high - center)
+    below = max(0.0, center - raw_low)
+    minimum_side = max(0.55, raw_span * 0.12)
+    above = max(above, minimum_side)
+    below = max(below, minimum_side)
+    green_to_red_ratio = 1.28
+
+    if direction == "صاعد":
+        above = max(above, below * green_to_red_ratio)
+    else:
+        below = max(below, above * green_to_red_ratio)
+
+    balanced_span = max(1.0, above + below)
+    edge_padding = max(0.70, balanced_span * 0.075)
+    green_extra = max(0.35, balanced_span * 0.055)
+
+    price_max = center + above + edge_padding
+    price_min = center - below - edge_padding
+    if direction == "صاعد":
+        price_max += green_extra
+    else:
+        price_min -= green_extra
+
+    return price_min, price_max
 
 
 def _price_y(price: float, price_min: float, price_max: float) -> int:
@@ -499,6 +552,39 @@ def _detect_order_blocks(candles: list[dict[str, Any]]) -> list[tuple[int, float
     return list(reversed(selected))
 
 
+def _select_directional_order_block(
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    focal_price: float,
+    atr: float,
+) -> tuple[int, float, float, int] | None:
+    """اختيار Order Block ثانوي وعلى جهة الإبطال فقط.
+
+    في الصعود يجب أن يكون أسفل السعر، وفي الهبوط أعلى السعر. لا نعرض منطقة
+    مخالفة للاتجاه ولا نسمح لها أن تصبح العنصر البصري المسيطر.
+    """
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    if direction not in {"صاعد", "هابط"}:
+        return None
+
+    recent_floor = max(0, len(candles) - 16)
+    max_distance = max(1.0, atr * 2.8)
+    candidates: list[tuple[float, tuple[int, float, float, int]]] = []
+    for zone in _detect_order_blocks(candles):
+        index, low, high, strength = zone
+        center = (low + high) / 2
+        correct_side = center < focal_price if direction == "صاعد" else center > focal_price
+        if not correct_side or index < recent_floor or strength < 78 or abs(center - focal_price) > max_distance:
+            continue
+        score = strength - abs(center - focal_price) * 14 + index * 0.12
+        candidates.append((score, zone))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
 def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
     left, top, right, bottom = CHART
     if not candles or str(analysis.get("draw_mode") or "watch") == "watch":
@@ -515,29 +601,19 @@ def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: 
     max_distance = max(1.2, atr * 3.2)
     recent_floor = max(0, len(candles) - 16)
 
-    # Order Block: نرسم أقوى منطقة حديثة وقريبة من الدخول فقط.
-    candidates: list[tuple[float, tuple[int, float, float, int]]] = []
-    for zone in _detect_order_blocks(candles):
-        index, low, high, strength = zone
-        center = (low + high) / 2
-        if index < recent_floor or strength < 72 or abs(center - focal_price) > max_distance:
-            continue
-        score = strength - abs(center - focal_price) * 12 + index * 0.15
-        candidates.append((score, zone))
-    candidates.sort(key=lambda item: item[0], reverse=True)
-
-    if candidates:
-        _, (index, low, high, strength) = candidates[0]
+    # Order Block عنصر ثانوي فقط، وعلى جهة الإبطال المناسبة للاتجاه.
+    selected_order_block = _select_directional_order_block(analysis, candles, focal_price, atr)
+    if selected_order_block is not None:
+        index, low, high, strength = selected_order_block
         if not (high < price_min or low > price_max):
-            x1 = max(left + 150, int(left + slot * max(0, index - 0.5)))
-            x2 = max(x1 + 190, zone_end)
-            x2 = min(zone_end, x2)
+            x1 = max(left + 170, int(left + slot * max(0, index - 0.4)))
+            x2 = min(zone_end, max(x1 + 155, analysis_left + 95))
             y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
-            if y2 - y1 < 34:
+            if y2 - y1 < 28:
                 mid = (y1 + y2) // 2
-                y1, y2 = mid - 17, mid + 17
-            ld.rounded_rectangle((x1, y1, x2, y2), radius=6, fill=(75, 99, 190, 58), outline=(100, 139, 255, 155), width=2)
-            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=F_ZONE, fill=(185, 207, 255, 255), anchor="mm")
+                y1, y2 = mid - 14, mid + 14
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(75, 99, 190, 36), outline=(100, 139, 255, 120), width=1)
+            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=F_ZONE, fill=(185, 207, 255, 225), anchor="mm")
 
     # FVG: فجوة حديثة وقريبة من الدخول، ممتدة حتى منطقة التحليل.
     fvg_candidates: list[tuple[float, tuple[int, float, float]]] = []

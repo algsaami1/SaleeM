@@ -89,6 +89,8 @@ ANALYSIS_SCHEMA = {
         "entry_kind": {"type": "string", "enum": ["مباشر", "اختراق", "إعادة اختبار", "مراقبة"]},
         "confirmation": {"type": "string"},
         "current_price": NUM_NULL,
+        "image_price_high": NUM_NULL,
+        "image_price_low": NUM_NULL,
         "support_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "resistance_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "entry": NUM_NULL,
@@ -113,8 +115,9 @@ ANALYSIS_SCHEMA = {
     },
     "required": [
         "chart_readable", "candles", "direction", "buy_probability", "sell_probability",
-        "setup_state", "entry_kind", "confirmation", "current_price", "support_levels",
-        "resistance_levels", "entry", "stop_loss", "stop_reason", "target_1", "target_2",
+        "setup_state", "entry_kind", "confirmation", "current_price", "image_price_high",
+        "image_price_low", "support_levels", "resistance_levels", "entry", "stop_loss",
+        "stop_reason", "target_1", "target_2",
         "target_3", "pattern_type", "pattern_confidence", "pattern_lines", "pattern_path",
         "scenario", "note", "memory_matches",
     ],
@@ -645,12 +648,21 @@ def _validate_analysis(
     data: dict[str, Any],
     market_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if data.get("chart_readable") is False:
-        raise RuntimeError("الصورة أو محور الأسعار غير واضحين بما يكفي للتحليل.")
+    image_current = _number(data.get("current_price"))
+    if data.get("chart_readable") is False and image_current is None:
+        raise RuntimeError(
+            "لم نتمكن من قراءة السعر الحالي من الصورة. فعّل Auto-scale وأظهر محور الأسعار كاملًا ثم أعد الرفع."
+        )
     candles = _normalize_candles(data.get("candles"))
     market_close = float(candles[-1]["close"])
-    image_current = _number(data.get("current_price"))
     current = float(image_current) if image_current is not None else market_close
+
+    image_price_high = _number(data.get("image_price_high"))
+    image_price_low = _number(data.get("image_price_low"))
+    if image_price_high is not None and image_price_high <= current:
+        image_price_high = None
+    if image_price_low is not None and image_price_low >= current:
+        image_price_low = None
     buy, sell = _normalize_probabilities(data)
     direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
     probability = max(buy, sell) if direction == "غير واضح" else (buy if direction == "صاعد" else sell)
@@ -714,6 +726,8 @@ def _validate_analysis(
             "candles": candles,
             "current_price": round(current, 2),
             "current_price_source": "chart_image" if image_current is not None else "market_fallback",
+            "image_price_high": round(image_price_high, 2) if image_price_high is not None else None,
+            "image_price_low": round(image_price_low, 2) if image_price_low is not None else None,
             "market_last_close": round(market_close, 2),
             "buy_probability": buy,
             "sell_probability": sell,
@@ -787,7 +801,11 @@ def _analyze(path: Path) -> dict[str, Any]:
 قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
 إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
 
-اقرأ صورة الشارت المرفوعة لاستخراج السعر الحالي الظاهر على محور السعر وفهم موضع الحركة فقط.
+اقرأ صورة الشارت المرفوعة لاستخراج ثلاثة أرقام من محور السعر:
+1) current_price: السعر الحالي الظاهر في ملصق السعر بجانب آخر شمعة.
+2) image_price_high: أعلى سعر ظاهر في أعلى محور الأسعار داخل الصورة.
+3) image_price_low: أدنى سعر ظاهر في أسفل محور الأسعار داخل الصورة.
+تأكد أن image_price_low < current_price < image_price_high. إذا تعذر رقم الحد الأعلى أو الأدنى فقط فأعده null، لكن ابذل محاولة دقيقة لقراءته.
 لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
 السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
 اجعل chart_readable=false فقط إذا تعذر قراءة السعر الحالي أو كانت الصورة غير صالحة للتحليل إطلاقًا.
@@ -809,7 +827,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق: دعم ومقاومة، Order Block، FVG، جلسات السوق، سهم واحد، منطقة دخول مدمجة، وقف، ثلاثة أهداف، وملاحظات أسفل الشارت.
+النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق. يضبط محور الأسعار تلقائيًا باستخدام السعر الحالي وأعلى وأدنى سعر مقروءة من الصورة، مع هامش علوي وسفلي إضافي. تكون المساحة الأكبر دائمًا في جهة منطقة الهدف الخضراء. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم الدعم والمقاومة وFVG والجلسات وسهمًا واحدًا والدخول والوقف وثلاثة أهداف والملاحظات.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
