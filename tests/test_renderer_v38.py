@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image
 
-from app.engine.renderer import _axis_values, _price_range, render_result
+from app.engine.renderer import _axis_values, _detect_chart_crop_box, _price_range, render_result
 
 
 def _candles(start=4142.0, count=30):
@@ -101,3 +101,45 @@ def test_renderer_produces_phone_png(tmp_path):
     with Image.open(output) as image:
         assert image.size == (1080, 1920)
         assert image.format == "PNG"
+
+
+
+def test_renderer_accepts_chart_background(tmp_path):
+    background = tmp_path / "chart.png"
+    Image.new("RGB", (960, 1600), (4, 4, 4)).save(background)
+    output = tmp_path / "preview_bg.png"
+    output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
+    with Image.open(output) as image:
+        assert image.size == (1080, 1920)
+        assert image.format == "PNG"
+
+
+
+def test_renderer_compresses_tall_chart_to_fit_panel(tmp_path):
+    background = tmp_path / "chart_tall.png"
+    Image.new("RGB", (800, 2200), (4, 4, 4)).save(background)
+    output = tmp_path / "preview_bg_tall.png"
+    output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
+    with Image.open(output) as image:
+        assert image.size == (1080, 1920)
+        assert image.format == "PNG"
+
+
+
+def test_detect_chart_crop_box_finds_chart_region(tmp_path):
+    image = Image.new("RGB", (1000, 1600), (0, 0, 0))
+    # create a chart-like active area in the middle
+    for x in range(80, 860, 70):
+        for y in range(120, 1480):
+            image.putpixel((x, y), (40, 50, 70))
+    for y in range(140, 1480, 90):
+        for x in range(80, 860):
+            image.putpixel((x, y), (38, 48, 66))
+    for x in range(260, 700, 22):
+        for y in range(620, 980):
+            image.putpixel((x, y), (95, 185, 175) if (x // 22) % 2 == 0 else (210, 90, 90))
+    left, top, right, bottom = _detect_chart_crop_box(image)
+    assert 0 <= left < right <= 1000
+    assert 0 <= top < bottom <= 1600
+    assert right - left >= 750
+    assert bottom - top >= 1200

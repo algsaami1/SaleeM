@@ -1168,7 +1168,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
     analysis = _analyze(image_path)
-    png = render_result(analysis)
+    png = render_result(analysis, chart_background_path=image_path)
     return {
         **analysis,
         "symbol": "XAUUSD",
