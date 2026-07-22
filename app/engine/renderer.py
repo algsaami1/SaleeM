@@ -416,6 +416,69 @@ def _price_y(price: float, price_min: float, price_max: float) -> int:
     return int(top + max(0.0, min(1.0, ratio)) * (bottom - top))
 
 
+def _anchored_price_range(
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+    reference_y: int | None,
+) -> tuple[float, float]:
+    """Shift the complete price transform so the current price sits on the
+    green reference line detected in the uploaded chart.
+
+    Every added element is drawn from the same ``price_min``/``price_max``
+    transform.  Anchoring that shared transform therefore moves support,
+    resistance, FVG, Order Block, entry, stop, targets and the direction arrow
+    together instead of moving only the green current-price line.
+
+    The visible span is enlarged only when required to keep the analysed
+    candles/levels/trade prices inside the chart after anchoring near an edge.
+    """
+    current = _number(analysis.get("current_price"))
+    if current is None or reference_y is None:
+        return price_min, price_max
+
+    _, top, _, bottom = CHART
+    chart_height = max(1, bottom - top)
+    y = int(max(top + 1, min(bottom - 1, reference_y)))
+
+    # Fractions of the chart available above and below the detected line.
+    above_fraction = max(1.0 / chart_height, (y - top) / chart_height)
+    below_fraction = max(1.0 / chart_height, (bottom - y) / chart_height)
+
+    visible_values: list[float] = [current]
+    for candle in analysis.get("candles") or []:
+        for key in ("high", "low"):
+            value = _number(candle.get(key))
+            if value is not None:
+                visible_values.append(value)
+    for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
+        value = _number(analysis.get(key))
+        if value is not None:
+            visible_values.append(value)
+    for key in ("support_levels", "resistance_levels"):
+        for level in analysis.get(key) or []:
+            value = _number(level.get("price"))
+            if value is not None:
+                visible_values.append(value)
+
+    required_above = max((value - current for value in visible_values), default=0.0)
+    required_below = max((current - value for value in visible_values), default=0.0)
+    original_span = max(0.0001, price_max - price_min)
+
+    # Preserve the previous visual scale whenever possible.  If the green line
+    # is near an edge, expand just enough so no important drawing is clipped.
+    span = max(
+        original_span,
+        required_above / above_fraction if required_above > 0 else 0.0,
+        required_below / below_fraction if required_below > 0 else 0.0,
+    )
+    span *= 1.015
+
+    anchored_max = current + above_fraction * span
+    anchored_min = current - below_fraction * span
+    return anchored_min, anchored_max
+
+
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
     """Resize and crop an image to cover the target area cleanly."""
     return ImageOps.fit(source, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
@@ -496,22 +559,15 @@ def _detect_green_reference_line_y(chart_image: Image.Image) -> int | None:
     return int(round(weighted_sum / max(1, total_score)))
 
 
-def _paste_chart_background(
-    image: Image.Image,
+def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
-) -> tuple[bool, int | None]:
-    """Use the uploaded chart as the chart-area background, then draw overlays above it.
-
-    Returns a tuple of:
-      1) whether the background was successfully pasted
-      2) the detected absolute Y position of the chart's horizontal green line,
-         if one was found
-    """
+) -> tuple[Image.Image | None, int | None]:
+    """Fit the uploaded chart once and detect its green reference line."""
     if not chart_background_path:
-        return False, None
+        return None, None
     path = Path(chart_background_path)
     if not path.exists():
-        return False, None
+        return None, None
 
     left, top, right, bottom = CHART
     try:
@@ -520,7 +576,15 @@ def _paste_chart_background(
             fitted = _fit_cover(chart_rgba, (right - left, bottom - top))
             detected_local_y = _detect_green_reference_line_y(fitted)
     except Exception:  # pragma: no cover
-        return False, None
+        return None, None
+
+    detected_absolute_y = None if detected_local_y is None else top + detected_local_y
+    return fitted, detected_absolute_y
+
+
+def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) -> None:
+    """Paste a previously fitted chart and add the readability overlay."""
+    left, top, right, bottom = CHART
 
     image.alpha_composite(fitted, (left, top))
 
@@ -530,7 +594,17 @@ def _paste_chart_background(
     d.rounded_rectangle((left, top, right, bottom), radius=6, fill=(0, 10, 26, 70))
     d.rectangle((left, top, right, bottom), outline=(112, 133, 168, 165), width=1)
     image.alpha_composite(overlay)
-    detected_absolute_y = None if detected_local_y is None else top + detected_local_y
+
+
+def _paste_chart_background(
+    image: Image.Image,
+    chart_background_path: str | os.PathLike[str] | None,
+) -> tuple[bool, int | None]:
+    """Compatibility wrapper used by older callers/tests."""
+    fitted, detected_absolute_y = _prepare_chart_background(chart_background_path)
+    if fitted is None:
+        return False, None
+    _paste_prepared_chart_background(image, fitted)
     return True, detected_absolute_y
 
 
@@ -1202,11 +1276,22 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     # الشارت يملأ الصفحة من الأعلى حتى صندوق الملاحظات السفلي.
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
-    using_chart_background = bool(chart_background_path) and Path(chart_background_path).exists()
-    detected_green_line_y: int | None = None
+    prepared_background, detected_green_line_y = _prepare_chart_background(chart_background_path)
+    using_chart_background = prepared_background is not None
+
+    # أهم نقطة في المزامنة: لا نحرك الخط الأخضر وحده. نعيد تثبيت محول السعر
+    # الكامل عليه قبل رسم أي عنصر، فتتحرك معه كل المستويات والمناطق والصفقة.
+    if detected_green_line_y is not None:
+        price_min, price_max = _anchored_price_range(
+            analysis,
+            price_min,
+            price_max,
+            detected_green_line_y,
+        )
+
     _draw_grid(draw, price_min, price_max, background_mode=using_chart_background)
-    if using_chart_background:
-        using_chart_background, detected_green_line_y = _paste_chart_background(image, chart_background_path)
+    if prepared_background is not None:
+        _paste_prepared_chart_background(image, prepared_background)
         draw = ImageDraw.Draw(image)
     count = max(1, len(candles))
     candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)

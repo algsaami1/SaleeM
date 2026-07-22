@@ -2,7 +2,17 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image
 
-from app.engine.renderer import CHART, CHART_CARD, NOTES, _axis_values, _detect_green_reference_line_y, _price_range, render_result
+from app.engine.renderer import (
+    CHART,
+    CHART_CARD,
+    NOTES,
+    _anchored_price_range,
+    _axis_values,
+    _detect_green_reference_line_y,
+    _price_range,
+    _price_y,
+    render_result,
+)
 
 
 def _candles(start=4142.0, count=30):
@@ -157,3 +167,34 @@ def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
         sample = image.getpixel((150, 72 + line_y))
         assert sample[1] > sample[0]
         assert sample[1] >= sample[2] - 20
+
+
+def test_all_price_drawings_share_green_line_anchored_transform():
+    analysis = _analysis("صاعد")
+    original_min, original_max = _price_range(analysis)
+    reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.72)
+
+    anchored_min, anchored_max = _anchored_price_range(
+        analysis,
+        original_min,
+        original_max,
+        reference_y,
+    )
+
+    current_y = _price_y(analysis["current_price"], anchored_min, anchored_max)
+    assert abs(current_y - reference_y) <= 1
+
+    # الدعم والمقاومة والدخول والوقف والأهداف كلها تستخدم نفس المحول، لذلك
+    # تبقى المسافة الرأسية بينها وبين الخط الأخضر متناسبة مع فرق السعر.
+    values = [
+        analysis["support_levels"][0]["price"],
+        analysis["resistance_levels"][0]["price"],
+        analysis["entry"],
+        analysis["stop_loss"],
+        analysis["target_1"],
+        analysis["target_3"],
+    ]
+    ys = [_price_y(value, anchored_min, anchored_max) for value in values]
+    assert all(CHART[1] <= y <= CHART[3] for y in ys)
+    assert ys[0] > current_y  # الدعم أسفل السعر الحالي
+    assert ys[1] < current_y  # المقاومة أعلى السعر الحالي
