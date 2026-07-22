@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image
 
-from app.engine.renderer import CHART, CHART_CARD, NOTES, _axis_values, _price_range, render_result
+from app.engine.renderer import CHART, CHART_CARD, NOTES, _axis_values, _detect_green_reference_line_y, _price_range, render_result
 
 
 def _candles(start=4142.0, count=30):
@@ -120,3 +120,40 @@ def test_result_chart_fills_page_until_bottom_notes_box():
     assert CHART[3] - CHART[1] >= 1200
     assert CHART_CARD[3] < NOTES[1]
     assert NOTES[3] >= 1880
+
+
+def test_detect_green_reference_line_row():
+    background = Image.new("RGBA", (872, 1208), (7, 14, 28, 255))
+    # بعض الأشكال الرأسية الخضراء حتى نتأكد أن الكاشف يفضّل الخط الأفقي الطويل.
+    for x in range(120, 150):
+        for y in range(280, 500):
+            background.putpixel((x, y), (17, 183, 94, 255))
+    target_y = 644
+    for x in range(24, 848):
+        background.putpixel((x, target_y), (38, 201, 128, 255))
+        background.putpixel((x, target_y + 1), (38, 201, 128, 210))
+
+    detected = _detect_green_reference_line_y(background)
+    assert detected is not None
+    assert abs(detected - target_y) <= 2
+
+
+def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
+    background = tmp_path / "chart_with_green_line.png"
+    width, height = 872, 1208
+    line_y = 730
+    bg = Image.new("RGBA", (width, height), (7, 14, 28, 255))
+    for x in range(18, width - 18):
+        bg.putpixel((x, line_y), (38, 201, 128, 255))
+    bg.save(background)
+
+    analysis = _analysis("صاعد")
+    # نجعل السعر الحالي بعيدًا عن موضع الخط حتى يثبت أن المزامنة تعتمد الاكتشاف.
+    analysis["current_price"] = analysis["current_price"] + 4.8
+
+    output = tmp_path / "preview_sync.png"
+    output.write_bytes(render_result(analysis, chart_background_path=background))
+    with Image.open(output) as image:
+        sample = image.getpixel((150, 72 + line_y))
+        assert sample[1] > sample[0]
+        assert sample[1] >= sample[2] - 20

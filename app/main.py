@@ -69,7 +69,7 @@ async def health():
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-adaptive-price-axis-clear-zones-v3.8",
+        "renderer": "saleem-full-page-chart-green-line-sync-v3.8.1",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
