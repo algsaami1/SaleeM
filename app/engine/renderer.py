@@ -421,21 +421,106 @@ def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
     return ImageOps.fit(source, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
 
 
-def _paste_chart_background(image: Image.Image, chart_background_path: str | os.PathLike[str] | None) -> bool:
-    """Use the uploaded chart as the chart-area background, then draw overlays above it."""
-    if not chart_background_path:
+def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    r, g, b, a = pixel
+    if a < 110:
         return False
+    if g < 78:
+        return False
+    if g < r + 15:
+        return False
+    if b > g + 55:
+        return False
+    if (g + b) < 150:
+        return False
+    return True
+
+
+def _row_green_score(chart_image: Image.Image, y: int) -> tuple[int, int]:
+    width, _ = chart_image.size
+    count = 0
+    run = 0
+    max_run = 0
+    for x in range(width):
+        if _is_green_reference_pixel(chart_image.getpixel((x, y))):
+            count += 1
+            run += 1
+            if run > max_run:
+                max_run = run
+        else:
+            run = 0
+    return count, max_run
+
+
+def _detect_green_reference_line_y(chart_image: Image.Image) -> int | None:
+    """Detect a horizontal green line in the uploaded chart after fitting.
+
+    Many user charts already contain a green current-price/reference line.  We
+    detect its vertical position so SaleeM can redraw the overlay on the same
+    row, which makes the annotations follow the original chart more accurately.
+    """
+    width, height = chart_image.size
+    if width < 80 or height < 80:
+        return None
+
+    top_skip = max(8, height // 30)
+    bottom_skip = max(8, height // 30)
+    best_y: int | None = None
+    best_score = -1
+    min_run = max(32, int(width * 0.18))
+    min_count = max(44, int(width * 0.24))
+
+    for y in range(top_skip, height - bottom_skip):
+        count, max_run = _row_green_score(chart_image, y)
+        if max_run < min_run and count < min_count:
+            continue
+        score = max_run * 3 + count
+        if score > best_score:
+            best_score = score
+            best_y = y
+
+    if best_y is None:
+        return None
+
+    band: list[tuple[int, int]] = []
+    for y in range(max(top_skip, best_y - 2), min(height - bottom_skip, best_y + 3)):
+        count, max_run = _row_green_score(chart_image, y)
+        score = max_run * 3 + count
+        if score >= int(best_score * 0.72):
+            band.append((score, y))
+    if not band:
+        return best_y
+
+    weighted_sum = sum(score * y for score, y in band)
+    total_score = sum(score for score, _ in band)
+    return int(round(weighted_sum / max(1, total_score)))
+
+
+def _paste_chart_background(
+    image: Image.Image,
+    chart_background_path: str | os.PathLike[str] | None,
+) -> tuple[bool, int | None]:
+    """Use the uploaded chart as the chart-area background, then draw overlays above it.
+
+    Returns a tuple of:
+      1) whether the background was successfully pasted
+      2) the detected absolute Y position of the chart's horizontal green line,
+         if one was found
+    """
+    if not chart_background_path:
+        return False, None
     path = Path(chart_background_path)
     if not path.exists():
-        return False
+        return False, None
 
     left, top, right, bottom = CHART
     try:
         with Image.open(path) as chart_image:
             chart_rgba = chart_image.convert("RGBA")
             fitted = _fit_cover(chart_rgba, (right - left, bottom - top))
+            detected_local_y = _detect_green_reference_line_y(fitted)
     except Exception:  # pragma: no cover
-        return False
+        return False, None
 
     image.alpha_composite(fitted, (left, top))
 
@@ -445,7 +530,8 @@ def _paste_chart_background(image: Image.Image, chart_background_path: str | os.
     d.rounded_rectangle((left, top, right, bottom), radius=6, fill=(0, 10, 26, 70))
     d.rectangle((left, top, right, bottom), outline=(112, 133, 168, 165), width=1)
     image.alpha_composite(overlay)
-    return True
+    detected_absolute_y = None if detected_local_y is None else top + detected_local_y
+    return True, detected_absolute_y
 
 
 def _draw_status(draw: ImageDraw.ImageDraw) -> None:
@@ -832,13 +918,28 @@ def _draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[in
     right_head = (ex - size * math.cos(angle + math.pi / 6), ey - size * math.sin(angle + math.pi / 6))
     draw.polygon([(ex, ey), left_head, right_head], fill=color)
 
-def _draw_current_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+def _draw_current_price(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+    *,
+    y_override: int | None = None,
+) -> None:
     current = _number(analysis.get("current_price"))
-    if current is None or not (price_min <= current <= price_max):
-        return
     left, top, right, bottom = CHART
-    y = _price_y(current, price_min, price_max)
-    draw.line((left, y, right, y), fill=(38, 201, 128, 145), width=1)
+    if y_override is None:
+        if current is None or not (price_min <= current <= price_max):
+            return
+        y = _price_y(current, price_min, price_max)
+    else:
+        y = int(max(top + 1, min(bottom - 1, y_override)))
+        if current is None:
+            # نحتفظ بالخط حتى لو تعذر الرقم، لكن بدون صندوق سعر فارغ.
+            draw.line((left, y, right, y), fill=(38, 201, 128, 170), width=2)
+            return
+
+    draw.line((left, y, right, y), fill=(38, 201, 128, 170), width=2)
     axis_left = right + 10
     axis_right = CHART_CARD[2] - 14
     draw.rounded_rectangle((axis_left, y - 15, axis_right, y + 15), radius=6, fill=(9, 133, 75, 255), outline=TP_GREEN, width=1)
@@ -1102,9 +1203,10 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
     using_chart_background = bool(chart_background_path) and Path(chart_background_path).exists()
+    detected_green_line_y: int | None = None
     _draw_grid(draw, price_min, price_max, background_mode=using_chart_background)
     if using_chart_background:
-        _paste_chart_background(image, chart_background_path)
+        using_chart_background, detected_green_line_y = _paste_chart_background(image, chart_background_path)
         draw = ImageDraw.Draw(image)
     count = max(1, len(candles))
     candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)
@@ -1113,7 +1215,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     draw = ImageDraw.Draw(image)
     if not using_chart_background:
         _draw_candles(draw, candles, price_min, price_max)
-    _draw_current_price(draw, analysis, price_min, price_max)
+    _draw_current_price(draw, analysis, price_min, price_max, y_override=detected_green_line_y)
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
