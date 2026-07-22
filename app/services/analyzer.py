@@ -639,20 +639,28 @@ def _validated_targets(
         if len(unique) == 3:
             break
 
-    if len(unique) < 3:
-        raise RuntimeError("تعذر تكوين ثلاثة أهداف منطقية داخل السيناريو.")
-    return unique
+    # حماية إضافية من التقريب أو تكرار المستويات: لا نوقف التحليل بسبب هدف ناقص.
+    multiplier = 4.0
+    while len(unique) < 3:
+        value = entry + risk * multiplier if direction == "صاعد" else entry - risk * multiplier
+        value = round(value, 2)
+        if all(abs(value - existing) >= max(0.25, risk * 0.15) for existing in unique):
+            unique.append(value)
+        multiplier += 0.8
+    return unique[:3]
 
 
 def _validate_analysis(
     data: dict[str, Any],
     market_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    image_current = _number(data.get("current_price"))
-    if data.get("chart_readable") is False and image_current is None:
-        raise RuntimeError(
-            "لم نتمكن من قراءة السعر الحالي من الصورة. فعّل Auto-scale وأظهر محور الأسعار كاملًا ثم أعد الرفع."
-        )
+    # القراءة من الصورة هي الأولوية، لكن فشلها لا يوقف التحليل بالكامل.
+    # نحفظ القيمة الخام في مفتاح داخلي حتى لا نخلطها بسعر السوق الاحتياطي.
+    image_current = _number(data.get("_image_current_price"))
+    if image_current is None and "_image_current_price" not in data:
+        image_current = _number(data.get("current_price"))
+    image_was_readable = bool(data.get("_image_chart_readable", data.get("chart_readable")))
+
     candles = _normalize_candles(data.get("candles"))
     market_close = float(candles[-1]["close"])
     current = float(image_current) if image_current is not None else market_close
@@ -663,6 +671,13 @@ def _validate_analysis(
         image_price_high = None
     if image_price_low is not None and image_price_low >= current:
         image_price_low = None
+
+    # إذا لم يقرأ النموذج حدي المحور، نستخدم نطاق الشموع المجلوبة بعد مواءمتها.
+    # هذا يمنع توقف الرسم ويظل محور النتيجة متوازنًا مع هامش علوي وسفلي.
+    if image_price_high is None:
+        image_price_high = max(float(candle["high"]) for candle in candles)
+    if image_price_low is None:
+        image_price_low = min(float(candle["low"]) for candle in candles)
     buy, sell = _normalize_probabilities(data)
     direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
     probability = max(buy, sell) if direction == "غير واضح" else (buy if direction == "صاعد" else sell)
@@ -722,10 +737,11 @@ def _validate_analysis(
 
     data.update(
         {
-            "chart_readable": True,
+            "chart_readable": bool(image_was_readable and image_current is not None),
             "candles": candles,
             "current_price": round(current, 2),
             "current_price_source": "chart_image" if image_current is not None else "market_fallback",
+            "price_range_source": "chart_image" if _number(data.get("image_price_high")) is not None and _number(data.get("image_price_low")) is not None else "market_candles_fallback",
             "image_price_high": round(image_price_high, 2) if image_price_high is not None else None,
             "image_price_low": round(image_price_low, 2) if image_price_low is not None else None,
             "market_last_close": round(market_close, 2),
@@ -808,7 +824,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 تأكد أن image_price_low < current_price < image_price_high. إذا تعذر رقم الحد الأعلى أو الأدنى فقط فأعده null، لكن ابذل محاولة دقيقة لقراءته.
 لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
 السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
-اجعل chart_readable=false فقط إذا تعذر قراءة السعر الحالي أو كانت الصورة غير صالحة للتحليل إطلاقًا.
+اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي، لكن أعد بقية التحليل المتاح لأن البرنامج يملك سعر سوق احتياطيًا ولن يوقف الطلب.
 
 التحليل المطلوب:
 - اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
@@ -827,7 +843,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق. يضبط محور الأسعار تلقائيًا باستخدام السعر الحالي وأعلى وأدنى سعر مقروءة من الصورة، مع هامش علوي وسفلي إضافي. تكون المساحة الأكبر دائمًا في جهة منطقة الهدف الخضراء. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم الدعم والمقاومة وFVG والجلسات وسهمًا واحدًا والدخول والوقف وثلاثة أهداف والملاحظات.
+النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق. يضبط محور الأسعار داخليًا باستخدام السعر الحالي وأعلى وأدنى نطاق متاح، مع هامش علوي وسفلي إضافي. تكون المساحة الأكبر دائمًا في جهة منطقة الهدف الخضراء. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم الدعم والمقاومة وFVG والجلسات وسهمًا واحدًا والدخول والوقف وثلاثة أهداف والملاحظات.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
@@ -942,6 +958,8 @@ def _analyze(path: Path) -> dict[str, Any]:
                 candle[key_name] = round(float(candle[key_name]) + offset, 2)
 
     model_data["candles"] = normalized_market
+    model_data["_image_current_price"] = image_current
+    model_data["_image_chart_readable"] = bool(model_data.get("chart_readable"))
     model_data["current_price"] = image_current if image_current is not None else normalized_market[-1]["close"]
     # الدعم والمقاومة في الصورة النهائية تُشتق من شموع مزود السوق بعد المواءمة.
     model_data["support_levels"] = []

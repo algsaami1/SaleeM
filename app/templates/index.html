@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=3.4.0">
+  <link rel="stylesheet" href="/static/style.css?v=3.5.0">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
@@ -21,40 +21,22 @@
       <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
         <label class="drop-zone" id="drop-zone" for="image-input">
           <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-          <input id="autoscale-confirmed" type="hidden" name="autoscale_confirmed" value="">
           <span class="upload-cloud" aria-hidden="true">
             <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
           </span>
           <strong>ارفع صورة الشارت</strong>
-          <small>ارفع شارت الذهب XAUUSD على فريم خمس دقائق، بعد تفعيل Auto-scale وإظهار السعر الحالي وأعلى وأدنى محور الأسعار بوضوح</small>
+          <small>ارفع صورة شارت الذهب XAUUSD على فريم خمس دقائق مع ظهور الشموع ومحور الأسعار بوضوح</small>
           <span class="primary-button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
             اختيار صورة
           </span>
           <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
-          <span class="autoscale-status" id="autoscale-status">قبل كل رفع: فعّل Auto-scale لمحور الأسعار</span>
         </label>
 
         <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
       </form>
     </section>
 
-    <div class="autoscale-modal" id="autoscale-modal" hidden>
-      <div class="autoscale-dialog" role="dialog" aria-modal="true" aria-labelledby="autoscale-title" aria-describedby="autoscale-description">
-        <span class="autoscale-dialog-icon" aria-hidden="true">↕</span>
-        <h3 id="autoscale-title">تأكد من تفعيل Auto-scale</h3>
-        <p id="autoscale-description">قبل تحليل الصورة، اجعل محور الأسعار تلقائيًا حتى يظهر السعر الحالي وأعلى وأدنى سعر بوضوح، ولا تقص محور الأسعار من الصورة.</p>
-        <div class="autoscale-checklist">
-          <span>✓ السعر الحالي ظاهر بجانب آخر شمعة</span>
-          <span>✓ أعلى وأدنى أرقام المحور ظاهرة</span>
-          <span>✓ الشموع غير مضغوطة أعلى أو أسفل الشاشة</span>
-        </div>
-        <div class="autoscale-actions">
-          <button class="autoscale-cancel" id="autoscale-cancel" type="button">اختيار صورة أخرى</button>
-          <button class="autoscale-confirm" id="autoscale-confirm" type="button">تم تفعيل Auto-scale</button>
-        </div>
-      </div>
-    </div>
 
     <section class="card processing-card" id="processing-card" hidden aria-live="polite">
       <div class="progress-column">
@@ -95,7 +77,7 @@
 
     <section class="card notice">
       <span class="notice-icon">💡</span>
-      <p>يأخذ التطبيق السعر الحالي وأعلى وأدنى محور الأسعار من صورة شارت <b>XAUUSD</b>، ويجلب الشموع والتوقيتات والمستويات من بيانات السوق، ثم يعيد ضبط المحور ويرسم السيناريو والأهداف بصورة واضحة.</p>
+      <p>يحاول التطبيق قراءة السعر الحالي وأعلى وأدنى نطاق ظاهر من صورة شارت <b>XAUUSD</b>، ثم يجلب الشموع والتوقيتات والمستويات من بيانات السوق ويعيد رسم السيناريو بصورة واضحة. وإذا تعذرت قراءة رقم من الصورة، يكمل التحليل بأقرب بيانات سوق متاحة بدل إيقافه.</p>
     </section>
 
     {% if error %}

@@ -24,7 +24,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="3.4.0",
+    version="3.5.0",
     description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
@@ -63,13 +63,13 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "3.4.0",
+        "version": "3.5.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-auto-scale-profit-space-v3.4",
+        "renderer": "saleem-adaptive-profit-space-v3.5",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
@@ -169,14 +169,23 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
             "متغير OPENAI_API_KEY",
             "تعذر جلب بيانات الفريمات",
             "خطأ خدمة التحليل",
-            "لم نتمكن من قراءة السعر الحالي",
+            "لم ترجع خدمة التحليل",
+            "بيانات السوق المتاحة",
+            "تعذر معايرة حركة",
+            "تعذر تكوين",
+            "ملف SALEEM_FINAL_SPEC",
         )
+        sensitive_markers = ("authorization", "api_key=", "/tmp/", "traceback", "bearer ")
+        lowered = technical_message.lower()
         if technical_message.startswith(safe_prefixes):
             error_message = technical_message
+        elif technical_message and not any(marker in lowered for marker in sensitive_markers):
+            # نظهر السبب الفعلي المختصر بدل رسالة عامة تخفي المشكلة.
+            error_message = f"تعذر إنشاء التحليل: {technical_message[:220]}"
         else:
             error_message = (
-                "تعذر إنشاء التحليل بدقة. فعّل Auto-scale وتأكد من ظهور السعر الحالي "
-                "وأعلى وأدنى محور الأسعار بوضوح في صورة شارت M5، ثم حاول مرة أخرى."
+                "تعذر إنشاء التحليل بسبب خطأ داخلي في البيانات أو الرسم. "
+                "تم تسجيل السبب في Railway للمراجعة."
             )
         return templates.TemplateResponse(
             "index.html",

@@ -105,3 +105,50 @@ def test_bearish_frames_can_produce_sell_without_buy_bias():
     assert direction == "هابط"
     assert sell > buy
     assert sell >= 65
+
+
+def test_unreadable_image_uses_market_fallback_without_stopping():
+    candles = _flat_candles(price=4120.0)
+    data = {
+        "chart_readable": False,
+        "_image_chart_readable": False,
+        "_image_current_price": None,
+        "candles": candles,
+        "direction": "غير واضح",
+        "buy_probability": 50,
+        "sell_probability": 50,
+        "setup_state": "مراقبة",
+        "entry_kind": "مراقبة",
+        "confirmation": "",
+        "current_price": candles[-1]["close"],
+        "image_price_high": None,
+        "image_price_low": None,
+        "support_levels": [],
+        "resistance_levels": [],
+        "entry": None,
+        "stop_loss": None,
+        "stop_reason": "",
+        "target_1": None,
+        "target_2": None,
+        "target_3": None,
+        "pattern_type": "لا يوجد",
+        "pattern_confidence": 0,
+        "pattern_lines": [],
+        "pattern_path": [],
+        "scenario": "",
+        "note": "",
+        "memory_matches": [],
+    }
+    summary = {
+        "direction": "عرضي",
+        "alignment": 50,
+        "frames": {frame: _frame() for frame in ("H4", "H1", "M15", "M5")},
+        "warnings": [],
+    }
+    result = _validate_analysis(data, summary)
+    assert result["current_price_source"] == "market_fallback"
+    assert result["price_range_source"] == "market_candles_fallback"
+    assert result["chart_readable"] is False
+    assert result["draw_mode"] == "watch"
+    assert result["image_price_high"] > result["current_price"]
+    assert result["image_price_low"] < result["current_price"]
