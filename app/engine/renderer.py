@@ -559,6 +559,7 @@ def _detect_green_reference_line_y(chart_image: Image.Image) -> int | None:
     return int(round(weighted_sum / max(1, total_score)))
 
 
+<<<<<<< main
 def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
 ) -> tuple[Image.Image | None, int | None]:
@@ -568,6 +569,24 @@ def _prepare_chart_background(
     path = Path(chart_background_path)
     if not path.exists():
         return None, None
+=======
+def _paste_chart_background(
+    image: Image.Image,
+    chart_background_path: str | os.PathLike[str] | None,
+) -> tuple[bool, int | None]:
+    """Use the uploaded chart as the chart-area background, then draw overlays above it.
+
+    Returns a tuple of:
+      1) whether the background was successfully pasted
+      2) the detected absolute Y position of the chart's horizontal green line,
+         if one was found
+    """
+    if not chart_background_path:
+        return False, None
+    path = Path(chart_background_path)
+    if not path.exists():
+        return False, None
+>>>>>>> origin/main
 
     left, top, right, bottom = CHART
     try:
@@ -576,6 +595,7 @@ def _prepare_chart_background(
             fitted = _fit_cover(chart_rgba, (right - left, bottom - top))
             detected_local_y = _detect_green_reference_line_y(fitted)
     except Exception:  # pragma: no cover
+<<<<<<< main
         return None, None
 
     detected_absolute_y = None if detected_local_y is None else top + detected_local_y
@@ -585,6 +605,9 @@ def _prepare_chart_background(
 def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) -> None:
     """Paste a previously fitted chart and add the readability overlay."""
     left, top, right, bottom = CHART
+=======
+        return False, None
+>>>>>>> origin/main
 
     image.alpha_composite(fitted, (left, top))
 
@@ -594,6 +617,7 @@ def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) ->
     d.rounded_rectangle((left, top, right, bottom), radius=6, fill=(0, 10, 26, 70))
     d.rectangle((left, top, right, bottom), outline=(112, 133, 168, 165), width=1)
     image.alpha_composite(overlay)
+<<<<<<< main
 
 
 def _paste_chart_background(
@@ -605,6 +629,9 @@ def _paste_chart_background(
     if fitted is None:
         return False, None
     _paste_prepared_chart_background(image, fitted)
+=======
+    detected_absolute_y = None if detected_local_y is None else top + detected_local_y
+>>>>>>> origin/main
     return True, detected_absolute_y
 
 
@@ -1276,6 +1303,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     # الشارت يملأ الصفحة من الأعلى حتى صندوق الملاحظات السفلي.
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
+<<<<<<< main
     prepared_background, detected_green_line_y = _prepare_chart_background(chart_background_path)
     using_chart_background = prepared_background is not None
 
@@ -1292,6 +1320,13 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_grid(draw, price_min, price_max, background_mode=using_chart_background)
     if prepared_background is not None:
         _paste_prepared_chart_background(image, prepared_background)
+=======
+    using_chart_background = bool(chart_background_path) and Path(chart_background_path).exists()
+    detected_green_line_y: int | None = None
+    _draw_grid(draw, price_min, price_max, background_mode=using_chart_background)
+    if using_chart_background:
+        using_chart_background, detected_green_line_y = _paste_chart_background(image, chart_background_path)
+>>>>>>> origin/main
         draw = ImageDraw.Draw(image)
     count = max(1, len(candles))
     candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)
