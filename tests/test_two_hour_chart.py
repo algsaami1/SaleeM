@@ -52,10 +52,10 @@ def sample_analysis():
     }
 
 
-def test_strength_width_matches_spec():
-    assert _strength_width(90) == 8
-    assert _strength_width(75) == 6
-    assert _strength_width(60) == 4
+def test_strength_width_matches_clean_chart_spec():
+    assert _strength_width(90) == 3
+    assert _strength_width(75) == 2
+    assert _strength_width(60) == 1
 
 
 def test_validation_accepts_flexible_candles_and_three_targets():
@@ -75,6 +75,7 @@ def test_renderer_creates_png():
 
 def test_auto_scale_keeps_extra_margins_and_more_space_on_green_side():
     result = _validate_analysis(sample_analysis())
+    result.update(direction="صاعد", analysis_direction="صاعد", draw_mode="conditional")
     price_min, price_max = _price_range(result)
     entry = float(result["entry"])
 

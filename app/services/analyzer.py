@@ -216,75 +216,155 @@ def _atr(candles: list[dict[str, Any]], periods: int = 8) -> float:
     return sum(ranges) / len(ranges)
 
 
-def _cluster_levels(candles: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
+def _cluster_levels(
+    candles: list[dict[str, Any]],
+    kind: str,
+    current: float,
+) -> list[dict[str, Any]]:
+    """اشتقاق مستويات فعلية من القمم والقيعان مع أولوية للـ pivots والحداثة."""
     if not candles:
         return []
-    prices = [float(c["low"] if kind == "support" else c["high"]) for c in candles]
-    total_range = max(prices) - min(prices)
-    tolerance = max(0.35, total_range * 0.035)
-    clusters: list[list[float]] = []
-    for price in sorted(prices):
+
+    atr = max(0.01, _atr(candles))
+    tolerance = max(0.25, atr * 0.32)
+    side_tolerance = max(0.18, atr * 0.18)
+    key = "low" if kind == "support" else "high"
+    candidates: list[dict[str, Any]] = []
+
+    for index, candle in enumerate(candles):
+        price = float(candle[key])
+        left = candles[max(0, index - 2):index]
+        right = candles[index + 1:index + 3]
+        neighbors = left + right
+        if kind == "support":
+            pivot = bool(neighbors) and price <= min(float(item["low"]) for item in neighbors)
+            valid_side = price <= current + side_tolerance
+        else:
+            pivot = bool(neighbors) and price >= max(float(item["high"]) for item in neighbors)
+            valid_side = price >= current - side_tolerance
+        if valid_side:
+            candidates.append({"price": price, "index": index, "pivot": pivot})
+
+    clusters: list[list[dict[str, Any]]] = []
+    for item in sorted(candidates, key=lambda value: float(value["price"])):
         for cluster in clusters:
-            center = sum(cluster) / len(cluster)
-            if abs(price - center) <= tolerance:
-                cluster.append(price)
+            center = statistics.median(float(value["price"]) for value in cluster)
+            if abs(float(item["price"]) - center) <= tolerance:
+                cluster.append(item)
                 break
         else:
-            clusters.append([price])
+            clusters.append([item])
 
     levels: list[dict[str, Any]] = []
+    last_index = max(1, len(candles) - 1)
     for cluster in clusters:
-        touches = len(cluster)
-        if touches < 2:
-            continue
-        center = sum(cluster) / touches
-        strength = min(92, 48 + touches * 8)
-        levels.append({"price": round(center, 2), "strength": strength, "touches": min(touches, 12)})
-    return sorted(levels, key=lambda level: (-int(level["strength"]), -int(level["touches"])))[:4]
+        prices = [float(item["price"]) for item in cluster]
+        center = float(statistics.median(prices))
+        touches = len({int(item["index"]) for item in cluster})
+        pivot_count = sum(1 for item in cluster if bool(item["pivot"]))
+        latest_index = max(int(item["index"]) for item in cluster)
+        recency = latest_index / last_index
+        strength = int(round(_clip(38 + touches * 7 + pivot_count * 7 + recency * 10, 42, 92)))
+        levels.append(
+            {
+                "price": round(center, 2),
+                "strength": strength,
+                "touches": min(12, max(1, touches)),
+                "source": "market",
+            }
+        )
+
+    return levels
 
 
 def _normalize_levels(raw: Any, candles: list[dict[str, Any]], kind: str, current: float) -> list[dict[str, Any]]:
+    """دمج مستويات النموذج والسوق وضمان ظهور أقرب مستويين بوضوح.
+
+    إذا لم يوجد مستوى تاريخي على الجهة المطلوبة، نضيف مستوى تقديري منخفض القوة
+    مبنيًا على ATR ونميّزه في الرسم بدل تسميته مقاومة/دعم قويًا.
+    """
+    atr = max(0.01, _atr(candles))
+    side_tolerance = max(0.25, atr * 0.20)
     levels: list[dict[str, Any]] = []
+
     for item in raw if isinstance(raw, list) else []:
         if not isinstance(item, dict):
             continue
         price = _number(item.get("price"))
         if price is None:
             continue
-        # الدعم يجب أن يكون أسفل/قريبًا من السعر، والمقاومة أعلى/قريبة منه.
-        side_tolerance = max(0.25, _atr(candles) * 0.20)
         if kind == "support" and price > current + side_tolerance:
             continue
         if kind == "resistance" and price < current - side_tolerance:
             continue
-        strength = max(35, min(95, int(item.get("strength") or 50)))
-        touches = max(1, min(12, int(item.get("touches") or 1)))
-        levels.append({"price": round(price, 2), "strength": strength, "touches": touches})
+        levels.append(
+            {
+                "price": round(price, 2),
+                "strength": max(35, min(95, int(item.get("strength") or 50))),
+                "touches": max(1, min(12, int(item.get("touches") or 1))),
+                "source": "model",
+            }
+        )
 
-    if len(levels) < 2:
-        existing = {round(float(level["price"]), 1) for level in levels}
-        side_tolerance = max(0.25, _atr(candles) * 0.20)
-        for derived in _cluster_levels(candles, kind):
-            price = float(derived["price"])
-            if kind == "support" and price > current + side_tolerance:
-                continue
-            if kind == "resistance" and price < current - side_tolerance:
-                continue
-            if round(price, 1) not in existing:
-                levels.append(derived)
-                existing.add(round(price, 1))
+    levels.extend(_cluster_levels(candles, kind, current))
 
-    # قوة المستوى أولًا ثم قربه من السعر الحالي، مع دمج المستويات المتقاربة.
-    levels.sort(key=lambda level: (-(float(level["strength"]) - abs(float(level["price"]) - current) * 1.5)))
+    # دمج المستويات المتقاربة مع الاحتفاظ بالأقوى والأحدث.
+    merge_distance = max(0.30, atr * 0.32)
+    levels.sort(
+        key=lambda level: (
+            -int(level.get("strength") or 0),
+            abs(float(level["price"]) - current),
+        )
+    )
     merged: list[dict[str, Any]] = []
-    merge_distance = max(0.35, _atr(candles) * 0.35)
     for level in levels:
         if any(abs(float(level["price"]) - float(other["price"])) <= merge_distance for other in merged):
             continue
         merged.append(level)
-        if len(merged) == 2:
+
+    # أقرب القمم/القيعان الفعلية كخطة احتياطية، حتى لو كانت لمسة واحدة فقط.
+    key = "low" if kind == "support" else "high"
+    raw_prices = sorted(
+        (float(candle[key]) for candle in candles),
+        reverse=(kind == "support"),
+    )
+    for price in raw_prices:
+        valid_side = price <= current + side_tolerance if kind == "support" else price >= current - side_tolerance
+        if not valid_side:
+            continue
+        if any(abs(price - float(other["price"])) <= merge_distance for other in merged):
+            continue
+        merged.append(
+            {
+                "price": round(price, 2),
+                "strength": 44,
+                "touches": 1,
+                "source": "market",
+            }
+        )
+        if len(merged) >= 2:
             break
-    return sorted(merged, key=lambda level: float(level["price"]), reverse=True)
+
+    # لا نخفي خطوط الجهة المقابلة إذا كان السعر عند قمة/قاع جديد تمامًا.
+    # نستخدم مستوى تقديري صريح منخفض القوة بدل اختلاق مستوى تاريخي.
+    step = max(0.55, atr * 0.90)
+    projection_index = 0
+    while len(merged) < 2:
+        projection_index += 1
+        distance = step * (1.0 + 0.85 * (projection_index - 1))
+        price = current - distance if kind == "support" else current + distance
+        merged.append(
+            {
+                "price": round(price, 2),
+                "strength": 40,
+                "touches": 0,
+                "source": "projected",
+            }
+        )
+
+    # الأقرب أولًا مع المحافظة على الجهة الصحيحة.
+    merged.sort(key=lambda level: abs(float(level["price"]) - current))
+    return merged[:2]
 
 
 def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
@@ -317,6 +397,104 @@ def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
     sell = 100 - buy
     return buy, sell
 
+
+
+def _apply_level_pressure(
+    candles: list[dict[str, Any]],
+    current: float,
+    supports: list[dict[str, Any]],
+    resistances: list[dict[str, Any]],
+    direction: str,
+    buy: int,
+    sell: int,
+) -> tuple[str, int, int, dict[str, Any]]:
+    """تعديل الاحتمالات عند الاصطدام بدعم/مقاومة قريبة بدل فرض اتجاه.
+
+    المستويات التقديرية لا تُستخدم كدليل ضغط؛ هي للرسم فقط عند غياب مستوى
+    تاريخي واضح. أما المستويات الفعلية فتؤثر حسب القرب والقوة وذيول الرفض.
+    """
+    atr = max(0.01, _atr(candles))
+    recent = candles[-2:] if candles else []
+    last = candles[-1] if candles else None
+    buy_adj = float(buy)
+    sell_adj = float(sell)
+    context: dict[str, Any] = {
+        "resistance_pressure": 0,
+        "support_pressure": 0,
+        "nearest_resistance": None,
+        "nearest_support": None,
+    }
+
+    actual_resistances = [
+        level for level in resistances
+        if str(level.get("source") or "") != "projected" and float(level["price"]) >= current - atr * 0.20
+    ]
+    actual_supports = [
+        level for level in supports
+        if str(level.get("source") or "") != "projected" and float(level["price"]) <= current + atr * 0.20
+    ]
+
+    if actual_resistances:
+        resistance = min(actual_resistances, key=lambda item: abs(float(item["price"]) - current))
+        price = float(resistance["price"])
+        distance_atr = max(0.0, price - current) / atr
+        strength = int(resistance.get("strength") or 50)
+        rejection = 0.0
+        for candle in recent:
+            body = max(0.02, abs(float(candle["close"]) - float(candle["open"])))
+            upper_wick = max(0.0, float(candle["high"]) - max(float(candle["open"]), float(candle["close"])))
+            if float(candle["close"]) <= price + atr * 0.10:
+                rejection = max(rejection, upper_wick / body)
+        if distance_atr <= 1.15 and (last is None or float(last["close"]) < price + atr * 0.15):
+            pressure = 4 + max(0, strength - 55) // 6
+            if distance_atr <= 0.55:
+                pressure += 4
+            if rejection >= 0.8:
+                pressure += min(6, int(rejection * 2))
+            pressure = max(0, min(16, pressure))
+            buy_adj -= pressure
+            sell_adj += pressure
+            context["resistance_pressure"] = pressure
+            context["nearest_resistance"] = round(price, 2)
+
+    if actual_supports:
+        support = min(actual_supports, key=lambda item: abs(float(item["price"]) - current))
+        price = float(support["price"])
+        distance_atr = max(0.0, current - price) / atr
+        strength = int(support.get("strength") or 50)
+        rejection = 0.0
+        for candle in recent:
+            body = max(0.02, abs(float(candle["close"]) - float(candle["open"])))
+            lower_wick = max(0.0, min(float(candle["open"]), float(candle["close"])) - float(candle["low"]))
+            if float(candle["close"]) >= price - atr * 0.10:
+                rejection = max(rejection, lower_wick / body)
+        if distance_atr <= 1.15 and (last is None or float(last["close"]) > price - atr * 0.15):
+            pressure = 4 + max(0, strength - 55) // 6
+            if distance_atr <= 0.55:
+                pressure += 4
+            if rejection >= 0.8:
+                pressure += min(6, int(rejection * 2))
+            pressure = max(0, min(16, pressure))
+            sell_adj -= pressure
+            buy_adj += pressure
+            context["support_pressure"] = pressure
+            context["nearest_support"] = round(price, 2)
+
+    total = max(1.0, buy_adj + sell_adj)
+    buy_final = int(round(_clip(buy_adj * 100.0 / total, 5, 95)))
+    sell_final = 100 - buy_final
+    margin = abs(buy_final - sell_final)
+
+    if margin < 12:
+        adjusted_direction = "غير واضح"
+    else:
+        adjusted_direction = "صاعد" if buy_final > sell_final else "هابط"
+
+    # لا نقلب اتجاهًا قويًا بمجرد ضغط صغير؛ نجعله مراقبة عند التعارض المحدود.
+    if direction in {"صاعد", "هابط"} and adjusted_direction != direction and margin < 18:
+        adjusted_direction = "غير واضح"
+
+    return adjusted_direction, buy_final, sell_final, context
 
 def _clip(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
@@ -407,11 +585,20 @@ def _build_market_summary(market_data: dict[str, Any]) -> dict[str, Any]:
     else:
         alignment = 50
 
+    m5_candles = frames.get("M5") if isinstance(frames, dict) else None
+    m5_latest_candle_time = (
+        m5_candles[-1].get("time")
+        if isinstance(m5_candles, list) and m5_candles and isinstance(m5_candles[-1], dict)
+        else market_data.get("latest_candle_time")
+    )
+
     return {
         "source": market_data.get("source"),
         "symbol": market_data.get("symbol"),
+        "timezone": market_data.get("timezone") or "Asia/Muscat",
         "fetched_at": market_data.get("fetched_at"),
         "latest_candle_time": market_data.get("latest_candle_time"),
+        "m5_latest_candle_time": m5_latest_candle_time,
         "direction": direction,
         "score": round(weighted_score, 3),
         "alignment": int(alignment),
@@ -463,14 +650,14 @@ def _choose_direction(
             frame_score = 0.0
 
     # النموذج يساهم، لكن لا يستطيع منفردًا فرض الاتجاه.
-    combined = model_score * 0.25 + m5_score * 0.28 + frame_score * 0.47
+    combined = model_score * 0.15 + m5_score * 0.28 + frame_score * 0.57
 
     h4 = str((frames.get("H4") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     h1 = str((frames.get("H1") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     higher_conflict = h4 in {"صاعد", "هابط"} and h1 in {"صاعد", "هابط"} and h4 != h1
 
     # منطقة حياد حقيقية؛ لا تحويل تلقائي إلى شراء أو بيع.
-    neutral_threshold = 0.28 if higher_conflict else 0.22
+    neutral_threshold = 0.36 if higher_conflict else 0.30
     if abs(combined) < neutral_threshold:
         edge = int(round(min(6.0, abs(combined) * 18.0)))
         if combined >= 0:
@@ -478,7 +665,7 @@ def _choose_direction(
         return "غير واضح", 50 - edge, 50 + edge
 
     direction = "صاعد" if combined > 0 else "هابط"
-    raw_probability = int(round(_clip(52 + abs(combined) * 17, 52, 88)))
+    raw_probability = int(round(_clip(52 + abs(combined) * 16, 52, 84)))
 
     alignment = int((market_summary or {}).get("alignment") or 50) if isinstance(market_summary, dict) else 50
     higher_direction = str((market_summary or {}).get("direction") or "عرضي") if isinstance(market_summary, dict) else "عرضي"
@@ -679,11 +866,13 @@ def _validate_analysis(
     if image_price_low is None:
         image_price_low = min(float(candle["low"]) for candle in candles)
     buy, sell = _normalize_probabilities(data)
-    direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
-    probability = max(buy, sell) if direction == "غير واضح" else (buy if direction == "صاعد" else sell)
-
     supports = _normalize_levels(data.get("support_levels"), candles, "support", current)
     resistances = _normalize_levels(data.get("resistance_levels"), candles, "resistance", current)
+    direction, buy, sell = _choose_direction(data, candles, buy, sell, market_summary)
+    direction, buy, sell, level_pressure = _apply_level_pressure(
+        candles, current, supports, resistances, direction, buy, sell
+    )
+    probability = max(buy, sell) if direction == "غير واضح" else (buy if direction == "صاعد" else sell)
 
     # في حالة الغموض نحتفظ بسيناريو مراقبة فقط ولا نعرض صفقة مؤكدة مختلقة.
     working_direction = direction
@@ -709,15 +898,21 @@ def _validate_analysis(
     )
 
     model_state = str(data.get("setup_state") or "مراقبة")
-    if direction not in {"صاعد", "هابط"} or probability < 56 or entry_kind == "مراقبة":
+    opposing_pressure = (
+        int(level_pressure.get("resistance_pressure") or 0)
+        if working_direction == "صاعد"
+        else int(level_pressure.get("support_pressure") or 0)
+    )
+    if direction not in {"صاعد", "هابط"} or probability < 58 or entry_kind == "مراقبة":
         draw_mode = "watch"
     elif (
-        probability >= 70
+        probability >= 72
         and model_state == "مؤكد"
         and higher_aligned
         and alignment >= 75
         and geometry_valid
         and not warnings
+        and opposing_pressure < 8
     ):
         draw_mode = "confirmed"
     else:
@@ -766,10 +961,13 @@ def _validate_analysis(
             "note": " ".join(str(data.get("note") or "").split())[:80],
             "market_data_source": (market_summary or {}).get("source"),
             "market_data_fetched_at": (market_summary or {}).get("fetched_at"),
+            "market_timezone": (market_summary or {}).get("timezone", "Asia/Muscat"),
             "market_latest_candle_time": (market_summary or {}).get("latest_candle_time"),
+            "market_m5_latest_candle_time": (market_summary or {}).get("m5_latest_candle_time"),
             "market_direction": (market_summary or {}).get("direction", "غير واضح"),
             "frame_alignment": alignment,
             "frame_directions": frames if isinstance(frames, dict) else {},
+            "level_pressure": level_pressure,
             "market_data_cache": (market_summary or {}).get("cache", {}),
             "market_data_warnings": (market_summary or {}).get("warnings", []),
         }
@@ -843,7 +1041,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق. يضبط محور الأسعار داخليًا باستخدام السعر الحالي وأعلى وأدنى نطاق متاح، مع هامش علوي وسفلي إضافي. تكون المساحة الأكبر دائمًا في جهة منطقة الهدف الخضراء. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم الدعم والمقاومة وFVG والجلسات وسهمًا واحدًا والدخول والوقف وثلاثة أهداف والملاحظات.
+النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق. يضبط محور الأسعار داخليًا باستخدام السعر الحالي وأعلى وأدنى نطاق متاح، مع هامش علوي وسفلي إضافي. تكون المساحة الأكبر دائمًا في جهة منطقة الهدف الخضراء. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم الدعم والمقاومة وFVG، وشريط جلسات مرتبطًا فعليًا بمحور الزمن، ومسار سيناريو رفيعًا غير مبالغ فيه، والدخول والوقف وثلاثة أهداف والملاحظات.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
@@ -961,9 +1159,8 @@ def _analyze(path: Path) -> dict[str, Any]:
     model_data["_image_current_price"] = image_current
     model_data["_image_chart_readable"] = bool(model_data.get("chart_readable"))
     model_data["current_price"] = image_current if image_current is not None else normalized_market[-1]["close"]
-    # الدعم والمقاومة في الصورة النهائية تُشتق من شموع مزود السوق بعد المواءمة.
-    model_data["support_levels"] = []
-    model_data["resistance_levels"] = []
+    # ندمج مستويات النموذج مع المستويات المشتقة من شموع السوق بعد مواءمتها.
+    # لا نحذفها لأن H1 وM15 قد يحتويان مقاومات أو دعومًا لا تظهر بوضوح في نافذة M5.
     model_data["market_price_offset"] = round(offset, 3)
 
     return _validate_analysis(model_data, market_summary=market_summary)

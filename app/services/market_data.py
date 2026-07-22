@@ -48,7 +48,7 @@ class TwelveDataConfig:
     api_key: str
     base_url: str = "https://api.twelvedata.com"
     symbol: str = "XAU/USD"
-    timezone_name: str = "UTC"
+    timezone_name: str = "Asia/Muscat"
     timeout_seconds: float = 30.0
     retries: int = 3
     cache_path: Path = Path("/tmp/saleem_market_data_cache.json")
@@ -68,7 +68,7 @@ class TwelveDataConfig:
         ).strip().rstrip("/")
 
         symbol = os.getenv("TWELVE_DATA_SYMBOL", "XAU/USD").strip()
-        timezone_name = os.getenv("TWELVE_DATA_TIMEZONE", "UTC").strip()
+        timezone_name = os.getenv("TWELVE_DATA_TIMEZONE", "Asia/Muscat").strip()
         cache_path = Path(
             os.getenv(
                 "MARKET_DATA_CACHE_PATH",
@@ -96,7 +96,7 @@ class TwelveDataConfig:
             api_key=api_key,
             base_url=base_url,
             symbol=symbol,
-            timezone_name=timezone_name or "UTC",
+            timezone_name=timezone_name or "Asia/Muscat",
             timeout_seconds=max(5.0, timeout_seconds),
             retries=max(1, min(5, retries)),
             cache_path=cache_path,

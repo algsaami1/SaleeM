@@ -152,3 +152,91 @@ def test_unreadable_image_uses_market_fallback_without_stopping():
     assert result["draw_mode"] == "watch"
     assert result["image_price_high"] > result["current_price"]
     assert result["image_price_low"] < result["current_price"]
+
+
+def test_levels_always_include_two_supports_and_two_resistances():
+    candles = _flat_candles(price=4120.0)
+    data = {
+        "chart_readable": True,
+        "candles": candles,
+        "direction": "غير واضح",
+        "buy_probability": 50,
+        "sell_probability": 50,
+        "setup_state": "مراقبة",
+        "entry_kind": "مراقبة",
+        "confirmation": "",
+        "current_price": 4120.0,
+        "image_price_high": 4123.0,
+        "image_price_low": 4117.0,
+        "support_levels": [],
+        "resistance_levels": [],
+        "entry": None,
+        "stop_loss": None,
+        "stop_reason": "",
+        "target_1": None,
+        "target_2": None,
+        "target_3": None,
+        "pattern_type": "لا يوجد",
+        "pattern_confidence": 0,
+        "pattern_lines": [],
+        "pattern_path": [],
+        "scenario": "",
+        "note": "",
+        "memory_matches": [],
+    }
+    summary = {
+        "direction": "عرضي",
+        "alignment": 50,
+        "frames": {frame: _frame() for frame in ("H4", "H1", "M15", "M5")},
+        "warnings": [],
+    }
+    result = _validate_analysis(data, summary)
+    assert len(result["support_levels"]) == 2
+    assert len(result["resistance_levels"]) == 2
+
+
+def test_strong_nearby_resistance_prevents_unchecked_buy_confirmation():
+    candles = _flat_candles(price=4120.0)
+    candles[-1].update(open=4119.8, high=4120.55, low=4119.7, close=4120.0)
+    data = {
+        "chart_readable": True,
+        "candles": candles,
+        "direction": "صاعد",
+        "buy_probability": 78,
+        "sell_probability": 22,
+        "setup_state": "مؤكد",
+        "entry_kind": "اختراق",
+        "confirmation": "إغلاق فوق المقاومة",
+        "current_price": 4120.0,
+        "image_price_high": 4123.0,
+        "image_price_low": 4117.0,
+        "support_levels": [{"price": 4119.0, "strength": 70, "touches": 3}],
+        "resistance_levels": [{"price": 4120.25, "strength": 88, "touches": 5}],
+        "entry": 4120.25,
+        "stop_loss": 4119.2,
+        "stop_reason": "أسفل الدعم",
+        "target_1": 4121.3,
+        "target_2": 4122.0,
+        "target_3": 4123.0,
+        "pattern_type": "لا يوجد",
+        "pattern_confidence": 0,
+        "pattern_lines": [],
+        "pattern_path": [],
+        "scenario": "اختراق مشروط",
+        "note": "",
+        "memory_matches": [],
+    }
+    summary = {
+        "direction": "صاعد",
+        "alignment": 100,
+        "frames": {
+            "H4": _frame("صاعد", 0.8, 80),
+            "H1": _frame("صاعد", 0.7, 78),
+            "M15": _frame("صاعد", 0.5, 72),
+            "M5": _frame("صاعد", 0.4, 68),
+        },
+        "warnings": [],
+    }
+    result = _validate_analysis(data, summary)
+    assert result["level_pressure"]["resistance_pressure"] > 0
+    assert result["draw_mode"] != "confirmed"
