@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image
 
-from app.engine.renderer import _axis_values, _price_range, render_result
+from app.engine.renderer import CHART, CHART_CARD, NOTES, _axis_values, _price_range, render_result
 
 
 def _candles(start=4142.0, count=30):
@@ -112,3 +112,11 @@ def test_renderer_accepts_chart_background(tmp_path):
     with Image.open(output) as image:
         assert image.size == (1080, 1920)
         assert image.format == "PNG"
+
+
+def test_result_chart_fills_page_until_bottom_notes_box():
+    assert CHART_CARD[1] <= 24
+    assert CHART[1] <= 80
+    assert CHART[3] - CHART[1] >= 1200
+    assert CHART_CARD[3] < NOTES[1]
+    assert NOTES[3] >= 1880

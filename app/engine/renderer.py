@@ -49,11 +49,12 @@ TEAL = (60, 216, 196, 255)
 TP_GREEN = (25, 211, 112, 255)
 TP_GREEN_FILL = (25, 211, 112, 52)
 
-MAIN_CARD = (24, 150, 1056, 1868)
-CHART_CARD = (36, 500, 1044, 1352)
-CHART = (72, 552, 922, 1222)
-PRICE_AXIS_X = 946
-NOTES = (36, 1370, 1044, 1848)
+# تخطيط صورة النتيجة: الشارت هو العنصر الرئيسي ويبدأ من أعلى الصورة،
+# ثم يأتي صندوق ملاحظات التحليل وحده في الأسفل.
+CHART_CARD = (20, 20, 1060, 1352)
+CHART = (56, 72, 928, 1280)
+PRICE_AXIS_X = 952
+NOTES = (36, 1370, 1044, 1884)
 
 _FONT_CACHE: dict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
@@ -1096,12 +1097,8 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(image)
 
-    _draw_status(draw)
-    _shadow_card(image, MAIN_CARD, 24, 6)
-    draw = ImageDraw.Draw(image)
-    _draw_header(draw, analysis)
-    _draw_signal(draw, analysis)
-
+    # لا نضع ترويسة أو بطاقات معلومات فوق الشارت في صورة النتيجة؛
+    # الشارت يملأ الصفحة من الأعلى حتى صندوق الملاحظات السفلي.
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
     using_chart_background = bool(chart_background_path) and Path(chart_background_path).exists()
