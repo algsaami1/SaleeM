@@ -24,7 +24,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="3.7.0",
+    version="3.8.0",
     description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
@@ -63,13 +63,13 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "3.7.0",
+        "version": "3.8.0",
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-balanced-levels-clean-chart-v3.7",
+        "renderer": "saleem-adaptive-price-axis-clear-zones-v3.8",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
