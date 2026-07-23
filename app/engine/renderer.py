@@ -321,6 +321,21 @@ def _strength_name(strength: int) -> str:
     return "متوسطة"
 
 
+def _image_key_prices(analysis: dict[str, Any]) -> tuple[float, float, float] | None:
+    # نفعّل هذا النمط فقط عندما تكون قراءة محور الصورة نفسها متاحة، حتى لا
+    # نفسد سلوك الاختيار التحليلي في الحالات القديمة أو الاختبارات الاصطناعية.
+    if not (analysis.get("image_axis_labels") or []):
+        return None
+    image_high = _number(analysis.get("image_price_high"))
+    current = _number(analysis.get("current_price"))
+    image_low = _number(analysis.get("image_price_low"))
+    if image_high is None or current is None or image_low is None:
+        return None
+    if not (image_low < current < image_high):
+        return None
+    return float(image_high), float(current), float(image_low)
+
+
 def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
     labels = analysis.get("image_axis_labels") or []
     points: list[tuple[float, float]] = []
@@ -338,6 +353,13 @@ def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
 
 
 def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
+    key_prices = _image_key_prices(analysis)
+    if key_prices is not None:
+        image_high, current, image_low = key_prices
+        span = max(0.0001, image_high - image_low)
+        pad = max(span * 0.04, 0.12)
+        return image_low - pad, image_high + pad
+
     points = _image_axis_points(analysis)
     if len(points) < 2:
         return None
@@ -844,17 +866,26 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 
-def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[float, int]]:
+def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
+    key_prices = _image_key_prices(analysis)
+    if key_prices is not None:
+        image_high, current, image_low = key_prices
+        return [
+            ("high", image_high, _price_y(image_high, price_min, price_max)),
+            ("current", current, _price_y(current, price_min, price_max)),
+            ("low", image_low, _price_y(image_low, price_min, price_max)),
+        ]
+
     points = _image_axis_points(analysis)
     if len(points) >= 2:
-        labels: list[tuple[float, int]] = []
+        labels: list[tuple[str, float, int]] = []
         for price, y_ratio in points:
             if price_min <= price <= price_max:
                 y = int(CHART[1] + y_ratio * (CHART[3] - CHART[1]))
-                labels.append((round(price, 6), y))
+                labels.append(("axis", round(price, 6), y))
         if len(labels) >= 2:
             return labels
-    return [(price, _price_y(price, price_min, price_max)) for price in _axis_values(price_min, price_max)]
+    return [("axis", price, _price_y(price, price_min, price_max)) for price in _axis_values(price_min, price_max)]
 
 
 
@@ -867,8 +898,8 @@ def _draw_right_price_axis(
     current_y: int | None = None,
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
-    for price, y in _right_axis_labels(analysis, price_min, price_max):
-        if CHART[1] + 8 <= y <= CHART[3] - 6:
+    for role, price, y in _right_axis_labels(analysis, price_min, price_max):
+        if CHART[1] + 8 <= y <= CHART[3] - 6 and role not in {"high", "current"}:
             draw.text((PRICE_AXIS_X + 12, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
 
@@ -882,7 +913,7 @@ def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: f
     _draw_rtl(draw, (CHART_CARD[2] - 26, top - 34), "محور السعر", F_SMALL, MUTED)
     draw.text((left, top - 34), "XAUUSD · M5", font=F_STATUS, fill=(208, 220, 240, 255), anchor="la")
 
-    for price, y in _right_axis_labels(analysis, price_min, price_max):
+    for role, price, y in _right_axis_labels(analysis, price_min, price_max):
         if not background_mode and CHART[1] + 4 <= y <= CHART[3] - 4:
             draw.line((left, y, right, y), fill=GRID, width=1)
 
