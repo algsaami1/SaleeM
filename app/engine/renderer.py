@@ -336,6 +336,12 @@ def _image_key_prices(analysis: dict[str, Any]) -> tuple[float, float, float] | 
     return float(image_high), float(current), float(image_low)
 
 
+def _strict_axis_sync(analysis: dict[str, Any]) -> bool:
+    if _image_key_prices(analysis) is not None:
+        return True
+    return len(_image_axis_points(analysis)) >= 2
+
+
 def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
     labels = analysis.get("image_axis_labels") or []
     points: list[tuple[float, float]] = []
@@ -543,6 +549,24 @@ def _anchored_price_range(
     above_fraction = max(1.0 / chart_height, (y - top) / chart_height)
     below_fraction = max(1.0 / chart_height, (bottom - y) / chart_height)
     original_span = max(0.0001, price_max - price_min)
+
+    key_prices = _image_key_prices(analysis)
+    if key_prices is not None:
+        image_high, _, image_low = key_prices
+        above_gap = max(0.0001, image_high - current)
+        below_gap = max(0.0001, current - image_low)
+        top_padding = max(above_gap * 0.04, original_span * 0.01, 0.06)
+        bottom_padding = max(below_gap * 0.04, original_span * 0.01, 0.06)
+        span = max(
+            (above_gap + top_padding) / above_fraction,
+            (below_gap + bottom_padding) / below_fraction,
+            original_span,
+            4.0,
+        )
+        anchored_max = current + above_fraction * span
+        anchored_min = current - below_fraction * span
+        if anchored_max > anchored_min:
+            return anchored_min, anchored_max
 
     image_high = _number(analysis.get("image_price_high"))
     if image_high is not None and image_high > current and above_fraction >= 0.10:
@@ -1090,10 +1114,13 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
                 continue
             all_levels.append((key, rank, level, price, _price_y(price, price_min, price_max), color, name))
 
-    positions = _spaced_positions(
-        [(f"{key}-{rank}", y) for key, rank, _, _, y, _, _ in all_levels],
-        min_gap=40,
-    )
+    if _strict_axis_sync(analysis):
+        positions = {f"{key}-{rank}": y for key, rank, _, _, y, _, _ in all_levels}
+    else:
+        positions = _spaced_positions(
+            [(f"{key}-{rank}", y) for key, rank, _, _, y, _, _ in all_levels],
+            min_gap=40,
+        )
     for key, rank, level, price, exact_y, color, name in all_levels:
         strength = int(level.get("strength") or 50)
         source = str(level.get("source") or "market")
@@ -1239,7 +1266,10 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     if stop_y is not None:
         label_items.append(("stop", stop_y))
     label_items.extend((f"tp{i}", y) for i, (_, y) in enumerate(visible_targets, start=1))
-    positions = _spaced_positions(label_items, min_gap=37)
+    if _strict_axis_sync(analysis):
+        positions = {key: y for key, y in label_items}
+    else:
+        positions = _spaced_positions(label_items, min_gap=37)
 
     labels: list[tuple[str, int, int, str, Any, bool]] = [
         ("entry", entry_y, positions["entry"], f"دخول | {_fmt_price(entry)}", ORANGE, True),
