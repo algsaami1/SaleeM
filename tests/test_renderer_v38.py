@@ -184,58 +184,52 @@ def test_model_current_line_ratio_is_used_as_pixel_detection_fallback():
     assert abs(detected - expected) <= 1
 
 
-def test_image_axis_uses_top_next_and_bottom_to_build_one_clean_step():
+def test_image_axis_prefers_inner_anchors_to_build_one_clean_step():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
     analysis["image_axis_labels"] = [
-        {"price": current + 4.0, "y_ratio": 0.15},
-        {"price": current + 2.0, "y_ratio": 0.32},
-        # Deliberately wrong middle OCR value: it must not distort the scale.
-        {"price": current + 0.37, "y_ratio": 0.49},
-        {"price": current - 4.0, "y_ratio": 0.83},
+        {"price": current + 8.0, "y_ratio": 0.06},  # ignored outer top label
+        {"price": current + 6.0, "y_ratio": 0.18},  # effective top anchor
+        {"price": current + 4.0, "y_ratio": 0.31},  # step anchor
+        {"price": current + 2.0, "y_ratio": 0.44},
+        {"price": current + 0.0, "y_ratio": 0.57},  # effective lower anchor
+        {"price": current - 2.0, "y_ratio": 0.70},  # ignored outer bottom label
     ]
     reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.52)
     dynamic = _dynamic_image_axis_range(analysis, reference_y)
     assert dynamic is not None
     low, high = dynamic
 
-    # The reverted model uses the highest full label and the next label below
-    # it to define the scale, while the lowest full label validates the whole
-    # arithmetic sequence. The current-price line is no longer allowed to shift
-    # the axis itself.
-    expected_current_y = _price_y(current, low, high)
-    assert expected_current_y == _price_y(current, low, high)
-    top_y = _price_y(current + 4.0, low, high)
-    second_y = _price_y(current + 2.0, low, high)
-    expected_step_px = round((CHART[3] - CHART[1]) * 0.17)
+    top_y = _price_y(current + 6.0, low, high)
+    second_y = _price_y(current + 4.0, low, high)
+    expected_step_px = round((CHART[3] - CHART[1]) * 0.13)
     assert abs((second_y - top_y) - expected_step_px) <= 1
 
     labels = _right_axis_labels(analysis, low, high)
     assert [price for _role, price, _y in labels] == [
+        current + 6.0,
         current + 4.0,
         current + 2.0,
         current,
-        current - 2.0,
-        current - 4.0,
     ]
     expected_y = [_price_y(price, low, high) for price in (
+        current + 6.0,
         current + 4.0,
         current + 2.0,
         current,
-        current - 2.0,
-        current - 4.0,
     )]
     assert [y for _role, _price, y in labels] == expected_y
 
 
-def test_image_axis_rejects_non_consecutive_second_label():
+def test_image_axis_rejects_inconsistent_inner_anchor_sequence():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
     analysis["image_axis_labels"] = [
-        {"price": current + 6.0, "y_ratio": 0.10},
-        # This skips the immediately following tick, so bottom consistency fails.
-        {"price": current + 2.0, "y_ratio": 0.25},
-        {"price": current - 6.0, "y_ratio": 0.70},
+        {"price": current + 10.0, "y_ratio": 0.08},
+        {"price": current + 8.0, "y_ratio": 0.20},
+        {"price": current + 4.0, "y_ratio": 0.34},
+        {"price": current + 1.0, "y_ratio": 0.50},
+        {"price": current - 2.0, "y_ratio": 0.66},
     ]
     assert _dynamic_image_axis_range(analysis) is None
 

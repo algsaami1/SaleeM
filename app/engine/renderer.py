@@ -376,20 +376,31 @@ def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
 
 
 def _image_axis_step_model(analysis: dict[str, Any]) -> dict[str, float | int] | None:
-    """Build the chart scale from three visual anchors.
+    """Build the chart scale from inner visual anchors.
 
-    The first two fully visible labels define the real price step and pixel
-    spacing.  The lowest fully visible label is used as the lower boundary and
-    as a consistency check.  Middle OCR labels are deliberately ignored so a
-    single bad reading cannot distort the whole right axis.
+    User preference: ignore the outermost OCR prices when possible.  The label
+    directly below the highest visible price becomes the effective top anchor
+    of the right axis, the label below it defines the price/pixel step, and
+    the penultimate visible price becomes the lower anchor.  This is usually
+    more stable because the very first and very last visible labels are the
+    most likely to be clipped by the screenshot edges.
+
+    If the image does not contain enough labels for the inner-anchor model, we
+    gracefully fall back to the original top/next/bottom model.
     """
     points = _image_axis_points(analysis)
     if len(points) < 3:
         return None
 
-    top_price, top_ratio = points[0]
-    second_price, second_ratio = points[1]
-    bottom_price, bottom_ratio = points[-1]
+    use_inner_anchors = len(points) >= 5
+    if use_inner_anchors:
+        top_price, top_ratio = points[1]
+        second_price, second_ratio = points[2]
+        bottom_price, bottom_ratio = points[-2]
+    else:
+        top_price, top_ratio = points[0]
+        second_price, second_ratio = points[1]
+        bottom_price, bottom_ratio = points[-1]
 
     price_step = top_price - second_price
     ratio_step = second_ratio - top_ratio
@@ -400,19 +411,14 @@ def _image_axis_step_model(analysis: dict[str, Any]) -> dict[str, float | int] |
 
     raw_intervals = (top_price - bottom_price) / price_step
     intervals = int(round(raw_intervals))
-    if intervals < 2:
+    if intervals < 1:
         return None
 
-    # The bottom label must belong to the same arithmetic sequence.  A modest
-    # tolerance handles two-decimal OCR rounding without accepting a wrong
-    # number from the chart body.
     residual = abs((top_price - intervals * price_step) - bottom_price)
     if residual > max(0.08, price_step * 0.18):
         return None
 
     expected_bottom_ratio = top_ratio + intervals * ratio_step
-    # Reject a "second" label that was not actually the immediately following
-    # tick.  The lower anchor allows small OCR placement error only.
     if abs(expected_bottom_ratio - bottom_ratio) > max(0.055, ratio_step * 0.55):
         return None
 
@@ -426,6 +432,7 @@ def _image_axis_step_model(analysis: dict[str, Any]) -> dict[str, float | int] |
         "price_step": float(price_step),
         "ratio_step": float(ratio_step),
         "intervals": intervals,
+        "uses_inner_anchors": 1 if use_inner_anchors else 0,
     }
 
 
@@ -473,24 +480,22 @@ def validate_uploaded_axis(
 ) -> tuple[bool, str]:
     """Validate a user screenshot before generating a final result image.
 
-    Reverted to the earlier, closer behavior: rely on the chart axis itself
-    (top full label, the next label, and the bottom full label).  The current
-    price line remains useful for rendering the green badge, but it no longer
-    blocks generation when the axis sequence itself is readable.
+    The chart axis remains the primary reference.  We prefer the inner labels
+    (the price below the highest, the price below it, and the penultimate low)
+    because they are usually more stable than the clipped outer edges.  The
+    current-price line remains useful for rendering the green badge, but it
+    does not block generation when the axis sequence itself is readable.
     """
     prepared_background, detected_green_line_y, visible_candles = _prepare_chart_background(chart_background_path)
     if prepared_background is None:
         return False, "تعذر تجهيز صورة الشارت للمعايرة."
 
-    if visible_candles is not None and visible_candles <= 10:
-        return False, "الصورة تحتاج تكبيرًا أفقيًا أقل: يجب أن يظهر أكثر من 10 شموع واضحة. استخدم Reset Vertical Scale أو Auto-scale ثم التقط صورة جديدة."
-
     if _image_axis_step_model(analysis) is None:
-        return False, "لم تُقرأ ثلاثة أسعار واضحة بالترتيب: أعلى سعر كامل، والسعر الذي تحته، وأدنى سعر كامل."
+        return False, "لم تُقرأ الأسعار المرجعية بوضوح لبناء المحور: السعر الذي تحت الأعلى، والسعر الذي تحته، والسعر قبل الأخير أسفل المحور."
 
     calibrated = _dynamic_image_axis_range(analysis, detected_green_line_y)
     if calibrated is None:
-        return False, "تعذر بناء محور السعر من أعلى سعر والسعر الذي يليه وأدنى سعر."
+        return False, "تعذر بناء محور السعر من السعر الذي تحت الأعلى والسعر الذي يليه والسعر قبل الأخير."
 
     labels = _right_axis_labels(analysis, calibrated[0], calibrated[1])
     if len(labels) < 3:
