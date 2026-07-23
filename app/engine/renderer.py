@@ -145,6 +145,19 @@ def _fmt_price(value: Any) -> str:
     return f"{rounded:.2f}".rstrip("0").rstrip(".")
 
 
+def _fmt_axis_price(value: Any) -> str:
+    """Format source-axis labels exactly like a broker price scale.
+
+    Trade labels may omit trailing zeroes to save space, but the right price
+    axis must preserve two decimals so values such as 4049.10 and 4055.80 do
+    not visually differ from the uploaded chart.
+    """
+    number = _number(value)
+    if number is None:
+        return "—"
+    return f"{round(number, 2):.2f}"
+
+
 def _time_label(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
@@ -993,14 +1006,16 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
     points = _image_axis_points(analysis)
     if len(points) >= 2:
-        # Use the same source prices, but pass them through the exact transform
-        # used by candles, levels and trade drawings.  The transform itself is
-        # fitted from these labels, so the axis follows the uploaded image while
-        # remaining mathematically synchronized with every horizontal line.
+        # Copy the uploaded chart's labels directly: same price, same vertical
+        # position.  Do not rebuild the list from a generated step and do not
+        # extrapolate a value above the first visible label or below the last.
+        # Values at the extreme image edge are naturally clipped later, which
+        # prevents partially visible/inferred labels from appearing.
+        top, bottom = CHART[1], CHART[3]
+        chart_height = bottom - top
         return [
-            ("axis", round(price, 6), _price_y(price, price_min, price_max))
-            for price, _y_ratio in points
-            if price_min <= price <= price_max
+            ("axis", round(price, 2), int(round(top + y_ratio * chart_height)))
+            for price, y_ratio in points
         ]
 
     key_prices = _image_key_prices(analysis)
@@ -1034,7 +1049,8 @@ def _draw_right_price_axis(
             continue
         if top_price_box is not None and top_price_box[1] - 4 <= y <= top_price_box[3] + 4:
             continue
-        draw.text((PRICE_AXIS_X + 12, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
+        axis_text = _fmt_axis_price(price) if role == "axis" else _fmt_price(price)
+        draw.text((PRICE_AXIS_X + 12, y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
 
 
