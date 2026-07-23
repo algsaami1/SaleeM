@@ -198,3 +198,25 @@ def test_all_price_drawings_share_green_line_anchored_transform():
     assert all(CHART[1] <= y <= CHART[3] for y in ys)
     assert ys[0] > current_y  # الدعم أسفل السعر الحالي
     assert ys[1] < current_y  # المقاومة أعلى السعر الحالي
+
+
+def test_close_top_price_from_input_controls_axis_spacing():
+    analysis = _analysis("هابط")
+    analysis["image_price_high"] = round(analysis["current_price"] + 0.8, 2)
+    low, high = _price_range(analysis)
+    span = high - low
+    top_gap_ratio = (high - analysis["current_price"]) / span
+    assert top_gap_ratio >= 0.08
+
+
+def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
+    analysis = _analysis("هابط")
+    analysis["image_price_high"] = round(analysis["current_price"] + 0.65, 2)
+    analysis["target_1"] = analysis["entry"] - 2.5
+    analysis["target_2"] = analysis["entry"] - 5.5
+    analysis["target_3"] = analysis["entry"] - 9.0
+    output = tmp_path / "partial_trade_hidden.png"
+    output.write_bytes(render_result(analysis))
+    with Image.open(output) as image:
+        assert image.size == (1080, 1920)
+        assert image.format == "PNG"
