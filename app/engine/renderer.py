@@ -390,13 +390,8 @@ def _axis_price_slope(points: list[tuple[float, float]]) -> float | None:
     if not slopes:
         return None
     return float(median(slopes))
-<<<<<<< main
 
 
-=======
-
-
->>>>>>> origin/main
 def _dynamic_image_axis_range(
     analysis: dict[str, Any],
     reference_y: int | None = None,
@@ -1011,7 +1006,6 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
     points = _image_axis_points(analysis)
     if len(points) >= 2:
-<<<<<<< main
         # Copy the uploaded chart's labels directly: same price, same vertical
         # position.  Do not rebuild the list from a generated step and do not
         # extrapolate a value above the first visible label or below the last.
@@ -1022,16 +1016,6 @@ def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: fl
         return [
             ("axis", round(price, 2), int(round(top + y_ratio * chart_height)))
             for price, y_ratio in points
-=======
-        # Use the same source prices, but pass them through the exact transform
-        # used by candles, levels and trade drawings.  The transform itself is
-        # fitted from these labels, so the axis follows the uploaded image while
-        # remaining mathematically synchronized with every horizontal line.
-        return [
-            ("axis", round(price, 6), _price_y(price, price_min, price_max))
-            for price, _y_ratio in points
-            if price_min <= price <= price_max
->>>>>>> origin/main
         ]
 
     key_prices = _image_key_prices(analysis)
@@ -1065,12 +1049,8 @@ def _draw_right_price_axis(
             continue
         if top_price_box is not None and top_price_box[1] - 4 <= y <= top_price_box[3] + 4:
             continue
-<<<<<<< main
         axis_text = _fmt_axis_price(price) if role == "axis" else _fmt_price(price)
         draw.text((PRICE_AXIS_X + 12, y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
-=======
-        draw.text((PRICE_AXIS_X + 12, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
->>>>>>> origin/main
 
 
 

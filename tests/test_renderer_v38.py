@@ -200,36 +200,18 @@ def test_image_axis_labels_keep_source_positions_and_drive_transform():
     # The green current-price line is the exact anchor for every drawing.
     assert abs(_price_y(current, low, high) - reference_y) <= 1
 
-<<<<<<< main
     # The right axis copies the source prices and their source Y positions
     # directly.  It must not regenerate or extrapolate extra labels.
-=======
-    # The right axis uses the same prices read from the image and the exact
-    # same transform as every horizontal drawing.
->>>>>>> origin/main
     labels = _right_axis_labels(analysis, low, high)
     assert labels
     assert [price for _role, price, _y in labels] == [
         item["price"] for item in analysis["image_axis_labels"]
     ]
-<<<<<<< main
     source_y = [
         CHART[1] + round((CHART[3] - CHART[1]) * item["y_ratio"])
         for item in analysis["image_axis_labels"]
     ]
     assert [y for _role, _price, y in labels] == source_y
-=======
-    for _role, price, y in labels:
-        assert y == _price_y(price, low, high)
->>>>>>> origin/main
-
-    # Because the transform was fitted from the source chart, label positions
-    # remain close to the source ratios despite minor OCR noise.
-    source_y = [
-        CHART[1] + round((CHART[3] - CHART[1]) * item["y_ratio"])
-        for item in analysis["image_axis_labels"]
-    ]
-    assert max(abs(y - expected_y) for (_role, _price, y), expected_y in zip(labels, source_y)) < 50
 
 
 def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
