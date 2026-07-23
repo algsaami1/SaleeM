@@ -56,6 +56,9 @@ CHART_CARD = (20, 20, 1060, 1352)
 CHART = (56, 72, 928, 1280)
 PRICE_AXIS_X = 952
 NOTES = (36, 1392, 1044, 1886)
+SOURCE_AXIS_VISIBLE_WIDTH = 114
+ADDITIONAL_RIGHT_AXIS_WIDTH = 58
+ADDITIONAL_RIGHT_AXIS_GAP = 6
 TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
@@ -68,6 +71,8 @@ UPLOADED_BG_RIGHT_TRIM_RATIO = 0.01
 UPLOADED_BG_TOP_MASK_RATIO = 0.055
 UPLOADED_BG_BOTTOM_MASK_RATIO = 0.10
 UPLOADED_BG_MIN_LEFT_CROP_PX = 0
+SOURCE_AXIS_VISIBLE_WIDTH = 60
+SALEEM_AXIS_EXTRA_WIDTH = 62
 
 
 class AxisCalibrationError(RuntimeError):
@@ -994,47 +999,63 @@ def _anchored_price_range(
     return anchored_min, anchored_max
 
 
-def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Prepare the uploaded chart without vertical distortion.
+def _source_background_box() -> tuple[int, int, int, int]:
+    """Visible area reserved for the uploaded screenshot itself.
 
-    The user asked to keep exactly the *visible* chart portion from the
-    uploaded screenshot without squeezing or stretching it. We therefore keep
-    the user-provided visible crop as-is, preserve the original aspect ratio
-    with uniform scaling, and align the result to the left inside the chart
-    frame so the custom SaleeM price axis remains clear.
+    This keeps the screenshot's own right price-axis visible. A separate new
+    SaleeM axis strip will be drawn to the right of that visible source axis.
     """
-    target_w, target_h = size
+    source_right = CHART_CARD[2] - 12 - SALEEM_AXIS_EXTRA_WIDTH
+    return CHART[0], CHART[1], source_right, CHART[3]
+
+
+
+def _saleem_axis_box() -> tuple[int, int, int, int]:
+    """Additional right-side strip for the redrawn SaleeM axis."""
+    left = CHART_CARD[2] - 12 - SALEEM_AXIS_EXTRA_WIDTH + 6
+    right = CHART_CARD[2] - 12
+    return left, CHART[1] - 10, right, CHART[3] + 10
+
+
+
+def _background_visible_box() -> tuple[int, int, int, int]:
+    """Backward-compatible alias for the visible screenshot area."""
+    return _source_background_box()
+
+
+
+def _background_axis_shift() -> int:
+    """Shift screenshot left by the width of the additional new axis strip."""
+    return SALEEM_AXIS_EXTRA_WIDTH
+
+
+def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Prepare the uploaded chart with a left shift and no distortion.
+
+    The user wants the uploaded screenshot to remain undistorted, with its own
+    right price-axis area effectively replaced by the SaleeM axis. To achieve
+    that we:
+
+    1) scale the screenshot uniformly,
+    2) make it wide enough to cover the visible area *plus* the reserved
+       right-axis width,
+    3) later shift it left by exactly that axis width.
+
+    This naturally hides a portion of the source image on the left, and when
+    the aspect ratios differ it also hides some of the top and bottom.
+    """
+    visible_w, visible_h = size
+    axis_shift = _background_axis_shift()
+    target_w = visible_w + axis_shift
+
     source_w, source_h = source.size
     if source_w <= 1 or source_h <= 1:
-        return source.resize(size, resample=Image.Resampling.LANCZOS)
+        return source.resize((target_w, visible_h), resample=Image.Resampling.LANCZOS)
 
-    left_crop = max(UPLOADED_BG_MIN_LEFT_CROP_PX, int(round(source_w * UPLOADED_BG_LEFT_CROP_RATIO)))
-    right_trim = int(round(source_w * UPLOADED_BG_RIGHT_TRIM_RATIO))
-    crop_left = min(max(0, left_crop), max(0, source_w - 2))
-    crop_right = max(crop_left + 1, source_w - right_trim)
-    focused = source.crop((crop_left, 0, crop_right, source_h))
-
-    # Uniform scaling preserves candle/body proportions and avoids the squeezed
-    # look that a direct width+height resize introduces.
-    scale = target_h / max(1, focused.size[1])
-    scaled_w = max(1, int(round(focused.size[0] * scale)))
-    scaled_h = max(1, int(round(focused.size[1] * scale)))
-    resized = focused.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
-
-    canvas = Image.new('RGBA', (target_w, target_h), (6, 17, 40, 255))
-
-    if scaled_w >= target_w:
-        # Keep the right side from the source visible, but because we already
-        # cropped the source's far left area, this still feels visually shifted
-        # left and leaves the SaleeM custom right axis readable.
-        window = resized.crop((0, 0, target_w, target_h))
-        canvas.alpha_composite(window, (0, 0))
-    else:
-        # Leave the extra width on the right so the chart feels left-shifted.
-        y = max(0, (target_h - scaled_h) // 2)
-        canvas.alpha_composite(resized, (0, y))
-
-    return canvas
+    scale = max(target_w / max(1, source_w), visible_h / max(1, source_h))
+    scaled_w = max(1, int(round(source_w * scale)))
+    scaled_h = max(1, int(round(source_h * scale)))
+    return source.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
 
 
 def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1253,45 +1274,62 @@ def _estimate_visible_candle_count(chart_image: Image.Image) -> int | None:
 def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
 ) -> tuple[Image.Image | None, int | None, int | None]:
-    """Fit the uploaded chart once, detect the green line, and estimate candle count."""
+    """Prepare the uploaded screenshot using the final visible geometry."""
     if not chart_background_path:
         return None, None, None
     path = Path(chart_background_path)
     if not path.exists():
         return None, None, None
 
-    left, top, right, bottom = CHART
+    visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
+    visible_w = visible_right - visible_left
+    visible_h = visible_bottom - visible_top
+
     try:
         with Image.open(path) as chart_image:
             chart_rgba = chart_image.convert("RGBA")
-            fitted = _fit_cover(chart_rgba, (right - left, bottom - top))
+            fitted = _fit_cover(chart_rgba, (visible_w, visible_h))
             detected_local_y = _detect_green_reference_line_y(fitted)
             visible_candles = _estimate_visible_candle_count(fitted)
     except Exception:  # pragma: no cover
         return None, None, None
 
-    detected_absolute_y = None if detected_local_y is None else top + detected_local_y
+    crop_top = max(0, (fitted.size[1] - visible_h) // 2)
+    detected_absolute_y = None
+    if detected_local_y is not None:
+        projected = visible_top + detected_local_y - crop_top
+        detected_absolute_y = int(max(visible_top, min(visible_bottom - 1, projected)))
     return fitted, detected_absolute_y, visible_candles
 
 
+
 def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) -> None:
-    """Paste a previously fitted chart and add the readability overlay."""
-    left, top, right, bottom = CHART
+    """Paste the shifted screenshot while keeping its original right axis visible."""
+    visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
+    visible_w = visible_right - visible_left
+    visible_h = visible_bottom - visible_top
+    axis_shift = _background_axis_shift()
+    crop_top = max(0, (fitted.size[1] - visible_h) // 2)
 
-    image.alpha_composite(fitted, (left, top))
+    paste_x = visible_left - axis_shift
+    paste_y = visible_top - crop_top
+    image.alpha_composite(fitted, (paste_x, paste_y))
 
-    # تعتيم خفيف حتى تبقى طبقات التحليل والملصقات أوضح فوق الشارت الأصلي،
-    # مع تغطية أعلى وأسفل الصورة المرفوعة كما طلب المستخدم.
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
-    d.rounded_rectangle((left, top, right, bottom), radius=6, fill=(0, 10, 26, 70))
+    d.rounded_rectangle((visible_left, visible_top, visible_right, visible_bottom), radius=6, fill=(0, 10, 26, 70))
 
-    chart_h = bottom - top
+    chart_h = visible_bottom - visible_top
     top_mask_h = max(26, int(chart_h * UPLOADED_BG_TOP_MASK_RATIO))
     bottom_mask_h = max(52, int(chart_h * UPLOADED_BG_BOTTOM_MASK_RATIO))
-    d.rounded_rectangle((left + 1, top + 1, right - 1, top + top_mask_h), radius=6, fill=(2, 11, 25, 170))
-    d.rounded_rectangle((left + 1, bottom - bottom_mask_h, right - 1, bottom - 1), radius=6, fill=(2, 11, 25, 188))
-    d.rectangle((left, top, right, bottom), outline=(112, 133, 168, 165), width=1)
+    d.rounded_rectangle((visible_left + 1, visible_top + 1, visible_right - 1, visible_top + top_mask_h), radius=6, fill=(2, 11, 25, 170))
+    d.rounded_rectangle((visible_left + 1, visible_bottom - bottom_mask_h, visible_right - 1, visible_bottom - 1), radius=6, fill=(2, 11, 25, 188))
+
+    # Only draw the additional SaleeM axis strip on the far right; the source
+    # image's own right axis stays visible immediately to its left.
+    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
+    d.rounded_rectangle((axis_left, axis_top, axis_right, axis_bottom), radius=12, fill=(5, 15, 34, 242))
+    d.rectangle((visible_left, visible_top, visible_right, visible_bottom), outline=(112, 133, 168, 165), width=1)
     image.alpha_composite(overlay)
 
 
@@ -1446,10 +1484,9 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
     if image_high is None:
         return None
 
-    left, top, right, bottom = CHART
-    axis_left = right + 10
-    axis_right = CHART_CARD[2] - 14
-    box = (axis_left, top + 4, axis_right, top + 30)
+    _left, top, _right, _bottom = CHART
+    axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
+    box = (axis_left + 2, top + 4, axis_right - 2, top + 30)
     draw.rounded_rectangle(box, radius=6, fill=(12, 27, 54, 255), outline=(92, 112, 156, 215), width=1)
     draw.text(((axis_left + axis_right) // 2, (box[1] + box[3]) // 2), _fmt_price(image_high), font=F_TRADE_SMALL_LATIN, fill=(224, 234, 248, 255), anchor="mm")
     return box
@@ -1527,7 +1564,8 @@ def _draw_right_price_axis(
         if top_price_box is not None and top_price_box[1] - 4 <= draw_y <= top_price_box[3] + 4:
             continue
         axis_text = _fmt_axis_price(price) if role == "axis" else _fmt_price(price)
-        draw.text((PRICE_AXIS_X + 12, draw_y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
+        axis_left, _axis_top, _axis_right, _axis_bottom = _saleem_axis_box()
+        draw.text((axis_left + 8, draw_y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
 
 
@@ -1535,9 +1573,10 @@ def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: f
     draw.rounded_rectangle(CHART_CARD, radius=21, fill=(6, 17, 40, 255), outline=BORDER, width=1)
     left, top, right, bottom = CHART
 
-    # شريط مستقل لمحور السعر حتى تبقى الأرقام بعيدة عن ملصقات الصفقة.
-    draw.rounded_rectangle((right + 8, top - 10, CHART_CARD[2] - 12, bottom + 10), radius=12, fill=(5, 15, 34, 255))
-    _draw_rtl(draw, (CHART_CARD[2] - 26, top - 34), "محور السعر", F_SMALL, MUTED)
+    # شريط إضافي لمحور السعر يظهر إلى يسار محور الأسعار الأصلي في الصورة.
+    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
+    draw.rounded_rectangle((axis_left, axis_top - 10, axis_right, axis_bottom + 10), radius=12, fill=(5, 15, 34, 212), outline=(76, 96, 131, 180), width=1)
+    _draw_rtl(draw, (axis_right - 6, top - 34), "محور إضافي", F_SMALL, MUTED)
     draw.text((left, top - 34), "XAUUSD · M5", font=F_STATUS, fill=(208, 220, 240, 255), anchor="la")
 
     for role, price, y in _right_axis_labels(analysis, price_min, price_max):
@@ -1808,9 +1847,8 @@ def _draw_current_price(
             return
 
     draw.line((left, y, right, y), fill=(38, 201, 128, 170), width=2)
-    axis_left = right + 10
-    axis_right = CHART_CARD[2] - 14
-    draw.rounded_rectangle((axis_left, y - 15, axis_right, y + 15), radius=6, fill=(9, 133, 75, 255), outline=TP_GREEN, width=1)
+    axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
+    draw.rounded_rectangle((axis_left + 2, y - 15, axis_right - 2, y + 15), radius=6, fill=(9, 133, 75, 255), outline=TP_GREEN, width=1)
     draw.text(((axis_left + axis_right) // 2, y), _fmt_price(current), font=F_TRADE_SMALL_LATIN, fill=WHITE, anchor="mm")
 
 
@@ -1880,7 +1918,8 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     for index, (target, exact_y) in enumerate(visible_targets, start=1):
         labels.append((f"tp{index}", exact_y, positions[f"tp{index}"], f"TP{index} | {_fmt_price(target)}", TP_GREEN, False))
 
-    axis_card_right = CHART_CARD[2] - 16
+    source_axis_left, _sat, _sar, _sab = _source_background_box()
+    axis_card_right = source_axis_left - 10
     chart_card_right = zone_right - 5
     for key, exact_y, shown_y, text, color, rtl in labels:
         if key.startswith("tp"):
