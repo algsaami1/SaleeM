@@ -115,7 +115,7 @@ def test_renderer_produces_phone_png(tmp_path):
     output = tmp_path / "preview.png"
     output.write_bytes(render_result(_analysis("صاعد")))
     with Image.open(output) as image:
-        assert image.size == (1080, 1920)
+        assert image.size == (900, 1600)
         assert image.format == "PNG"
 
 
@@ -126,16 +126,15 @@ def test_renderer_accepts_chart_background(tmp_path):
     output = tmp_path / "preview_bg.png"
     output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
     with Image.open(output) as image:
-        assert image.size == (1080, 1920)
+        assert image.size == (900, 1600)
         assert image.format == "PNG"
 
 
-def test_result_chart_fills_page_until_bottom_notes_box():
+def test_result_chart_fills_most_of_phone_canvas():
     assert CHART_CARD[1] <= 24
     assert CHART[1] <= 80
-    assert CHART[3] - CHART[1] >= 1200
-    assert CHART_CARD[3] < NOTES[1]
-    assert NOTES[3] >= 1880
+    assert CHART[3] - CHART[1] >= 1450
+    assert CHART_CARD[3] >= 1580
 
 
 def test_detect_green_reference_line_row():
@@ -313,7 +312,7 @@ def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
     output = tmp_path / "partial_trade_hidden.png"
     output.write_bytes(render_result(analysis))
     with Image.open(output) as image:
-        assert image.size == (1080, 1920)
+        assert image.size == (900, 1600)
         assert image.format == "PNG"
 
 

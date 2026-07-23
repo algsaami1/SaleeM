@@ -19,8 +19,8 @@ except ImportError:  # pragma: no cover
     get_display = None
 
 # صورة عمودية مناسبة للهاتف، لكن جميع الإحداثيات داخلية وقابلة للتغيير.
-WIDTH = 1080
-HEIGHT = 1920
+WIDTH = 900
+HEIGHT = 1600
 
 # لوحة ألوان قريبة من التصميم المرجعي.
 BG = (4, 13, 30, 255)
@@ -49,13 +49,14 @@ TEAL = (60, 216, 196, 255)
 TP_GREEN = (25, 211, 112, 255)
 TP_GREEN_FILL = (25, 211, 112, 52)
 
-# تخطيط صورة النتيجة: الشارت هو العنصر الرئيسي ويبدأ من أعلى الصورة،
-# ثم يأتي صندوق ملاحظات التحليل أسفل الشارت وبفاصل واضح حتى يكون خارج
-# صورة التحليل نفسها وليس فوقها.
-CHART_CARD = (20, 20, 1060, 1352)
-CHART = (56, 72, 928, 1280)
-PRICE_AXIS_X = 952
-NOTES = (36, 1392, 1044, 1886)
+# تخطيط صورة النتيجة: صورة الشارت نفسها فقط، بحجم مناسب لعرض الآيفون
+# وبدون صندوق ملاحظات داخل الصورة حتى تبقى التفاصيل أوضح لاستخراج الأسعار.
+CHART_CARD = (12, 18, 888, 1588)
+CHART = (36, 60, 736, 1548)
+PRICE_AXIS_X = 824
+# تبقى الملاحظات خارج الصورة في واجهة الويب، لذا هذا الصندوق غير مستخدم في
+# الرسم النهائي ويُترك هنا فقط للتوافق مع بعض الاستدعاءات القديمة.
+NOTES = (24, 1604, 876, 1604)
 SOURCE_AXIS_VISIBLE_WIDTH = 114
 ADDITIONAL_RIGHT_AXIS_WIDTH = 58
 ADDITIONAL_RIGHT_AXIS_GAP = 6
@@ -2159,7 +2160,6 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
     _draw_sessions(draw, candles, slot, str(analysis.get("market_timezone") or "Asia/Muscat"))
-    _draw_notes(draw, analysis)
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)

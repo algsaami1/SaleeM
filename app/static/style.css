@@ -95,11 +95,12 @@ button{font-family:inherit}
 .result-heading h3{margin:3px 0 0;font-size:17px}
 .done-mark{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;background:#eaf9ef;color:var(--purple)!important;font-size:16px!important}
 .result-card img{display:block;width:100%;border-radius:15px;border:1px solid var(--line)}
-.result-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:13px}
-.result-action{width:100%;min-height:48px;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px 10px;cursor:pointer;font-size:13px;transition:.18s ease}
-.share-button{background:linear-gradient(90deg,#727d91,#465166);box-shadow:0 10px 24px rgba(70,81,102,.18)}
-.result-action-status{min-height:18px;margin:8px 4px 0;text-align:center;color:#27824a;font-size:9px;line-height:1.7}
-
+.analysis-notes-card{padding:18px 20px;border-color:#d8efe0}
+.analysis-notes-grid{display:grid;gap:10px}
+.analysis-note-row{display:grid;grid-template-columns:108px 1fr;gap:12px;align-items:start;padding:12px 14px;border:1px solid #e5f0e9;border-radius:14px;background:#fbfffc}
+.analysis-note-row span{font-size:12px;font-weight:700;color:var(--purple)}
+.analysis-note-row b{font-size:12px;line-height:1.9;color:var(--ink);font-weight:600}
+.analysis-notes-footnote{margin:14px 2px 0;text-align:center;color:var(--muted);font-size:10px;line-height:1.8}
 .experimental-banner{display:flex;align-items:flex-start;gap:12px;padding:16px 18px;background:#fff9eb;border-color:#f0dfad}
 .experimental-icon{font-size:24px;line-height:1}
 .experimental-banner strong{display:block;color:#9a6a00;font-size:13px;margin-bottom:5px}
@@ -216,6 +217,8 @@ button{font-family:inherit}
   .notice p{font-size:10px;line-height:1.85}
   .result-heading h3{font-size:16px}
   .result-card img{border-radius:12px}
+  .analysis-note-row{grid-template-columns:1fr;padding:11px 12px;gap:6px}
+  .analysis-note-row span,.analysis-note-row b{font-size:11px}
   .feedback-heading h3{font-size:16px}
   .rating-star{font-size:34px}
   .trade-result-grid{grid-template-columns:1fr}

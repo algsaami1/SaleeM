@@ -96,20 +96,29 @@
     {% endif %}
 
     {% if result %}
+    {% set state_label = 'مراقبة' if result.draw_mode == 'watch' else ('مؤكد' if result.draw_mode == 'confirmed' else 'مشروط') %}
     <section class="card result-card" id="result-card">
       <div class="result-heading"><div><span>اكتمل التحليل</span><h3>تحليل SaleeM</h3></div><span class="done-mark">✓</span></div>
       <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه من بيانات السوق مع السيناريو الفني">
-      <div class="result-actions">
-        <button class="result-action save-button" id="save-image-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 18v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>
-          حفظ في الاستديو
-        </button>
-        <button class="result-action share-button" id="share-image-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
-          مشاركة
-        </button>
+    </section>
+
+    <section class="card analysis-notes-card" id="analysis-notes-card">
+      <div class="feedback-heading">
+        <span class="feedback-icon" aria-hidden="true">≣</span>
+        <div>
+          <small>خارج الصورة لتبقى تفاصيل الشارت أوضح</small>
+          <h3>ملاحظات التحليل</h3>
+        </div>
       </div>
-      <p class="result-action-status" id="result-action-status" role="status" aria-live="polite"></p>
+      <div class="analysis-notes-grid">
+        <div class="analysis-note-row"><span>الاتجاه</span><b>{{ result.direction }} - احتمال {{ result.trade_probability }}٪ - {{ state_label }}</b></div>
+        <div class="analysis-note-row"><span>النمط</span><b>{% if result.pattern_type and result.pattern_type != 'لا يوجد' %}{{ result.pattern_type }} - ثقة {{ result.pattern_confidence }}٪{% else %}لا يوجد نموذج مكتمل{% endif %}</b></div>
+        <div class="analysis-note-row"><span>شرط الدخول</span><b>{{ result.confirmation or 'انتظار تأكيد واضح' }}</b></div>
+        <div class="analysis-note-row"><span>وقف</span><b>{% if result.draw_mode != 'watch' and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
+        <div class="analysis-note-row"><span>الأهداف</span><b>{% if result.draw_mode != 'watch' %}{% if result.target_1 is not none %}TP1: {{ '%.2f'|format(result.target_1) }}{% endif %}{% if result.target_2 is not none %} | TP2: {{ '%.2f'|format(result.target_2) }}{% endif %}{% if result.target_3 is not none %} | TP3: {{ '%.2f'|format(result.target_3) }}{% endif %}{% else %}بانتظار وضوح السيناريو{% endif %}</b></div>
+        <div class="analysis-note-row"><span>أقرب سيناريو</span><b>{{ result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد' }}</b></div>
+      </div>
+      <p class="analysis-notes-footnote">تحليل فني تعليمي، وليس توصية استثمارية.</p>
     </section>
 
     <section class="card experimental-banner">
