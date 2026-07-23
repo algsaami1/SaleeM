@@ -350,9 +350,9 @@ def _image_key_prices(analysis: dict[str, Any]) -> tuple[float, float, float] | 
 
 
 def _strict_axis_sync(analysis: dict[str, Any]) -> bool:
-    if _image_key_prices(analysis) is not None:
+    if _image_axis_step_model(analysis) is not None:
         return True
-    return len(_image_axis_points(analysis)) >= 2
+    return _image_key_prices(analysis) is not None
 
 
 def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
@@ -371,63 +371,84 @@ def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
     return points
 
 
-def _axis_price_slope(points: list[tuple[float, float]]) -> float | None:
-    """Estimate the source chart price-per-height ratio robustly.
+def _image_axis_step_model(analysis: dict[str, Any]) -> dict[str, float | int] | None:
+    """Build the chart scale from three visual anchors.
 
-    Axis OCR can contain a slightly misplaced label.  The median of all valid
-    pairwise slopes preserves the chart's real spacing while resisting one bad
-    point.  A valid price axis must decrease as the Y ratio increases.
+    The first two fully visible labels define the real price step and pixel
+    spacing.  The lowest fully visible label is used as the lower boundary and
+    as a consistency check.  Middle OCR labels are deliberately ignored so a
+    single bad reading cannot distort the whole right axis.
     """
-    slopes: list[float] = []
-    for index, (price_a, ratio_a) in enumerate(points):
-        for price_b, ratio_b in points[index + 1 :]:
-            ratio_gap = ratio_b - ratio_a
-            if ratio_gap < 0.025:
-                continue
-            slope = (price_b - price_a) / ratio_gap
-            if slope < -0.01:
-                slopes.append(slope)
-    if not slopes:
+    points = _image_axis_points(analysis)
+    if len(points) < 3:
         return None
-    return float(median(slopes))
+
+    top_price, top_ratio = points[0]
+    second_price, second_ratio = points[1]
+    bottom_price, bottom_ratio = points[-1]
+
+    price_step = top_price - second_price
+    ratio_step = second_ratio - top_ratio
+    if price_step <= 0.01 or ratio_step < 0.025:
+        return None
+    if bottom_price >= second_price or bottom_ratio <= second_ratio:
+        return None
+
+    raw_intervals = (top_price - bottom_price) / price_step
+    intervals = int(round(raw_intervals))
+    if intervals < 2:
+        return None
+
+    # The bottom label must belong to the same arithmetic sequence.  A modest
+    # tolerance handles two-decimal OCR rounding without accepting a wrong
+    # number from the chart body.
+    residual = abs((top_price - intervals * price_step) - bottom_price)
+    if residual > max(0.08, price_step * 0.18):
+        return None
+
+    expected_bottom_ratio = top_ratio + intervals * ratio_step
+    # Reject a "second" label that was not actually the immediately following
+    # tick.  The lower anchor allows small OCR placement error only.
+    if abs(expected_bottom_ratio - bottom_ratio) > max(0.055, ratio_step * 0.55):
+        return None
+
+    return {
+        "top_price": float(top_price),
+        "top_ratio": float(top_ratio),
+        "second_price": float(second_price),
+        "second_ratio": float(second_ratio),
+        "bottom_price": float(bottom_price),
+        "bottom_ratio": float(bottom_ratio),
+        "price_step": float(price_step),
+        "ratio_step": float(ratio_step),
+        "intervals": intervals,
+    }
 
 
 def _dynamic_image_axis_range(
     analysis: dict[str, Any],
     reference_y: int | None = None,
 ) -> tuple[float, float] | None:
-    """Rebuild the output transform from the uploaded chart's own axis.
+    """Rebuild the transform from top tick, next tick, and bottom tick.
 
-    The slope comes from all readable source-axis labels.  When the real green
-    current-price line is detected, the intercept is anchored to that exact
-    pixel, so every drawing uses the same moving scale as the uploaded image.
+    ``reference_y`` remains in the signature for compatibility, but the scale
+    itself is intentionally not shifted by the green current-price line.  The
+    first two source ticks define the true step; shifting the transform would
+    make the right axis disagree with the prices printed in the uploaded chart.
     """
-    points = _image_axis_points(analysis)
-    if len(points) < 2:
+    del reference_y
+    model = _image_axis_step_model(analysis)
+    if model is None:
         return None
 
-    slope = _axis_price_slope(points)
-    if slope is None:
-        return None
+    top_price = float(model["top_price"])
+    top_ratio = float(model["top_ratio"])
+    price_step = float(model["price_step"])
+    ratio_step = float(model["ratio_step"])
+    price_per_ratio = price_step / ratio_step
 
-    current = _number(analysis.get("current_price"))
-    anchor_ratio: float | None = None
-    if reference_y is not None:
-        _, top, _, bottom = CHART
-        anchor_ratio = (float(reference_y) - top) / max(1.0, float(bottom - top))
-        anchor_ratio = max(0.0, min(1.0, anchor_ratio))
-    elif current is not None:
-        model_ratio = _number(analysis.get("current_price_y_ratio"))
-        if model_ratio is not None:
-            anchor_ratio = max(0.0, min(1.0, float(model_ratio)))
-
-    if current is not None and anchor_ratio is not None:
-        intercept = float(current) - slope * anchor_ratio
-    else:
-        intercept = float(median(price - slope * ratio for price, ratio in points))
-
-    price_max = intercept
-    price_min = intercept + slope
+    price_max = top_price + top_ratio * price_per_ratio
+    price_min = price_max - price_per_ratio
     if price_max <= price_min or price_max - price_min < 0.1:
         return None
     return price_min, price_max
@@ -805,6 +826,31 @@ def _analysis_current_reference_y(analysis: dict[str, Any]) -> int | None:
     return int(round(top + ratio * (bottom - top)))
 
 
+def _axis_checked_current_reference_y(
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+    detected_y: int | None,
+) -> int | None:
+    """Keep the real green line when it agrees with the calculated image axis.
+
+    If pixel detection accidentally selects a candle or a colored zone far from
+    the mathematically expected current-price position, the image-axis model is
+    safer.  Small differences are preserved so the badge remains on the real
+    line visible in the uploaded chart.
+    """
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return detected_y
+    calculated_y = _price_y(float(current), price_min, price_max)
+    if detected_y is None:
+        return calculated_y
+    tolerance = max(16, int((CHART[3] - CHART[1]) * 0.025))
+    if abs(int(detected_y) - calculated_y) <= tolerance:
+        return int(detected_y)
+    return calculated_y
+
+
 def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
 ) -> tuple[Image.Image | None, int | None]:
@@ -987,7 +1033,7 @@ def _axis_values(price_min: float, price_max: float) -> list[float]:
 
 def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> tuple[int, int, int, int] | None:
     """Fallback top-price badge when full source-axis labels are unavailable."""
-    if len(_image_axis_points(analysis)) >= 2:
+    if _image_axis_step_model(analysis) is not None:
         return None
     image_high = _number(analysis.get("image_price_high"))
     if image_high is None:
@@ -1004,19 +1050,31 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
-    points = _image_axis_points(analysis)
-    if len(points) >= 2:
-        # Copy the uploaded chart's labels directly: same price, same vertical
-        # position.  Do not rebuild the list from a generated step and do not
-        # extrapolate a value above the first visible label or below the last.
-        # Values at the extreme image edge are naturally clipped later, which
-        # prevents partially visible/inferred labels from appearing.
+    model = _image_axis_step_model(analysis)
+    if model is not None:
+        # Generate one clean arithmetic sequence.  The top and immediately
+        # following source labels determine both the price step and the pixel
+        # step; the lowest visible label determines where the sequence stops.
         top, bottom = CHART[1], CHART[3]
         chart_height = bottom - top
-        return [
-            ("axis", round(price, 2), int(round(top + y_ratio * chart_height)))
-            for price, y_ratio in points
-        ]
+        top_price = float(model["top_price"])
+        top_ratio = float(model["top_ratio"])
+        price_step = float(model["price_step"])
+        ratio_step = float(model["ratio_step"])
+        intervals = int(model["intervals"])
+        bottom_ratio = float(model["bottom_ratio"])
+
+        labels: list[tuple[str, float, int]] = []
+        for index in range(intervals + 1):
+            y_ratio = top_ratio + index * ratio_step
+            # Never invent a tick below the lowest fully visible source label.
+            if y_ratio > bottom_ratio + max(0.018, ratio_step * 0.22):
+                break
+            price = top_price - index * price_step
+            y = int(round(top + y_ratio * chart_height))
+            labels.append(("axis", round(price, 2), y))
+        if len(labels) >= 3:
+            return labels
 
     key_prices = _image_key_prices(analysis)
     if key_prices is not None:
@@ -1606,12 +1664,18 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if current_reference_y is None:
         current_reference_y = _analysis_current_reference_y(analysis)
 
-    # عندما تقرأ الصورة أسعار محورها، يكون مقياسها هو المرجع الأول: نستخرج
-    # ميل السعر من جميع الأرقام ونثبته على خط السعر الحالي الحقيقي. وبذلك
-    # يتغير محور اليمين مع كل صورة وتستخدم الرسومات كلها التحويل نفسه.
+    # محور الصورة هو المرجع الأول. أعلى رقم كامل والرقم الذي يليه مباشرة
+    # يحددان الخطوة السعرية والمسافة الرأسية، بينما أدنى رقم كامل يحدد نهاية
+    # السلسلة. جميع الشموع والخطوط تستخدم التحويل الحسابي نفسه.
     dynamic_axis_range = _dynamic_image_axis_range(analysis, current_reference_y)
     if dynamic_axis_range is not None:
         price_min, price_max = dynamic_axis_range
+        current_reference_y = _axis_checked_current_reference_y(
+            analysis,
+            price_min,
+            price_max,
+            current_reference_y,
+        )
     elif current_reference_y is not None:
         # fallback للصور التي يظهر فيها خط السعر ولكن لم تُقرأ أرقام محورها.
         price_min, price_max = _anchored_price_range(

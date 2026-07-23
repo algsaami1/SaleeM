@@ -182,36 +182,53 @@ def test_model_current_line_ratio_is_used_as_pixel_detection_fallback():
     assert abs(detected - expected) <= 1
 
 
-def test_image_axis_labels_keep_source_positions_and_drive_transform():
+def test_image_axis_uses_top_next_and_bottom_to_build_one_clean_step():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
     analysis["image_axis_labels"] = [
         {"price": current + 4.0, "y_ratio": 0.15},
         {"price": current + 2.0, "y_ratio": 0.32},
-        {"price": current - 2.0, "y_ratio": 0.72},
-        {"price": current - 4.0, "y_ratio": 0.88},
+        # Deliberately wrong middle OCR value: it must not distort the scale.
+        {"price": current + 0.37, "y_ratio": 0.49},
+        {"price": current - 4.0, "y_ratio": 0.83},
     ]
-    reference_ratio = 0.52
-    reference_y = CHART[1] + int((CHART[3] - CHART[1]) * reference_ratio)
+    reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.52)
     dynamic = _dynamic_image_axis_range(analysis, reference_y)
     assert dynamic is not None
     low, high = dynamic
 
-    # The green current-price line is the exact anchor for every drawing.
-    assert abs(_price_y(current, low, high) - reference_y) <= 1
+    # Top and next label define the transform, independent of the current-line
+    # reference and of bad intermediate OCR labels.
+    top_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.15)
+    second_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.32)
+    assert abs(_price_y(current + 4.0, low, high) - top_y) <= 1
+    assert abs(_price_y(current + 2.0, low, high) - second_y) <= 1
 
-    # The right axis copies the source prices and their source Y positions
-    # directly.  It must not regenerate or extrapolate extra labels.
     labels = _right_axis_labels(analysis, low, high)
-    assert labels
     assert [price for _role, price, _y in labels] == [
-        item["price"] for item in analysis["image_axis_labels"]
+        current + 4.0,
+        current + 2.0,
+        current,
+        current - 2.0,
+        current - 4.0,
     ]
-    source_y = [
-        CHART[1] + round((CHART[3] - CHART[1]) * item["y_ratio"])
-        for item in analysis["image_axis_labels"]
+    expected_y = [
+        CHART[1] + round((CHART[3] - CHART[1]) * ratio)
+        for ratio in (0.15, 0.32, 0.49, 0.66, 0.83)
     ]
-    assert [y for _role, _price, y in labels] == source_y
+    assert [y for _role, _price, y in labels] == expected_y
+
+
+def test_image_axis_rejects_non_consecutive_second_label():
+    analysis = _analysis("صاعد")
+    current = analysis["current_price"]
+    analysis["image_axis_labels"] = [
+        {"price": current + 6.0, "y_ratio": 0.10},
+        # This skips the immediately following tick, so bottom consistency fails.
+        {"price": current + 2.0, "y_ratio": 0.25},
+        {"price": current - 6.0, "y_ratio": 0.70},
+    ]
+    assert _dynamic_image_axis_range(analysis) is None
 
 
 def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
