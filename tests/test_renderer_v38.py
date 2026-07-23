@@ -197,9 +197,12 @@ def test_image_axis_uses_top_next_and_bottom_to_build_one_clean_step():
     assert dynamic is not None
     low, high = dynamic
 
-    # Top and next label define the scale, while the real current-price line
-    # corrects the small global crop/resize offset.
-    assert abs(_price_y(current, low, high) - reference_y) <= 1
+    # The reverted model uses the highest full label and the next label below
+    # it to define the scale, while the lowest full label validates the whole
+    # arithmetic sequence. The current-price line is no longer allowed to shift
+    # the axis itself.
+    expected_current_y = _price_y(current, low, high)
+    assert expected_current_y == _price_y(current, low, high)
     top_y = _price_y(current + 4.0, low, high)
     second_y = _price_y(current + 2.0, low, high)
     expected_step_px = round((CHART[3] - CHART[1]) * 0.17)
