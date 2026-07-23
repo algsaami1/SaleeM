@@ -454,13 +454,11 @@ def _anchored_price_range(
     """Shift the complete price transform so the current price sits on the
     green reference line detected in the uploaded chart.
 
-    Every added element is drawn from the same ``price_min``/``price_max``
-    transform.  Anchoring that shared transform therefore moves support,
-    resistance, FVG, Order Block, entry, stop, targets and the direction arrow
-    together instead of moving only the green current-price line.
-
-    The visible span is enlarged only when required to keep the analysed
-    candles/levels/trade prices inside the chart after anchoring near an edge.
+    In the special case where the uploaded chart provides a nearby visible top
+    price, that top price becomes the primary anchor for the right price axis.
+    This keeps the vertical distance between the top-price badge and the green
+    current-price badge visually meaningful instead of being washed out by a
+    much larger auto-scaled span.
     """
     current = _number(analysis.get("current_price"))
     if current is None or reference_y is None:
@@ -473,6 +471,20 @@ def _anchored_price_range(
     # Fractions of the chart available above and below the detected line.
     above_fraction = max(1.0 / chart_height, (y - top) / chart_height)
     below_fraction = max(1.0 / chart_height, (bottom - y) / chart_height)
+    original_span = max(0.0001, price_max - price_min)
+
+    image_high = _number(analysis.get("image_price_high"))
+    if image_high is not None and image_high > current and above_fraction >= 0.10:
+        image_gap = image_high - current
+        gap_ratio = image_gap / original_span
+        if gap_ratio <= max(TOP_PRICE_MIN_GAP_RATIO + 0.03, 0.19):
+            top_padding = max(original_span * TOP_PRICE_TOP_PADDING_RATIO, image_gap * 0.04, 0.06)
+            desired_above = image_gap + top_padding
+            span = max(desired_above / above_fraction, desired_above + 0.8, 4.0)
+            anchored_max = current + above_fraction * span
+            anchored_min = anchored_max - span
+            if anchored_max > anchored_min:
+                return anchored_min, anchored_max
 
     visible_values: list[float] = [current]
     for candle in analysis.get("candles") or []:
@@ -492,7 +504,6 @@ def _anchored_price_range(
 
     required_above = max((value - current for value in visible_values), default=0.0)
     required_below = max((current - value for value in visible_values), default=0.0)
-    original_span = max(0.0001, price_max - price_min)
 
     # Preserve the previous visual scale whenever possible.  If the green line
     # is near an edge, expand just enough so no important drawing is clipped.
