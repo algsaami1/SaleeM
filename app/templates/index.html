@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=3.5.0">
+  <link rel="stylesheet" href="/static/style.css?v=3.6.0">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
@@ -77,11 +77,22 @@
 
     <section class="card notice">
       <span class="notice-icon">💡</span>
-      <p>يحاول التطبيق قراءة السعر الحالي وأعلى وأدنى نطاق ظاهر من صورة شارت <b>XAUUSD</b>، ثم يجلب الشموع والتوقيتات والمستويات من بيانات السوق ويعيد رسم السيناريو بصورة واضحة. وإذا تعذرت قراءة رقم من الصورة، يكمل التحليل بأقرب بيانات سوق متاحة بدل إيقافه.</p>
+      <p>يقرأ التطبيق سلم الأسعار وخط السعر الحالي من صورة شارت <b>XAUUSD</b> ثم يستخدم مقياسًا واحدًا للمحور والدخول والوقف والأهداف. إذا لم ينجح التطابق بدقة، سيطلب تفعيل <b>Auto-scale / الضبط التلقائي</b> والتقاط صورة جديدة بدل رسم محور تقريبي.</p>
     </section>
 
     {% if error %}
-    <section class="card error-card"><strong>تعذر التحليل</strong><p>{{ error }}</p></section>
+    <section class="card error-card{% if axis_retry %} axis-retry-card{% endif %}">
+      <strong>{% if axis_retry %}تعذر ضبط محور الأسعار{% else %}تعذر التحليل{% endif %}</strong>
+      <p>{{ error }}</p>
+      {% if axis_retry %}
+      <div class="axis-retry-steps">
+        <span><b>1</b> فعّل Auto-scale أو «الضبط التلقائي» في الشارت.</span>
+        <span><b>2</b> تأكد من ظهور أرقام المحور اليميني وخط السعر الحالي كاملًا.</span>
+        <span><b>3</b> التقط صورة جديدة ثم أعد المحاولة.</span>
+      </div>
+      <button class="axis-retry-button" id="axis-retry-button" type="button">اختيار صورة جديدة</button>
+      {% endif %}
+    </section>
     {% endif %}
 
     {% if result %}
@@ -214,6 +225,6 @@
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=3.4.0" defer></script>
+  <script src="/static/app.js?v=3.5.0" defer></script>
 </body>
 </html>

@@ -59,6 +59,10 @@ TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
 
+
+class AxisCalibrationError(RuntimeError):
+    """Raised when the uploaded chart cannot produce a trustworthy price axis."""
+
 _FONT_CACHE: dict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
 
@@ -429,14 +433,14 @@ def _dynamic_image_axis_range(
     analysis: dict[str, Any],
     reference_y: int | None = None,
 ) -> tuple[float, float] | None:
-    """Rebuild the transform from top tick, next tick, and bottom tick.
+    """Rebuild one shared transform for the source axis and all drawings.
 
-    ``reference_y`` remains in the signature for compatibility, but the scale
-    itself is intentionally not shifted by the green current-price line.  The
-    first two source ticks define the true step; shifting the transform would
-    make the right axis disagree with the prices printed in the uploaded chart.
+    The first two complete source ticks define the scale.  The lowest complete
+    tick validates the sequence.  The real current-price line then removes the
+    small global vertical offset introduced by screenshot cropping/resizing.
+    This keeps the right axis, current badge, entry, stop and targets on the
+    exact same transform.
     """
-    del reference_y
     model = _image_axis_step_model(analysis)
     if model is None:
         return None
@@ -447,11 +451,83 @@ def _dynamic_image_axis_range(
     ratio_step = float(model["ratio_step"])
     price_per_ratio = price_step / ratio_step
 
-    price_max = top_price + top_ratio * price_per_ratio
+    source_price_max = top_price + top_ratio * price_per_ratio
+    price_max = source_price_max
+
+    current = _number(analysis.get("current_price"))
+    if reference_y is not None and current is not None:
+        chart_height = max(1, CHART[3] - CHART[1])
+        current_ratio = (float(reference_y) - CHART[1]) / chart_height
+        current_ratio = max(0.0, min(1.0, current_ratio))
+
+        # A valid axis and a valid current line should disagree only by a small
+        # global offset.  A large disagreement means OCR selected a wrong tick
+        # or pixel detection selected a candle/zone, so the result must not be
+        # rendered with a misleading approximate axis.
+        source_current_ratio = (source_price_max - float(current)) / price_per_ratio
+        anchor_error = abs(source_current_ratio - current_ratio)
+        anchor_tolerance = max(0.032, ratio_step * 0.36)
+        if anchor_error > anchor_tolerance:
+            return None
+
+        price_max = float(current) + current_ratio * price_per_ratio
+
     price_min = price_max - price_per_ratio
     if price_max <= price_min or price_max - price_min < 0.1:
         return None
+
+
+    # Validate the three structural anchors against the final calibrated
+    # transform.  Small uniform OCR placement noise is accepted; a broken scale
+    # is rejected so the UI can ask for Auto-scale and a new screenshot.
+    anchor_errors = []
+    for price_key, ratio_key in (
+        ("top_price", "top_ratio"),
+        ("second_price", "second_ratio"),
+        ("bottom_price", "bottom_ratio"),
+    ):
+        source_price = float(model[price_key])
+        source_ratio = float(model[ratio_key])
+        calculated_ratio = (price_max - source_price) / price_per_ratio
+        anchor_errors.append(abs(calculated_ratio - source_ratio))
+    if max(anchor_errors) > max(0.038, ratio_step * 0.42):
+        return None
+
+    analysis["_calibrated_axis_model"] = {
+        **model,
+        "price_per_ratio": float(price_per_ratio),
+        "price_max": float(price_max),
+        "price_min": float(price_min),
+    }
     return price_min, price_max
+
+
+def validate_uploaded_axis(
+    analysis: dict[str, Any],
+    chart_background_path: str | os.PathLike[str] | None,
+) -> tuple[bool, str]:
+    """Validate a user screenshot before generating a final result image."""
+    prepared_background, detected_green_line_y = _prepare_chart_background(chart_background_path)
+    if prepared_background is None:
+        return False, "تعذر تجهيز صورة الشارت للمعايرة."
+
+    current_reference_y = detected_green_line_y
+    if current_reference_y is None:
+        current_reference_y = _analysis_current_reference_y(analysis)
+    if current_reference_y is None:
+        return False, "لم يظهر خط السعر الحالي بوضوح داخل الشارت."
+
+    if _image_axis_step_model(analysis) is None:
+        return False, "لم تُقرأ ثلاثة أسعار متسلسلة وواضحة من محور الشارت."
+
+    calibrated = _dynamic_image_axis_range(analysis, current_reference_y)
+    if calibrated is None:
+        return False, "لم تتطابق مسافات أسعار المحور مع موضع السعر الحالي."
+
+    labels = _right_axis_labels(analysis, calibrated[0], calibrated[1])
+    if len(labels) < 3:
+        return False, "لم يتكوّن سلم سعري كامل وموثوق من الصورة."
+    return True, ""
 
 
 def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
@@ -1050,7 +1126,9 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
-    model = _image_axis_step_model(analysis)
+    model = analysis.get("_calibrated_axis_model")
+    if not isinstance(model, dict):
+        model = _image_axis_step_model(analysis)
     if model is not None:
         # Generate one clean arithmetic sequence.  The top and immediately
         # following source labels determine both the price step and the pixel
@@ -1071,7 +1149,10 @@ def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: fl
             if y_ratio > bottom_ratio + max(0.018, ratio_step * 0.22):
                 break
             price = top_price - index * price_step
-            y = int(round(top + y_ratio * chart_height))
+            # Use the final shared transform instead of the raw OCR ratio.  The
+            # current-price line may have corrected a small global crop/resize
+            # offset, and every right-axis tick must move by the same amount.
+            y = _price_y(price, price_min, price_max)
             labels.append(("axis", round(price, 2), y))
         if len(labels) >= 3:
             return labels
@@ -1671,14 +1752,6 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if dynamic_axis_range is not None:
         price_min, price_max = dynamic_axis_range
         current_reference_y = _axis_checked_current_reference_y(
-            analysis,
-            price_min,
-            price_max,
-            current_reference_y,
-        )
-    elif current_reference_y is not None:
-        # fallback للصور التي يظهر فيها خط السعر ولكن لم تُقرأ أرقام محورها.
-        price_min, price_max = _anchored_price_range(
             analysis,
             price_min,
             price_max,

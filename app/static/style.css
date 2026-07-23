@@ -81,6 +81,13 @@ button{font-family:inherit}
 .notice b{color:var(--purple)}
 .error-card{padding:17px;border-color:#d4f2dc;color:#247242}
 .error-card p{margin:6px 0 0}
+.axis-retry-card{border-color:#f0c76f;background:linear-gradient(180deg,#fffdf7,#fffaf0);color:#6a4a08}
+.axis-retry-card>strong{display:block;font-size:17px;color:#8a5a00}
+.axis-retry-card>p{line-height:1.9;color:#72561e}
+.axis-retry-steps{display:grid;gap:9px;margin:14px 0;padding:13px;border:1px solid #f3d89e;border-radius:14px;background:#fff}
+.axis-retry-steps span{display:flex;align-items:flex-start;gap:9px;font-size:11px;line-height:1.75;color:#5d4b28}
+.axis-retry-steps b{width:23px;height:23px;flex:0 0 23px;display:grid;place-items:center;border-radius:50%;background:#f5b942;color:#fff;font-size:11px}
+.axis-retry-button{display:block;width:100%;border:0;border-radius:14px;padding:14px;background:linear-gradient(135deg,#f2b53b,#d99212);color:#fff;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(217,146,18,.22)}
 
 .result-card{padding:15px}
 .result-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}

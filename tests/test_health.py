@@ -1,5 +1,9 @@
-from fastapi.testclient import TestClient
+import io
 
+from fastapi.testclient import TestClient
+from PIL import Image
+
+from app.engine.renderer import AxisCalibrationError
 from app.main import app
 
 client = TestClient(app)
@@ -29,3 +33,22 @@ def test_home_has_no_autoscale_confirmation():
     assert "autoscale-modal" not in html
     assert "تم تفعيل Auto-scale" not in html
     assert "قبل كل رفع" not in html
+
+
+def test_axis_failure_requests_autoscale_only_after_failed_analysis(monkeypatch):
+    def fail_axis(*_args, **_kwargs):
+        raise AxisCalibrationError(
+            "تعذر ضبط محور الأسعار بدقة. فعّل Auto-scale أو «الضبط التلقائي» ثم أعد المحاولة."
+        )
+
+    monkeypatch.setattr("app.main.analyze_chart_image", fail_axis)
+    payload = io.BytesIO()
+    Image.new("RGB", (240, 400), "white").save(payload, format="PNG")
+    response = client.post(
+        "/analyze",
+        files={"image": ("chart.png", payload.getvalue(), "image/png")},
+    )
+    assert response.status_code == 422
+    assert "تعذر ضبط محور الأسعار" in response.text
+    assert "Auto-scale" in response.text
+    assert "اختيار صورة جديدة" in response.text

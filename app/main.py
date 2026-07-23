@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
+from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
 from app.services.mailer import owner_email, send_note_email
@@ -43,11 +44,12 @@ class NotePayload(BaseModel):
     message: str = Field(..., min_length=1, max_length=1500)
 
 
-def page_context(request: Request, *, result=None, error=None):
+def page_context(request: Request, *, result=None, error=None, axis_retry=False):
     return {
         "request": request,
         "result": result,
         "error": error,
+        "axis_retry": axis_retry,
         "summary": feedback_store.summary(),
         "owner_email": owner_email(),
     }
@@ -69,7 +71,7 @@ async def health():
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-full-page-chart-green-line-sync-v3.8.1",
+        "renderer": "saleem-strict-image-axis-autoscale-retry-v3.8.2",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
@@ -162,6 +164,12 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
         )
     except HTTPException:
         raise
+    except AxisCalibrationError as exc:
+        return templates.TemplateResponse(
+            "index.html",
+            page_context(request, error=str(exc), axis_retry=True),
+            status_code=422,
+        )
     except Exception as exc:
         logging.exception("SaleeM analysis failed")
         technical_message = str(exc).strip()

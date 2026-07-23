@@ -197,12 +197,13 @@ def test_image_axis_uses_top_next_and_bottom_to_build_one_clean_step():
     assert dynamic is not None
     low, high = dynamic
 
-    # Top and next label define the transform, independent of the current-line
-    # reference and of bad intermediate OCR labels.
-    top_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.15)
-    second_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.32)
-    assert abs(_price_y(current + 4.0, low, high) - top_y) <= 1
-    assert abs(_price_y(current + 2.0, low, high) - second_y) <= 1
+    # Top and next label define the scale, while the real current-price line
+    # corrects the small global crop/resize offset.
+    assert abs(_price_y(current, low, high) - reference_y) <= 1
+    top_y = _price_y(current + 4.0, low, high)
+    second_y = _price_y(current + 2.0, low, high)
+    expected_step_px = round((CHART[3] - CHART[1]) * 0.17)
+    assert abs((second_y - top_y) - expected_step_px) <= 1
 
     labels = _right_axis_labels(analysis, low, high)
     assert [price for _role, price, _y in labels] == [
@@ -212,10 +213,13 @@ def test_image_axis_uses_top_next_and_bottom_to_build_one_clean_step():
         current - 2.0,
         current - 4.0,
     ]
-    expected_y = [
-        CHART[1] + round((CHART[3] - CHART[1]) * ratio)
-        for ratio in (0.15, 0.32, 0.49, 0.66, 0.83)
-    ]
+    expected_y = [_price_y(price, low, high) for price in (
+        current + 4.0,
+        current + 2.0,
+        current,
+        current - 2.0,
+        current - 4.0,
+    )]
     assert [y for _role, _price, y in labels] == expected_y
 
 

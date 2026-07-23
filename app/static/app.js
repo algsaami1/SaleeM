@@ -13,6 +13,7 @@
   const saveImageButton = document.getElementById('save-image-button');
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
+  const axisRetryButton = document.getElementById('axis-retry-button');
 
   const tradeFeedbackForm = document.getElementById('trade-feedback-form');
   const tradeStatus = document.getElementById('trade-feedback-status');
@@ -48,6 +49,12 @@
   };
 
   fileInput?.addEventListener('change', handleSelectedFile);
+
+  axisRetryButton?.addEventListener('click', () => {
+    const uploadCard = document.querySelector('.upload-card');
+    uploadCard?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    window.setTimeout(() => fileInput?.click(), 260);
+  });
 
   if (dropZone) {
     ['dragenter', 'dragover'].forEach((eventName) => {
