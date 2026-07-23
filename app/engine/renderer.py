@@ -1143,18 +1143,28 @@ def _draw_right_price_axis(
     current_y: int | None = None,
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
-    for role, price, y in _right_axis_labels(analysis, price_min, price_max):
+    labels = [item for item in _right_axis_labels(analysis, price_min, price_max) if item[0] not in {"high", "current"}]
+    for index, (role, price, y) in enumerate(labels):
         if not (CHART[1] + 8 <= y <= CHART[3] - 6):
             continue
-        if role in {"high", "current"}:
+        draw_y = y
+        # Pull the highest visible price upward and the lowest visible price
+        # downward inside the right axis so they visually hug the axis edges,
+        # as requested by the user.
+        if index == 0:
+            top_anchor = CHART[1] + 30
+            if top_price_box is not None:
+                top_anchor = max(top_anchor, top_price_box[3] + 14)
+            draw_y = min(max(draw_y, top_anchor), top_anchor)
+        elif index == len(labels) - 1:
+            bottom_anchor = CHART[3] - 26
+            draw_y = max(min(draw_y, bottom_anchor), bottom_anchor)
+        if current_y is not None and abs(draw_y - current_y) < 22:
             continue
-        if current_y is not None and abs(y - current_y) < 22:
-            # The green current-price badge replaces an overlapping axis label.
-            continue
-        if top_price_box is not None and top_price_box[1] - 4 <= y <= top_price_box[3] + 4:
+        if top_price_box is not None and top_price_box[1] - 4 <= draw_y <= top_price_box[3] + 4:
             continue
         axis_text = _fmt_axis_price(price) if role == "axis" else _fmt_price(price)
-        draw.text((PRICE_AXIS_X + 12, y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
+        draw.text((PRICE_AXIS_X + 12, draw_y), axis_text, font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
 
 
@@ -1460,8 +1470,10 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     stop_y = _price_y(stop, price_min, price_max) if stop_visible and stop is not None else None
     visible_targets = [(target, _price_y(target, price_min, price_max)) for target in targets if _is_visible_price(target, price_min, price_max)]
     target_ys = [item[1] for item in visible_targets]
-    zone_left = min(right - 190, max(candle_right + 12, int(left + (right - left) * 0.67)))
-    zone_right = right - 8
+    # Shift the analysis zones a bit left so the chart-side axis remains clear,
+    # and reserve the right strip for the price cards.
+    zone_left = min(right - 210, max(candle_right + 8, int(left + (right - left) * 0.60)))
+    zone_right = right - 28
 
     # لا نشترط بقاء جميع الرسومات داخل الشاشة؛ كل عنصر خارج محور الأسعار يختفي.
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -1472,16 +1484,12 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
             (zone_left, min(entry_y, far_target_y), zone_right, max(entry_y, far_target_y)),
             radius=7,
             fill=TP_GREEN_FILL,
-            outline=(25, 211, 112, 150),
-            width=2,
         )
     if stop_y is not None:
         ld.rounded_rectangle(
             (zone_left, min(entry_y, stop_y), zone_right, max(entry_y, stop_y)),
             radius=7,
             fill=RED_FILL,
-            outline=(245, 63, 70, 150),
-            width=2,
         )
     image.alpha_composite(layer)
 
@@ -1509,6 +1517,8 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     for index, (target, exact_y) in enumerate(visible_targets, start=1):
         labels.append((f"tp{index}", exact_y, positions[f"tp{index}"], f"TP{index} | {_fmt_price(target)}", TP_GREEN, False))
 
+    axis_card_right = CHART_CARD[2] - 16
+    chart_card_right = zone_right - 5
     for key, exact_y, shown_y, text, color, rtl in labels:
         if key.startswith("tp"):
             fill = (5, 62, 38, 248)
@@ -1519,9 +1529,10 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         else:
             fill = (112, 24, 35, 248)
             text_fill = WHITE
+        label_x = axis_card_right if key in {"entry", "stop"} else chart_card_right
         rect = _rounded_label(
             draw,
-            zone_right - 5,
+            label_x,
             shown_y - 14,
             text,
             F_TRADE_SMALL if rtl else F_TRADE_SMALL_LATIN,
