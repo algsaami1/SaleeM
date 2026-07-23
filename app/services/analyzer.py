@@ -860,10 +860,8 @@ def _normalize_axis_labels(labels: Any, *, image_high: float | None = None, imag
         if price is None or y_ratio is None:
             continue
         y_ratio = max(0.0, min(1.0, float(y_ratio)))
-        if image_high is not None and price > image_high + 0.75:
-            continue
-        if image_low is not None and price < image_low - 0.75:
-            continue
+        # لا نحذف رقمًا واضحًا بسبب خطأ محتمل في قراءة أعلى/أدنى المحور؛
+        # السلسلة الكاملة للأرقام أهم لأنها تحدد مقياس الصورة الحقيقي.
         result.append({"price": round(float(price), 2), "y_ratio": round(y_ratio, 4)})
     result.sort(key=lambda item: item["y_ratio"])
     dedup: list[dict[str, float]] = []
@@ -910,11 +908,21 @@ def _validate_analysis(
 
     image_price_high = _number(data.get("image_price_high"))
     image_price_low = _number(data.get("image_price_low"))
-    image_axis_labels = _normalize_axis_labels(data.get("image_axis_labels"), image_high=image_price_high, image_low=image_price_low)
+    image_axis_labels = _normalize_axis_labels(data.get("image_axis_labels"))
     if image_price_high is not None and image_price_high <= current:
         image_price_high = None
     if image_price_low is not None and image_price_low >= current:
         image_price_low = None
+
+    # عند توفر سلسلة المحور نستخدم أول وآخر رقم واضحين لتصحيح أي قراءة
+    # منفصلة خاطئة للحدين، من دون إجبارهما على حواف الصورة.
+    if len(image_axis_labels) >= 2:
+        top_axis_price = float(image_axis_labels[0]["price"])
+        bottom_axis_price = float(image_axis_labels[-1]["price"])
+        if image_price_high is None or image_price_high < top_axis_price:
+            image_price_high = top_axis_price
+        if image_price_low is None or image_price_low > bottom_axis_price:
+            image_price_low = bottom_axis_price
 
     # إذا لم يقرأ النموذج حدي المحور، نستخدم نطاق الشموع المجلوبة بعد مواءمتها.
     # هذا يمنع توقف الرسم ويظل محور النتيجة متوازنًا مع هامش علوي وسفلي.
@@ -1106,7 +1114,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها من نافذة مرنة من شموع السوق داخل تصميم SaleeM. يضبط محور السعر تلقائيًا حول منطقة القرار: الشموع والسعر الحالي والدعم والمقاومة والدخول والوقف والأهداف. أعلى وأدنى سعر المقروءان من الصورة مرجع مساعد فقط، ولا يسمح لهما بضغط الشموع إذا كانا بعيدين عن السيناريو. تكون جهة الهدف أوسع قليلًا، وتظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
+النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عندما تكون image_axis_labels متاحة يجب أن يكون محور السعر الأيمن نسخة من محور الصورة نفسها: نفس الأرقام، نفس ترتيبها، ونفس مواضعها الرأسية، ويتغير بالكامل مع كل صورة جديدة. استخدم current_price والخط الحقيقي current_price_y_ratio كنقطة تثبيت، ولا تقترح تدريجًا ثابتًا أو Auto-scale مستقلًا عن الصورة. يجب أن تستخدم الشموع والدعم والمقاومة والدخول والوقف والأهداف التحويل السعري نفسه المستخرج من محور الصورة. لا يُستخدم الضبط التلقائي حول منطقة القرار إلا كحل احتياطي إذا تعذرت قراءة رقمين متتاليين على الأقل من محور الصورة. تكون جهة الهدف أوسع قليلًا في وضع fallback فقط، وتظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
