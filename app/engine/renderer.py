@@ -478,9 +478,12 @@ def validate_uploaded_axis(
     price line remains useful for rendering the green badge, but it no longer
     blocks generation when the axis sequence itself is readable.
     """
-    prepared_background, detected_green_line_y = _prepare_chart_background(chart_background_path)
+    prepared_background, detected_green_line_y, visible_candles = _prepare_chart_background(chart_background_path)
     if prepared_background is None:
         return False, "تعذر تجهيز صورة الشارت للمعايرة."
+
+    if visible_candles is not None and visible_candles <= 10:
+        return False, "الصورة تحتاج تكبيرًا أفقيًا أقل: يجب أن يظهر أكثر من 10 شموع واضحة. استخدم Reset Vertical Scale أو Auto-scale ثم التقط صورة جديدة."
 
     if _image_axis_step_model(analysis) is None:
         return False, "لم تُقرأ ثلاثة أسعار واضحة بالترتيب: أعلى سعر كامل، والسعر الذي تحته، وأدنى سعر كامل."
@@ -886,21 +889,84 @@ def _axis_checked_current_reference_y(
     calculated_y = _price_y(float(current), price_min, price_max)
     if detected_y is None:
         return calculated_y
-    tolerance = max(16, int((CHART[3] - CHART[1]) * 0.025))
-    if abs(int(detected_y) - calculated_y) <= tolerance:
-        return int(detected_y)
-    return calculated_y
+    # User preference: whenever a real current-price line is visible in the
+    # uploaded chart, the green badge must stay attached to that line.
+    return int(detected_y)
+
+
+def _is_candle_colored_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    """Detect likely candle pixels while ignoring neutral grid/background tones."""
+    r, g, b, a = pixel
+    if a < 110:
+        return False
+    chroma = max(r, g, b) - min(r, g, b)
+    if chroma < 18:
+        return False
+    brightness = (r + g + b) / 3.0
+    if brightness < 20 or brightness > 246:
+        return False
+    return True
+
+
+
+def _estimate_visible_candle_count(chart_image: Image.Image) -> int | None:
+    """Estimate how many candles are visible in the uploaded screenshot.
+
+    The estimate is intentionally simple: scan the chart area (excluding the
+    right price axis) and count narrow clusters of colored columns.  This is
+    used only to reject screenshots that are too zoomed-in, not for precise
+    analysis.
+    """
+    width, height = chart_image.size
+    if width < 120 or height < 120:
+        return None
+
+    left = max(4, int(width * 0.01))
+    right = max(left + 20, int(width * 0.82))
+    top = max(8, int(height * 0.04))
+    bottom = min(height - 8, int(height * 0.96))
+    pixels = chart_image.load()
+
+    active_columns: list[bool] = []
+    for x in range(left, right):
+        colored = 0
+        for y in range(top, bottom):
+            if _is_candle_colored_pixel(pixels[x, y]):
+                colored += 1
+        active_columns.append(colored >= max(6, int((bottom - top) * 0.018)))
+
+    if not any(active_columns):
+        return None
+
+    segments: list[int] = []
+    run = 0
+    for active in active_columns:
+        if active:
+            run += 1
+        elif run:
+            segments.append(run)
+            run = 0
+    if run:
+        segments.append(run)
+
+    if not segments:
+        return None
+
+    max_width = max(2, int((right - left) * 0.075))
+    count = sum(1 for width_px in segments if 1 <= width_px <= max_width)
+    return count or None
+
 
 
 def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
-) -> tuple[Image.Image | None, int | None]:
-    """Fit the uploaded chart once and detect its green reference line."""
+) -> tuple[Image.Image | None, int | None, int | None]:
+    """Fit the uploaded chart once, detect the green line, and estimate candle count."""
     if not chart_background_path:
-        return None, None
+        return None, None, None
     path = Path(chart_background_path)
     if not path.exists():
-        return None, None
+        return None, None, None
 
     left, top, right, bottom = CHART
     try:
@@ -908,11 +974,12 @@ def _prepare_chart_background(
             chart_rgba = chart_image.convert("RGBA")
             fitted = _fit_cover(chart_rgba, (right - left, bottom - top))
             detected_local_y = _detect_green_reference_line_y(fitted)
+            visible_candles = _estimate_visible_candle_count(fitted)
     except Exception:  # pragma: no cover
-        return None, None
+        return None, None, None
 
     detected_absolute_y = None if detected_local_y is None else top + detected_local_y
-    return fitted, detected_absolute_y
+    return fitted, detected_absolute_y, visible_candles
 
 
 def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) -> None:
@@ -934,7 +1001,7 @@ def _paste_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
 ) -> tuple[bool, int | None]:
     """Compatibility wrapper used by older callers/tests."""
-    fitted, detected_absolute_y = _prepare_chart_background(chart_background_path)
+    fitted, detected_absolute_y, _visible_candles = _prepare_chart_background(chart_background_path)
     if fitted is None:
         return False, None
     _paste_prepared_chart_background(image, fitted)
@@ -1718,7 +1785,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     # الشارت يملأ الصفحة من الأعلى حتى صندوق الملاحظات السفلي.
     candles = analysis.get("candles") or []
     price_min, price_max = _price_range(analysis)
-    prepared_background, detected_green_line_y = _prepare_chart_background(chart_background_path)
+    prepared_background, detected_green_line_y, _visible_candles = _prepare_chart_background(chart_background_path)
     using_chart_background = prepared_background is not None
     current_reference_y = detected_green_line_y
     if current_reference_y is None:

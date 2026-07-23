@@ -8,9 +8,11 @@ from app.engine.renderer import (
     NOTES,
     _analysis_current_reference_y,
     _anchored_price_range,
+    _axis_checked_current_reference_y,
     _axis_values,
     _detect_green_reference_line_y,
     _dynamic_image_axis_range,
+    _estimate_visible_candle_count,
     _price_range,
     _price_y,
     _right_axis_labels,
@@ -310,3 +312,33 @@ def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
     with Image.open(output) as image:
         assert image.size == (1080, 1920)
         assert image.format == "PNG"
+
+
+def test_estimate_visible_candle_count_recognizes_more_than_ten_candles():
+    width, height = 872, 1208
+    background = Image.new("RGBA", (width, height), (240, 240, 240, 255))
+    start_x = 30
+    step = 34
+    for index in range(12):
+        x = start_x + index * step
+        color = (48, 166, 154, 255) if index % 2 == 0 else (224, 92, 84, 255)
+        for y in range(320, 520):
+            background.putpixel((x, y), color)
+            background.putpixel((x + 1, y), color)
+            background.putpixel((x + 2, y), color)
+        for y in range(280, 580):
+            background.putpixel((x + 1, y), color)
+
+    estimated = _estimate_visible_candle_count(background)
+    assert estimated is not None
+    assert estimated >= 11
+
+
+def test_axis_checked_current_reference_y_prefers_detected_chart_line():
+    analysis = _analysis("صاعد")
+    price_min, price_max = _price_range(analysis)
+    calculated_y = _price_y(analysis["current_price"], price_min, price_max)
+    detected_y = calculated_y + 140
+
+    chosen = _axis_checked_current_reference_y(analysis, price_min, price_max, detected_y)
+    assert chosen == detected_y

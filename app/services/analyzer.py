@@ -1244,8 +1244,8 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     axis_ok, axis_reason = validate_uploaded_axis(analysis, image_path)
     if not axis_ok:
         raise AxisCalibrationError(
-            "تعذر ضبط محور الأسعار بدقة. فعّل Auto-scale أو «الضبط التلقائي» "
-            "في الشارت، وتأكد من ظهور محور الأسعار كاملًا وخط السعر الحالي، "
+            "تعذر ضبط محور الأسعار بدقة. استخدم Reset Vertical Scale أو فعّل Auto-scale / «الضبط التلقائي» "
+            "في الشارت، وتأكد من ظهور محور الأسعار كاملًا وخط السعر الحالي، وأن الصورة تحتوي على أكثر من 10 شموع، "
             f"ثم التقط صورة جديدة وأعد المحاولة. السبب: {axis_reason}"
         )
     png = render_result(analysis, chart_background_path=image_path)
