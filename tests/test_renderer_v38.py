@@ -13,6 +13,7 @@ from app.engine.renderer import (
     _detect_green_reference_line_y,
     _dynamic_image_axis_range,
     _estimate_visible_candle_count,
+    _exact_image_axis_model,
     _price_range,
     _price_y,
     _right_axis_labels,
@@ -184,40 +185,41 @@ def test_model_current_line_ratio_is_used_as_pixel_detection_fallback():
     assert abs(detected - expected) <= 1
 
 
-def test_image_axis_prefers_inner_anchors_to_build_one_clean_step():
+def test_image_axis_uses_exact_label_positions_when_available():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
     analysis["image_axis_labels"] = [
-        {"price": current + 8.0, "y_ratio": 0.06},  # ignored outer top label
-        {"price": current + 6.0, "y_ratio": 0.18},  # effective top anchor
-        {"price": current + 4.0, "y_ratio": 0.31},  # step anchor
+        {"price": current + 8.0, "y_ratio": 0.06},
+        {"price": current + 6.0, "y_ratio": 0.18},
+        {"price": current + 4.0, "y_ratio": 0.31},
         {"price": current + 2.0, "y_ratio": 0.44},
-        {"price": current + 0.0, "y_ratio": 0.57},  # effective lower anchor
-        {"price": current - 2.0, "y_ratio": 0.70},  # ignored outer bottom label
+        {"price": current + 0.0, "y_ratio": 0.57},
+        {"price": current - 2.0, "y_ratio": 0.70},
     ]
     reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.52)
     dynamic = _dynamic_image_axis_range(analysis, reference_y)
     assert dynamic is not None
     low, high = dynamic
 
+    # The internal scale still uses the preferred inner anchors.
     top_y = _price_y(current + 6.0, low, high)
     second_y = _price_y(current + 4.0, low, high)
     expected_step_px = round((CHART[3] - CHART[1]) * 0.13)
-    assert abs((second_y - top_y) - expected_step_px) <= 1
+    assert abs((second_y - top_y) - expected_step_px) <= 2
 
     labels = _right_axis_labels(analysis, low, high)
     assert [price for _role, price, _y in labels] == [
+        current + 8.0,
         current + 6.0,
         current + 4.0,
         current + 2.0,
         current,
+        current - 2.0,
     ]
-    expected_y = [_price_y(price, low, high) for price in (
-        current + 6.0,
-        current + 4.0,
-        current + 2.0,
-        current,
-    )]
+    expected_y = [
+        CHART[1] + round((CHART[3] - CHART[1]) * ratio)
+        for ratio in (0.06, 0.18, 0.31, 0.44, 0.57, 0.70)
+    ]
     assert [y for _role, _price, y in labels] == expected_y
 
 
@@ -336,3 +338,45 @@ def test_axis_checked_current_reference_y_prefers_detected_chart_line():
 
     chosen = _axis_checked_current_reference_y(analysis, price_min, price_max, detected_y)
     assert chosen == detected_y
+
+
+def test_exact_axis_mode_filters_one_bad_ocr_label_and_keeps_source_positions():
+    analysis = _analysis("صاعد")
+    current = analysis["current_price"]
+    analysis["image_axis_labels"] = [
+        {"price": current + 8.0, "y_ratio": 0.08},
+        {"price": current + 6.0, "y_ratio": 0.20},
+        {"price": current + 4.0, "y_ratio": 0.32},
+        {"price": current + 9.73, "y_ratio": 0.44},  # bad OCR reading
+        {"price": current + 0.0, "y_ratio": 0.56},
+        {"price": current - 2.0, "y_ratio": 0.68},
+        {"price": current - 4.0, "y_ratio": 0.80},
+    ]
+    model = _exact_image_axis_model(analysis)
+    assert model is not None
+    assert model["mode"] == "exact"
+    assert model["inlier_count"] >= 6
+    assert model["source_count"] == 7
+    assert analysis["axis_calibration_mode"] == "exact"
+    assert analysis["axis_calibration_confidence"] >= 70
+    kept_prices = [round(price, 2) for price, _ratio in model["points"]]
+    assert round(current + 9.73, 2) not in kept_prices
+
+
+def test_exact_axis_range_maps_clean_source_labels_near_their_original_y():
+    analysis = _analysis("صاعد")
+    current = analysis["current_price"]
+    ratios = (0.10, 0.22, 0.34, 0.46, 0.58, 0.70)
+    prices = [current + 6, current + 4, current + 2, current, current - 2, current - 4]
+    analysis["image_axis_labels"] = [
+        {"price": price, "y_ratio": ratio}
+        for price, ratio in zip(prices, ratios)
+    ]
+    dynamic = _dynamic_image_axis_range(analysis)
+    assert dynamic is not None
+    low, high = dynamic
+    chart_height = CHART[3] - CHART[1]
+    for price, ratio in zip(prices, ratios):
+        fitted_y = _price_y(price, low, high)
+        source_y = CHART[1] + round(chart_height * ratio)
+        assert abs(fitted_y - source_y) <= 2

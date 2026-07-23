@@ -354,6 +354,8 @@ def _image_key_prices(analysis: dict[str, Any]) -> tuple[float, float, float] | 
 
 
 def _strict_axis_sync(analysis: dict[str, Any]) -> bool:
+    if _exact_image_axis_model(analysis) is not None:
+        return True
     if _image_axis_step_model(analysis) is not None:
         return True
     return _image_key_prices(analysis) is not None
@@ -372,7 +374,185 @@ def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
         y_ratio = max(0.0, min(1.0, float(y_ratio)))
         points.append((float(price), y_ratio))
     points.sort(key=lambda item: item[1])
-    return points
+
+    # Remove near-duplicate OCR readings without changing the original order.
+    deduped: list[tuple[float, float]] = []
+    for price, ratio in points:
+        duplicate = False
+        for old_price, old_ratio in deduped:
+            if abs(ratio - old_ratio) <= 0.004 and abs(price - old_price) <= 0.08:
+                duplicate = True
+                break
+        if not duplicate:
+            deduped.append((price, ratio))
+    return deduped
+
+
+def _median_number(values: list[float]) -> float | None:
+    clean = sorted(float(value) for value in values if math.isfinite(float(value)))
+    if not clean:
+        return None
+    middle = len(clean) // 2
+    if len(clean) % 2:
+        return clean[middle]
+    return (clean[middle - 1] + clean[middle]) / 2.0
+
+
+def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
+    """Fit a robust literal axis model from all readable source labels.
+
+    The model uses a Theil-Sen style median slope so one bad OCR label cannot
+    bend the whole scale.  It then removes outliers and refits a single linear
+    price-to-Y transform.  Exact mode is enabled only when at least five
+    consistent labels cover a useful portion of the chart.
+    """
+    cached = analysis.get("_exact_axis_model")
+    if isinstance(cached, dict):
+        return cached
+
+    points = _image_axis_points(analysis)
+    if len(points) < 5:
+        return None
+
+    pair_slopes: list[float] = []
+    for index, (price_a, ratio_a) in enumerate(points):
+        for price_b, ratio_b in points[index + 1:]:
+            ratio_delta = ratio_b - ratio_a
+            price_delta = price_a - price_b
+            if ratio_delta < 0.025 or price_delta <= 0.01:
+                continue
+            pair_slopes.append(price_delta / ratio_delta)
+
+    slope = _median_number(pair_slopes)
+    if slope is None or slope <= 0.1:
+        return None
+
+    intercept = _median_number([price + slope * ratio for price, ratio in points])
+    if intercept is None:
+        return None
+
+    adjacent_steps = [
+        points[index][0] - points[index + 1][0]
+        for index in range(len(points) - 1)
+        if points[index][0] - points[index + 1][0] > 0.01
+    ]
+    typical_step = _median_number(adjacent_steps) or 0.5
+    tolerance = max(0.10, typical_step * 0.24, slope * 0.010)
+
+    inliers = [
+        (price, ratio)
+        for price, ratio in points
+        if abs(price - (intercept - slope * ratio)) <= tolerance
+    ]
+    if len(inliers) < 5:
+        return None
+
+    # Refit after outlier removal.  price = intercept - slope * y_ratio.
+    mean_ratio = sum(ratio for _, ratio in inliers) / len(inliers)
+    mean_price = sum(price for price, _ in inliers) / len(inliers)
+    variance = sum((ratio - mean_ratio) ** 2 for _, ratio in inliers)
+    if variance <= 1e-9:
+        return None
+    covariance = sum((ratio - mean_ratio) * (price - mean_price) for price, ratio in inliers)
+    fitted_slope = -covariance / variance
+    if fitted_slope <= 0.1:
+        return None
+    fitted_intercept = mean_price + fitted_slope * mean_ratio
+
+    final_tolerance = max(0.08, typical_step * 0.20, fitted_slope * 0.008)
+    final_points = [
+        (price, ratio)
+        for price, ratio in inliers
+        if abs(price - (fitted_intercept - fitted_slope * ratio)) <= final_tolerance
+    ]
+    if len(final_points) < 5:
+        return None
+
+    # Preserve only strictly descending prices as Y increases.
+    monotonic: list[tuple[float, float]] = []
+    for price, ratio in final_points:
+        if monotonic and price >= monotonic[-1][0] - 0.01:
+            continue
+        monotonic.append((price, ratio))
+    if len(monotonic) < 5:
+        return None
+
+    # Axis labels should follow a regular tick sequence. Missing labels are
+    # allowed only when the price gap and the pixel gap both represent the same
+    # integer multiple of the typical step.
+    interval_pairs = [
+        (monotonic[index][0] - monotonic[index + 1][0], monotonic[index + 1][1] - monotonic[index][1])
+        for index in range(len(monotonic) - 1)
+    ]
+    price_gaps = [gap for gap, _ in interval_pairs if gap > 0.01]
+    ratio_gaps = [gap for _, gap in interval_pairs if gap > 0.005]
+    base_price_gap = _median_number(price_gaps)
+    base_ratio_gap = _median_number(ratio_gaps)
+    if base_price_gap is None or base_ratio_gap is None:
+        return None
+
+    regular_intervals = 0
+    for price_gap, ratio_gap in interval_pairs:
+        multiple = max(1, int(round(price_gap / base_price_gap)))
+        expected_price_gap = base_price_gap * multiple
+        expected_ratio_gap = base_ratio_gap * multiple
+        price_error = abs(price_gap - expected_price_gap) / max(expected_price_gap, 1e-6)
+        ratio_error = abs(ratio_gap - expected_ratio_gap) / max(expected_ratio_gap, 1e-6)
+        if price_error <= 0.20 and ratio_error <= 0.24:
+            regular_intervals += 1
+    regularity = regular_intervals / max(1, len(interval_pairs))
+    if regularity < 0.72:
+        return None
+
+    coverage = monotonic[-1][1] - monotonic[0][1]
+    residuals = [abs(price - (fitted_intercept - fitted_slope * ratio)) for price, ratio in monotonic]
+    median_residual = _median_number(residuals) or 0.0
+    inlier_ratio = len(monotonic) / max(1, len(points))
+    count_score = min(1.0, len(monotonic) / 8.0)
+    coverage_score = min(1.0, coverage / 0.55)
+    residual_score = max(0.0, 1.0 - median_residual / max(final_tolerance, 1e-6))
+    confidence = (
+        0.42 * inlier_ratio
+        + 0.28 * count_score
+        + 0.18 * coverage_score
+        + 0.08 * residual_score
+        + 0.04 * regularity
+    )
+    if confidence < 0.70 or coverage < 0.30:
+        return None
+
+    model: dict[str, Any] = {
+        "mode": "exact",
+        "points": [(float(price), float(ratio)) for price, ratio in monotonic],
+        "slope": float(fitted_slope),
+        "intercept": float(fitted_intercept),
+        "price_max": float(fitted_intercept),
+        "price_min": float(fitted_intercept - fitted_slope),
+        "confidence": round(float(confidence), 4),
+        "source_count": len(points),
+        "inlier_count": len(monotonic),
+        "median_residual": float(median_residual),
+        "regularity": round(float(regularity), 4),
+    }
+    analysis["_exact_axis_model"] = model
+    analysis["axis_calibration_mode"] = "exact"
+    analysis["axis_calibration_confidence"] = round(float(confidence) * 100.0, 1)
+    return model
+
+
+def _exact_source_axis_labels(analysis: dict[str, Any]) -> list[tuple[str, float, int]]:
+    """Redraw cleaned source prices at their original Y positions."""
+    model = _exact_image_axis_model(analysis)
+    if model is None:
+        return []
+    points = model.get("points") or []
+    top, bottom = CHART[1], CHART[3]
+    chart_height = bottom - top
+    labels: list[tuple[str, float, int]] = []
+    for price, y_ratio in points:
+        y = int(round(top + float(y_ratio) * chart_height))
+        labels.append(("axis", round(float(price), 2), y))
+    return labels
 
 
 def _image_axis_step_model(analysis: dict[str, Any]) -> dict[str, float | int] | None:
@@ -440,16 +620,17 @@ def _dynamic_image_axis_range(
     analysis: dict[str, Any],
     reference_y: int | None = None,
 ) -> tuple[float, float] | None:
-    """Rebuild the transform from top tick, next tick, and bottom tick.
-
-    ``reference_y`` remains in the signature for compatibility, but the scale
-    itself is intentionally not shifted by the green current-price line. The
-    user asked to return to the previous behavior because it was closer: build
-    the right axis from the highest full price, the price directly beneath it,
-    and the lowest full price. The first two labels define the price step and
-    pixel spacing, while the bottom label validates the sequence.
-    """
+    """Choose exact source-axis fitting first, then reconstructed fallback."""
     del reference_y
+
+    exact_model = _exact_image_axis_model(analysis)
+    if exact_model is not None:
+        price_min = float(exact_model["price_min"])
+        price_max = float(exact_model["price_max"])
+        if price_max > price_min and price_max - price_min >= 0.1:
+            analysis["_calibrated_axis_model"] = dict(exact_model)
+            return price_min, price_max
+
     model = _image_axis_step_model(analysis)
     if model is None:
         return None
@@ -467,10 +648,12 @@ def _dynamic_image_axis_range(
 
     analysis["_calibrated_axis_model"] = {
         **model,
+        "mode": "reconstructed",
         "price_per_ratio": float(price_per_ratio),
         "price_max": float(price_max),
         "price_min": float(price_min),
     }
+    analysis["axis_calibration_mode"] = "reconstructed"
     return price_min, price_max
 
 
@@ -486,16 +669,18 @@ def validate_uploaded_axis(
     current-price line remains useful for rendering the green badge, but it
     does not block generation when the axis sequence itself is readable.
     """
-    prepared_background, detected_green_line_y, visible_candles = _prepare_chart_background(chart_background_path)
+    prepared_background, detected_green_line_y, _visible_candles = _prepare_chart_background(chart_background_path)
     if prepared_background is None:
         return False, "تعذر تجهيز صورة الشارت للمعايرة."
 
-    if _image_axis_step_model(analysis) is None:
-        return False, "لم تُقرأ الأسعار المرجعية بوضوح لبناء المحور: السعر الذي تحت الأعلى، والسعر الذي تحته، والسعر قبل الأخير أسفل المحور."
+    exact_model = _exact_image_axis_model(analysis)
+    reconstructed_model = _image_axis_step_model(analysis)
+    if exact_model is None and reconstructed_model is None:
+        return False, "لم تُقرأ نقاط سعرية كافية ومتناسقة من محور الصورة لبناء مقياس موثوق."
 
     calibrated = _dynamic_image_axis_range(analysis, detected_green_line_y)
     if calibrated is None:
-        return False, "تعذر بناء محور السعر من السعر الذي تحت الأعلى والسعر الذي يليه والسعر قبل الأخير."
+        return False, "تعذر بناء محور السعر من مواضع الأرقام الأصلية أو من نقاط الارتكاز الاحتياطية."
 
     labels = _right_axis_labels(analysis, calibrated[0], calibrated[1])
     if len(labels) < 3:
@@ -1146,7 +1331,7 @@ def _axis_values(price_min: float, price_max: float) -> list[float]:
 
 def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> tuple[int, int, int, int] | None:
     """Fallback top-price badge when full source-axis labels are unavailable."""
-    if _image_axis_step_model(analysis) is not None:
+    if _exact_image_axis_model(analysis) is not None or _image_axis_step_model(analysis) is not None:
         return None
     image_high = _number(analysis.get("image_price_high"))
     if image_high is None:
@@ -1163,15 +1348,16 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
+    exact_labels = _exact_source_axis_labels(analysis)
+    if len(exact_labels) >= 3:
+        return exact_labels
+
     model = analysis.get("_calibrated_axis_model")
     if not isinstance(model, dict):
         model = _image_axis_step_model(analysis)
     if model is not None:
-        # Generate one clean arithmetic sequence.  The top and immediately
-        # following source labels determine both the price step and the pixel
-        # step; the lowest visible label determines where the sequence stops.
-        top, bottom = CHART[1], CHART[3]
-        chart_height = bottom - top
+        # Fall back to a reconstructed arithmetic sequence when the chart did
+        # not provide enough readable labels to mirror directly.
         top_price = float(model["top_price"])
         top_ratio = float(model["top_ratio"])
         price_step = float(model["price_step"])
@@ -1182,13 +1368,9 @@ def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: fl
         labels: list[tuple[str, float, int]] = []
         for index in range(intervals + 1):
             y_ratio = top_ratio + index * ratio_step
-            # Never invent a tick below the lowest fully visible source label.
             if y_ratio > bottom_ratio + max(0.018, ratio_step * 0.22):
                 break
             price = top_price - index * price_step
-            # Use the final shared transform instead of the raw OCR ratio.  The
-            # current-price line may have corrected a small global crop/resize
-            # offset, and every right-axis tick must move by the same amount.
             y = _price_y(price, price_min, price_max)
             labels.append(("axis", round(price, 2), y))
         if len(labels) >= 3:
@@ -1216,23 +1398,21 @@ def _draw_right_price_axis(
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
     labels = [item for item in _right_axis_labels(analysis, price_min, price_max) if item[0] not in {"high", "current"}]
+    exact_mode = len(_exact_source_axis_labels(analysis)) >= 3
     for index, (role, price, y) in enumerate(labels):
         if not (CHART[1] + 8 <= y <= CHART[3] - 6):
             continue
         draw_y = y
-        # Pull the highest visible price upward and the lowest visible price
-        # downward inside the right axis so they visually hug the axis edges,
-        # as requested by the user.
-        if index == 0:
-            # Lift the highest right-axis price closer to the top edge.
-            top_anchor = CHART[1] + 6
-            if top_price_box is not None:
-                top_anchor = max(top_anchor, top_price_box[3] + 6)
-            draw_y = top_anchor
-        elif index == len(labels) - 1:
-            # Drop the lowest right-axis price closer to the bottom edge.
-            bottom_anchor = CHART[3] - 4
-            draw_y = bottom_anchor
+        if not exact_mode:
+            # In reconstructed mode we can cosmetically hug the axis edges.
+            if index == 0:
+                top_anchor = CHART[1] + 6
+                if top_price_box is not None:
+                    top_anchor = max(top_anchor, top_price_box[3] + 6)
+                draw_y = top_anchor
+            elif index == len(labels) - 1:
+                bottom_anchor = CHART[3] - 4
+                draw_y = bottom_anchor
         if current_y is not None and abs(draw_y - current_y) < 22:
             continue
         if top_price_box is not None and top_price_box[1] - 4 <= draw_y <= top_price_box[3] + 4:
