@@ -55,8 +55,9 @@ CHART_CARD = (20, 20, 1060, 1352)
 CHART = (56, 72, 928, 1280)
 PRICE_AXIS_X = 952
 NOTES = (36, 1370, 1044, 1884)
-TOP_PRICE_MIN_GAP_RATIO = 0.08
-TOP_PRICE_TRIGGER_ATR = 3.5
+TOP_PRICE_MIN_GAP_RATIO = 0.14
+TOP_PRICE_TRIGGER_ATR = 6.0
+TOP_PRICE_TOP_PADDING_RATIO = 0.02
 
 _FONT_CACHE: dict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont] = {}
 
@@ -391,38 +392,42 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
     above = max(core_high - anchor, core_span * 0.36)
     below = max(anchor - core_low, core_span * 0.36)
 
-    # إذا كان أعلى سعر الصورة قريبًا من السعر الحالي، فالمسافة بينهما تصبح
-    # مرجعًا أساسيًا لتحديد مقياس محور الأسعار يمينًا. عندها لا نجبر الرسم على
-    # إبقاء جميع المقاومات أو الأهداف داخل النطاق؛ ما يخرج عن المحور يُخفى.
-    top_gap_priority = False
-    image_gap = None
-    if current is not None and image_high is not None and image_high > current:
-        image_gap = image_high - current
-        close_threshold = max(atr * TOP_PRICE_TRIGGER_ATR, core_span * 0.24, 1.2)
-        if image_gap <= close_threshold:
-            top_gap_priority = True
-            above = max(image_high - anchor, image_gap)
-            desired_total_span = max((image_high - current) / TOP_PRICE_MIN_GAP_RATIO, atr * 5.6, 4.0)
-            below = max(desired_total_span - above, atr * 2.6, 2.6)
-
     # نضيف هامشًا معتدلًا في جهة الهدف من دون موازنة كامل التاريخ المقابل؛
     # لأن الموازنة القسرية كانت تنشئ فراغًا كبيرًا وتضغط الشموع.
     active_trade = draw_mode != "watch" and direction in {"صاعد", "هابط"}
-    if not top_gap_priority:
-        if active_trade and direction == "صاعد":
-            above = max(above * 1.10, below * 1.04, atr * 3.0)
-        elif active_trade and direction == "هابط":
-            below = max(below * 1.10, above * 1.04, atr * 3.0)
-        else:
-            balanced = max(above, below)
-            above = max(above, balanced * 0.82)
-            below = max(below, balanced * 0.82)
+    if active_trade and direction == "صاعد":
+        above = max(above * 1.10, below * 1.04, atr * 3.0)
+    elif active_trade and direction == "هابط":
+        below = max(below * 1.10, above * 1.04, atr * 3.0)
+    else:
+        balanced = max(above, below)
+        above = max(above, balanced * 0.82)
+        below = max(below, balanced * 0.82)
 
-    visible_span = max(above + below, atr * 6.5 if top_gap_priority else atr * 8.0, 4.0)
-    edge_padding = max(atr * (0.42 if top_gap_priority else 0.85), visible_span * (0.022 if top_gap_priority else 0.075), 0.14 if top_gap_priority else 0.45)
-    axis_anchor = current if top_gap_priority and current is not None else anchor
-    price_min = axis_anchor - below - edge_padding
-    price_max = axis_anchor + above + edge_padding
+    visible_span = max(above + below, atr * 8.0, 4.0)
+    edge_padding = max(atr * 0.85, visible_span * 0.075, 0.45)
+    standard_price_min = anchor - below - edge_padding
+    standard_price_max = anchor + above + edge_padding
+
+    # إذا كانت المسافة المرئية بين أعلى سعر الصورة والسعر الحالي صغيرة جدًا
+    # مقارنة بمدى المحور المحسوب، نعيد بناء المدى بحيث تصبح هذه المسافة مرجعًا
+    # مباشرًا لمحور السعر. عندها من الطبيعي أن تختفي أي رسومات تقع خارج المدى.
+    top_gap_priority = False
+    if current is not None and image_high is not None and image_high > current:
+        image_gap = image_high - current
+        current_gap_ratio = image_gap / max(0.0001, standard_price_max - standard_price_min)
+        if current_gap_ratio < TOP_PRICE_MIN_GAP_RATIO:
+            top_gap_priority = True
+            desired_total_span = max(image_gap / TOP_PRICE_MIN_GAP_RATIO, atr * 4.5, image_gap * 2.2)
+            top_padding = max(desired_total_span * TOP_PRICE_TOP_PADDING_RATIO, atr * 0.10, 0.06)
+            price_max = image_high + top_padding
+            price_min = price_max - desired_total_span
+        else:
+            price_min = standard_price_min
+            price_max = standard_price_max
+    else:
+        price_min = standard_price_min
+        price_max = standard_price_max
 
     if price_max <= price_min:
         return anchor - 1.0, anchor + 1.0
