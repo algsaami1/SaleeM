@@ -10,6 +10,7 @@ from app.engine.renderer import (
     _anchored_price_range,
     _axis_values,
     _detect_green_reference_line_y,
+    _dynamic_image_axis_range,
     _price_range,
     _price_y,
     _right_axis_labels,
@@ -181,7 +182,7 @@ def test_model_current_line_ratio_is_used_as_pixel_detection_fallback():
     assert abs(detected - expected) <= 1
 
 
-def test_image_axis_prices_share_the_anchored_price_transform():
+def test_image_axis_labels_keep_source_positions_and_drive_transform():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
     analysis["image_axis_labels"] = [
@@ -190,14 +191,32 @@ def test_image_axis_prices_share_the_anchored_price_transform():
         {"price": current - 2.0, "y_ratio": 0.72},
         {"price": current - 4.0, "y_ratio": 0.88},
     ]
-    low, high = _price_range(analysis)
-    reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.61)
-    low, high = _anchored_price_range(analysis, low, high, reference_y)
+    reference_ratio = 0.52
+    reference_y = CHART[1] + int((CHART[3] - CHART[1]) * reference_ratio)
+    dynamic = _dynamic_image_axis_range(analysis, reference_y)
+    assert dynamic is not None
+    low, high = dynamic
 
+    # The green current-price line is the exact anchor for every drawing.
+    assert abs(_price_y(current, low, high) - reference_y) <= 1
+
+    # The right axis uses the same prices read from the image and the exact
+    # same transform as every horizontal drawing.
     labels = _right_axis_labels(analysis, low, high)
     assert labels
+    assert [price for _role, price, _y in labels] == [
+        item["price"] for item in analysis["image_axis_labels"]
+    ]
     for _role, price, y in labels:
         assert y == _price_y(price, low, high)
+
+    # Because the transform was fitted from the source chart, label positions
+    # remain close to the source ratios despite minor OCR noise.
+    source_y = [
+        CHART[1] + round((CHART[3] - CHART[1]) * item["y_ratio"])
+        for item in analysis["image_axis_labels"]
+    ]
+    assert max(abs(y - expected_y) for (_role, _price, y), expected_y in zip(labels, source_y)) < 50
 
 
 def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
