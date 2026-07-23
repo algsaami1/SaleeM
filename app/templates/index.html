@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>SaleeM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=3.5.0">
+</head>
+<body data-has-result="{{ 'true' if result else 'false' }}">
+  <main class="app-shell">
+    <header class="hero hero-art">
+      <h1 class="sr-only">SaleeM</h1>
+      <img class="hero-banner" src="/static/saleem-hero.webp?v=2.3.5" alt="واجهة SaleeM مع صورة المطور وخلفية تحليل الأسواق">
+    </header>
+
+    <section class="card upload-card">
+      <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
+        <label class="drop-zone" id="drop-zone" for="image-input">
+          <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <span class="upload-cloud" aria-hidden="true">
+            <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
+          </span>
+          <strong>ارفع صورة الشارت</strong>
+          <small>ارفع صورة شارت الذهب XAUUSD على فريم خمس دقائق مع ظهور الشموع ومحور الأسعار بوضوح</small>
+          <span class="primary-button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+            اختيار صورة
+          </span>
+          <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
+        </label>
+
+        <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
+      </form>
+    </section>
+
+
+    <section class="card processing-card" id="processing-card" hidden aria-live="polite">
+      <div class="progress-column">
+        <div class="progress-ring" id="progress-ring">
+          <svg class="progress-svg" viewBox="0 0 180 180" aria-hidden="true">
+            <circle class="progress-track" cx="90" cy="90" r="76"></circle>
+            <circle class="progress-indicator" id="progress-circle" cx="90" cy="90" r="76" pathLength="100"></circle>
+          </svg>
+          <div class="progress-inner">
+            <strong id="progress-value">0%</strong>
+            <span>جاري المعالجة</span>
+          </div>
+          <span class="progress-moving-dot" aria-hidden="true"></span>
+        </div>
+        <small class="eta">الوقت المتوقع: 15 - 30 ثانية</small>
+      </div>
+      <div class="processing-copy">
+        <h3>جاري التحليل...</h3>
+        <div class="steps" id="processing-steps">
+          <span class="current">تحديث بيانات السوق</span>
+          <span>تحليل اتجاه الفريمات الأكبر</span>
+          <span>تحديد الدعم والمقاومة</span>
+          <span>بناء السيناريو الأفضل</span>
+          <span>إعادة رسم الشارت النهائي</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card features-card">
+      <div class="section-title"><h3>مميزات SaleeM</h3><span>✨</span></div>
+      <div class="features-grid">
+        <article><span class="feature-icon purple">🚀</span><strong>تحليل ذكي</strong><small>قراءة منظمة للشارت</small></article>
+        <article><span class="feature-icon purple">🎯</span><strong>دقة عالية</strong><small>مستويات واضحة</small></article>
+        <article><span class="feature-icon gold">⚡</span><strong>نتائج سريعة</strong><small>شارت جديد واضح</small></article>
+        <article><span class="feature-icon purple">🛡️</span><strong>موثوق وآمن</strong><small>خصوصيتك محفوظة</small></article>
+      </div>
+    </section>
+
+    <section class="card notice">
+      <span class="notice-icon">💡</span>
+      <p>يحاول التطبيق قراءة السعر الحالي وأعلى وأدنى نطاق ظاهر من صورة شارت <b>XAUUSD</b>، ثم يجلب الشموع والتوقيتات والمستويات من بيانات السوق ويعيد رسم السيناريو بصورة واضحة. وإذا تعذرت قراءة رقم من الصورة، يكمل التحليل بأقرب بيانات سوق متاحة بدل إيقافه.</p>
+    </section>
+
+    {% if error %}
+    <section class="card error-card"><strong>تعذر التحليل</strong><p>{{ error }}</p></section>
+    {% endif %}
+
+    {% if result %}
+    <section class="card result-card" id="result-card">
+      <div class="result-heading"><div><span>اكتمل التحليل</span><h3>تحليل SaleeM</h3></div><span class="done-mark">✓</span></div>
+      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه من بيانات السوق مع السيناريو الفني">
+      <div class="result-actions">
+        <button class="result-action save-button" id="save-image-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 18v1a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-1"/></svg>
+          حفظ في الاستديو
+        </button>
+        <button class="result-action share-button" id="share-image-button" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+          مشاركة
+        </button>
+      </div>
+      <p class="result-action-status" id="result-action-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section class="card experimental-banner">
+      <span class="experimental-icon">⚠️</span>
+      <div>
+        <strong>نسخة تجريبية — التطبيق لا يزال قيد التجربة والتطوير.</strong>
+        <p>شارك معنا في التقييم والملاحظات والاقتراحات لتحسين تجربة SaleeM.</p>
+      </div>
+    </section>
+
+    <section class="card feedback-card" id="feedback-card" aria-labelledby="feedback-title">
+      <div class="feedback-heading trade-heading">
+        <span class="feedback-icon" aria-hidden="true">◎</span>
+        <div>
+          <small>بعد كل تحليل أخبرنا بالنتيجة السابقة</small>
+          <h3 id="feedback-title">نتيجة الصفقة السابقة</h3>
+        </div>
+      </div>
+
+      <form id="trade-feedback-form" class="trade-feedback-form">
+        <fieldset class="trade-fieldset">
+          <legend>اختر نتيجة الصفقة المرتبطة بالتحليل السابق</legend>
+          <div class="trade-result-grid" id="trade-result-grid">
+            <button type="button" class="trade-result-option success" data-result="win"><span class="option-icon">✓</span><span>نجحت الصفقة</span></button>
+            <button type="button" class="trade-result-option danger" data-result="loss"><span class="option-icon">×</span><span>فشلت الصفقة</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="no_trade"><span class="option-icon">−</span><span>لم أدخل الصفقة</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="open"><span class="option-icon">◷</span><span>الصفقة ما زالت مفتوحة</span></button>
+          </div>
+          <input id="trade-result-value" type="hidden" value="">
+        </fieldset>
+
+        <fieldset class="rating-fieldset">
+          <legend>قيّم التحليل السابق</legend>
+          <div class="rating-stars" id="rating-stars" role="radiogroup" aria-label="اختر تقييمًا من خمس نجوم">
+            <button type="button" class="rating-star" data-rating="1" aria-label="نجمة واحدة">☆</button>
+            <button type="button" class="rating-star" data-rating="2" aria-label="نجمتان">☆</button>
+            <button type="button" class="rating-star" data-rating="3" aria-label="ثلاث نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="4" aria-label="أربع نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="5" aria-label="خمس نجوم">☆</button>
+          </div>
+          <input id="rating-value" type="hidden" value="">
+        </fieldset>
+
+        <button class="feedback-submit" id="trade-feedback-submit" type="submit">إرسال التقييم</button>
+        <p class="feedback-helper-note">يساعد تقييمك في تحسين التطبيق.</p>
+        <p class="feedback-status" id="trade-feedback-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <section class="card summary-card" id="summary-card">
+      <div class="feedback-heading summary-heading">
+        <span class="feedback-icon" aria-hidden="true">👥</span>
+        <div>
+          <small>ملخص دائم لجميع المشاركين الذين قاموا بالإرسال</small>
+          <h3>ملخص المشاركين</h3>
+        </div>
+      </div>
+
+      <div class="summary-grid">
+        <div class="summary-gauge-block">
+          <div class="gauge-label">نسبة النجاح</div>
+          <div class="summary-gauge" id="summary-gauge" style="--summary-progress: {{ summary.success_rate }}">
+            <div class="summary-gauge-inner"><strong id="summary-success-rate">{{ summary.success_rate }}%</strong></div>
+          </div>
+        </div>
+
+        <div class="summary-rating-block">
+          <div class="summary-rating-value"><span id="summary-average-rating">{{ '%.1f'|format(summary.average_rating) }}</span> <small>/ 5</small></div>
+          <div class="summary-stars" id="summary-stars" data-average="{{ summary.average_rating }}">
+            <span>★</span><span>★</span><span>★</span><span>★</span><span>★</span>
+          </div>
+          <div class="summary-rating-count">عدد التقييمات: <b id="summary-rating-count">{{ summary.rating_count }}</b></div>
+        </div>
+
+        <div class="summary-stat-list">
+          <div class="summary-stat-item"><span>إجمالي الصفقات</span><b id="summary-total-trades">{{ summary.total_trades }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات الناجحة</span><b id="summary-wins">{{ summary.wins }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات الفاشلة</span><b id="summary-losses">{{ summary.losses }}</b></div>
+          <div class="summary-stat-item"><span>الصفقات المفتوحة</span><b id="summary-open-trades">{{ summary.open_trades }}</b></div>
+        </div>
+      </div>
+
+      <div class="summary-bar-block">
+        <div class="summary-bar-label">مقارنة النتائج (جميع المشاركين)</div>
+        <div class="summary-bar-wrap">
+          <span class="summary-bar-side summary-bar-side-right"><b id="summary-success-rate-inline">{{ summary.success_rate }}%</b> ناجحة</span>
+          <div class="summary-bar"><span id="summary-success-bar" style="width: {{ summary.success_rate }}%"></span></div>
+          <span class="summary-bar-side summary-bar-side-left"><b id="summary-failure-rate-inline">{{ summary.failure_rate }}%</b> فاشلة</span>
+        </div>
+      </div>
+
+      <div class="summary-footnote">تُعرض النتائج بشكل مجمّع دون إظهار هوية المشاركين.</div>
+    </section>
+
+    <section class="card notes-card" id="notes-card">
+      <div class="feedback-heading notes-heading">
+        <span class="feedback-icon" aria-hidden="true">✎</span>
+        <div>
+          <small>ساعدنا على تطوير SaleeM</small>
+          <h3>الملاحظات والاقتراحات</h3>
+        </div>
+      </div>
+
+      <form id="notes-form">
+        <label class="feedback-label" for="feedback-notes">اكتب ملاحظاتك أو اقتراحاتك</label>
+        <textarea id="feedback-notes" maxlength="1500" rows="5" placeholder="اكتب ملاحظاتك أو اقتراحاتك هنا..."></textarea>
+        <div class="feedback-counter"><span id="feedback-count">0</span>/1500</div>
+
+        <button class="feedback-submit notes-submit" type="submit">إرسال الملاحظات والاقتراحات</button>
+        <p class="feedback-email-note">تُرسل نسخة إلى بريد مالك التطبيق <b>{{ owner_email }}</b></p>
+        <p class="feedback-status" id="notes-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    {% endif %}
+  </main>
+  <script src="/static/app.js?v=3.4.0" defer></script>
+</body>
+</html>
