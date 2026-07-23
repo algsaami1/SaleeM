@@ -1152,13 +1152,15 @@ def _draw_right_price_axis(
         # downward inside the right axis so they visually hug the axis edges,
         # as requested by the user.
         if index == 0:
-            top_anchor = CHART[1] + 30
+            # Lift the highest right-axis price closer to the top edge.
+            top_anchor = CHART[1] + 6
             if top_price_box is not None:
-                top_anchor = max(top_anchor, top_price_box[3] + 14)
-            draw_y = min(max(draw_y, top_anchor), top_anchor)
+                top_anchor = max(top_anchor, top_price_box[3] + 6)
+            draw_y = top_anchor
         elif index == len(labels) - 1:
-            bottom_anchor = CHART[3] - 26
-            draw_y = max(min(draw_y, bottom_anchor), bottom_anchor)
+            # Drop the lowest right-axis price closer to the bottom edge.
+            bottom_anchor = CHART[3] - 4
+            draw_y = bottom_anchor
         if current_y is not None and abs(draw_y - current_y) < 22:
             continue
         if top_price_box is not None and top_price_box[1] - 4 <= draw_y <= top_price_box[3] + 4:
@@ -1529,7 +1531,8 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         else:
             fill = (112, 24, 35, 248)
             text_fill = WHITE
-        label_x = axis_card_right if key in {"entry", "stop"} else chart_card_right
+        # Keep all trade cards, including TP targets, inside the right price-axis strip.
+        label_x = axis_card_right
         rect = _rounded_label(
             draw,
             label_x,
