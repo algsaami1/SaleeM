@@ -321,6 +321,56 @@ def _strength_name(strength: int) -> str:
     return "متوسطة"
 
 
+def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
+    labels = analysis.get("image_axis_labels") or []
+    points: list[tuple[float, float]] = []
+    for item in labels:
+        if not isinstance(item, dict):
+            continue
+        price = _number(item.get("price"))
+        y_ratio = _number(item.get("y_ratio"))
+        if price is None or y_ratio is None:
+            continue
+        y_ratio = max(0.0, min(1.0, float(y_ratio)))
+        points.append((float(price), y_ratio))
+    if len(points) < 2:
+        return None
+
+    # انحدار خطي بسيط: price = intercept + slope * y_ratio
+    n = float(len(points))
+    sum_y = sum(y for _, y in points)
+    sum_p = sum(price for price, _ in points)
+    sum_yy = sum(y * y for _, y in points)
+    sum_yp = sum(price * y for price, y in points)
+    denom = n * sum_yy - sum_y * sum_y
+    if abs(denom) < 1e-9:
+        return None
+    slope = (n * sum_yp - sum_y * sum_p) / denom
+    intercept = (sum_p - slope * sum_y) / n
+    if slope >= 0:
+        return None
+
+    price_max = intercept
+    price_min = intercept + slope
+    if price_max <= price_min:
+        return None
+
+    # هامش خفيف حتى لا تتجاوز بطاقة أعلى السعر حدود المحور.
+    image_high = _number(analysis.get("image_price_high"))
+    image_low = _number(analysis.get("image_price_low"))
+    span = price_max - price_min
+    pad = max(span * 0.015, 0.08)
+    if image_high is not None:
+        price_max = max(price_max, float(image_high)) + pad
+    else:
+        price_max += pad
+    if image_low is not None:
+        price_min = min(price_min, float(image_low)) - pad
+    else:
+        price_min -= pad
+    return price_min, price_max
+
+
 def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
     """إنشاء محور سعر يركز على منطقة القرار بدل ضغط الشموع.
 
@@ -367,6 +417,10 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
 
     atr = median(candle_ranges) if candle_ranges else 1.0
     atr = max(0.05, float(atr))
+
+    axis_range = _image_axis_range(analysis)
+    if axis_range is not None:
+        return axis_range
 
     # نبقي المستويات القريبة المفيدة فقط حتى لا تُضغط منطقة القرار.
     max_level_distance = max(atr * 16.0, 10.0)
@@ -796,31 +850,23 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 def _right_axis_values(analysis: dict[str, Any], price_min: float, price_max: float) -> list[float]:
-    """قيم محور اليمين مرتبطة مباشرة بتحويل السعر نفسه.
+    """قيم محور اليمين.
 
-    عندما يكون أعلى سعر الصورة قريبًا من السعر الحالي، نبدأ القيم من أقرب
-    مستوى أسفل أعلى السعر حتى يظهر قرب أعلى الشريط، لكننا نحسب موضع كل قيمة
-    دائمًا عبر ``_price_y`` حتى تبقى متطابقة مع مستويات الرسم.
+    إذا قرأنا أرقام المحور من صورة المستخدم نستخدمها كما هي، وإلا نرجع
+    للتوليد التلقائي المعتاد.
     """
-    current = _number(analysis.get("current_price"))
-    image_high = _number(analysis.get("image_price_high"))
-    span = max(0.0001, price_max - price_min)
-
-    if current is not None and image_high is not None and image_high > current:
-        gap = image_high - current
-        if gap / span <= max(TOP_PRICE_MIN_GAP_RATIO + 0.04, 0.20):
-            step = _nice_step(span, 8)
-            first = math.floor(image_high / step) * step
-            if first < current:
-                first += step
-            values: list[float] = []
-            value = first
-            while value >= price_min - step * 0.05 and len(values) < 14:
-                values.append(round(value, 6))
-                value -= step
-            if values:
-                return values
-
+    labels = analysis.get("image_axis_labels") or []
+    values: list[float] = []
+    for item in labels:
+        if not isinstance(item, dict):
+            continue
+        price = _number(item.get("price"))
+        if price is None:
+            continue
+        if price_min <= price <= price_max:
+            values.append(round(float(price), 6))
+    if len(values) >= 2:
+        return values
     return _axis_values(price_min, price_max)
 
 

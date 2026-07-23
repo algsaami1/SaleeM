@@ -75,6 +75,15 @@ LEVEL = {
     },
     "required": ["price", "strength", "touches"],
 }
+AXIS_LABEL = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "price": {"type": "number"},
+        "y_ratio": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    },
+    "required": ["price", "y_ratio"],
+}
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -91,6 +100,7 @@ ANALYSIS_SCHEMA = {
         "current_price": NUM_NULL,
         "image_price_high": NUM_NULL,
         "image_price_low": NUM_NULL,
+        "image_axis_labels": {"type": "array", "items": AXIS_LABEL, "maxItems": 12},
         "support_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "resistance_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "entry": NUM_NULL,
@@ -116,7 +126,7 @@ ANALYSIS_SCHEMA = {
     "required": [
         "chart_readable", "candles", "direction", "buy_probability", "sell_probability",
         "setup_state", "entry_kind", "confirmation", "current_price", "image_price_high",
-        "image_price_low", "support_levels", "resistance_levels", "entry", "stop_loss",
+        "image_price_low", "image_axis_labels", "support_levels", "resistance_levels", "entry", "stop_loss",
         "stop_reason", "target_1", "target_2",
         "target_3", "pattern_type", "pattern_confidence", "pattern_lines", "pattern_path",
         "scenario", "note", "memory_matches",
@@ -837,6 +847,43 @@ def _validated_targets(
     return unique[:3]
 
 
+def _normalize_axis_labels(labels: Any, *, image_high: float | None = None, image_low: float | None = None) -> list[dict[str, float]]:
+    result: list[dict[str, float]] = []
+    if not isinstance(labels, list):
+        labels = []
+    for item in labels:
+        if not isinstance(item, dict):
+            continue
+        price = _number(item.get("price"))
+        y_ratio = _number(item.get("y_ratio"))
+        if price is None or y_ratio is None:
+            continue
+        y_ratio = max(0.0, min(1.0, float(y_ratio)))
+        if image_high is not None and price > image_high + 0.75:
+            continue
+        if image_low is not None and price < image_low - 0.75:
+            continue
+        result.append({"price": round(float(price), 2), "y_ratio": round(y_ratio, 4)})
+    result.sort(key=lambda item: item["y_ratio"])
+    dedup: list[dict[str, float]] = []
+    for item in result:
+        if dedup and abs(dedup[-1]["y_ratio"] - item["y_ratio"]) < 0.015:
+            if abs(item["price"] - dedup[-1]["price"]) > 0.02:
+                dedup[-1] = item
+            continue
+        dedup.append(item)
+    # نتأكد أن الأسعار تنخفض عمومًا كلما نزلنا لأسفل.
+    cleaned: list[dict[str, float]] = []
+    last_price: float | None = None
+    for item in dedup:
+        price = item["price"]
+        if last_price is not None and price >= last_price:
+            continue
+        cleaned.append(item)
+        last_price = price
+    return cleaned[:12]
+
+
 def _validate_analysis(
     data: dict[str, Any],
     market_summary: dict[str, Any] | None = None,
@@ -854,6 +901,7 @@ def _validate_analysis(
 
     image_price_high = _number(data.get("image_price_high"))
     image_price_low = _number(data.get("image_price_low"))
+    image_axis_labels = _normalize_axis_labels(data.get("image_axis_labels"), image_high=image_price_high, image_low=image_price_low)
     if image_price_high is not None and image_price_high <= current:
         image_price_high = None
     if image_price_low is not None and image_price_low >= current:
@@ -939,6 +987,7 @@ def _validate_analysis(
             "price_range_source": "chart_image" if _number(data.get("image_price_high")) is not None and _number(data.get("image_price_low")) is not None else "market_candles_fallback",
             "image_price_high": round(image_price_high, 2) if image_price_high is not None else None,
             "image_price_low": round(image_price_low, 2) if image_price_low is not None else None,
+            "image_axis_labels": image_axis_labels,
             "market_last_close": round(market_close, 2),
             "buy_probability": buy,
             "sell_probability": sell,
@@ -1015,10 +1064,14 @@ def _analyze(path: Path) -> dict[str, Any]:
 قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
 إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
 
-اقرأ صورة الشارت المرفوعة لاستخراج ثلاثة أرقام من محور السعر:
+اقرأ صورة الشارت المرفوعة لاستخراج بيانات محور السعر:
 1) current_price: السعر الحالي الظاهر في ملصق السعر بجانب آخر شمعة.
 2) image_price_high: أعلى سعر ظاهر في أعلى محور الأسعار داخل الصورة.
 3) image_price_low: أدنى سعر ظاهر في أسفل محور الأسعار داخل الصورة.
+4) image_axis_labels: قائمة أسعار محور الصورة نفسها من الأعلى إلى الأسفل. لكل عنصر أعد:
+   - price: الرقم الظاهر على محور السعر في الصورة.
+   - y_ratio: موضعه الرأسي النسبي داخل منطقة الشارت المرئية، حيث 0.0 أعلى الشارت و1.0 أسفله.
+   أعد فقط الأرقام التي تراها بوضوح، ويفضل بين 4 و10 قيم إن أمكن.
 تأكد أن image_price_low < current_price < image_price_high. إذا تعذر رقم الحد الأعلى أو الأدنى فقط فأعده null، لكن ابذل محاولة دقيقة لقراءته.
 لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
 السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
