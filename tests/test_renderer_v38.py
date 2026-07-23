@@ -216,11 +216,18 @@ def test_image_axis_uses_exact_label_positions_when_available():
         current,
         current - 2.0,
     ]
-    expected_y = [
-        CHART[1] + round((CHART[3] - CHART[1]) * ratio)
-        for ratio in (0.06, 0.18, 0.31, 0.44, 0.57, 0.70)
-    ]
+    # The detected current line is the offset anchor, so every axis label must
+    # be projected by the exact same transform used by the chart drawings.
+    expected_y = [_price_y(price, low, high) for price in (
+        current + 8.0,
+        current + 6.0,
+        current + 4.0,
+        current + 2.0,
+        current,
+        current - 2.0,
+    )]
     assert [y for _role, _price, y in labels] == expected_y
+    assert abs(_price_y(current, low, high) - reference_y) <= 1
 
 
 def test_image_axis_rejects_inconsistent_inner_anchor_sequence():
@@ -330,14 +337,14 @@ def test_estimate_visible_candle_count_recognizes_more_than_ten_candles():
     assert estimated >= 11
 
 
-def test_axis_checked_current_reference_y_prefers_detected_chart_line():
+def test_axis_checked_current_reference_y_uses_shared_axis_transform():
     analysis = _analysis("صاعد")
     price_min, price_max = _price_range(analysis)
     calculated_y = _price_y(analysis["current_price"], price_min, price_max)
     detected_y = calculated_y + 140
 
     chosen = _axis_checked_current_reference_y(analysis, price_min, price_max, detected_y)
-    assert chosen == detected_y
+    assert chosen == calculated_y
 
 
 def test_exact_axis_mode_filters_one_bad_ocr_label_and_keeps_source_positions():

@@ -9,7 +9,7 @@ from statistics import median
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 
 try:
     import arabic_reshaper
@@ -540,8 +540,19 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
     return model
 
 
-def _exact_source_axis_labels(analysis: dict[str, Any]) -> list[tuple[str, float, int]]:
-    """Redraw cleaned source prices at their original Y positions."""
+def _exact_source_axis_labels(
+    analysis: dict[str, Any],
+    price_min: float | None = None,
+    price_max: float | None = None,
+) -> list[tuple[str, float, int]]:
+    """Return cleaned source prices using the same transform as every drawing.
+
+    The previous implementation drew OCR labels at their raw pixel ratios while
+    candles, levels and trade lines used the fitted price transform.  Even a
+    small OCR residual therefore produced two competing vertical scales.  When
+    a calibrated range is supplied, all labels are now projected through
+    ``_price_y`` so the chart and the right axis are mathematically identical.
+    """
     model = _exact_image_axis_model(analysis)
     if model is None:
         return []
@@ -549,8 +560,16 @@ def _exact_source_axis_labels(analysis: dict[str, Any]) -> list[tuple[str, float
     top, bottom = CHART[1], CHART[3]
     chart_height = bottom - top
     labels: list[tuple[str, float, int]] = []
+    use_shared_transform = (
+        price_min is not None
+        and price_max is not None
+        and float(price_max) > float(price_min)
+    )
     for price, y_ratio in points:
-        y = int(round(top + float(y_ratio) * chart_height))
+        if use_shared_transform:
+            y = _price_y(float(price), float(price_min), float(price_max))
+        else:
+            y = int(round(top + float(y_ratio) * chart_height))
         labels.append(("axis", round(float(price), 2), y))
     return labels
 
@@ -620,15 +639,48 @@ def _dynamic_image_axis_range(
     analysis: dict[str, Any],
     reference_y: int | None = None,
 ) -> tuple[float, float] | None:
-    """Choose exact source-axis fitting first, then reconstructed fallback."""
-    del reference_y
+    """Build one authoritative price-to-pixel transform for the whole chart.
+
+    The label sequence determines the scale (price per normalized Y).  The
+    uploaded green current-price line, when available, determines the vertical
+    offset.  As a result candles, support/resistance, entry, stop, targets,
+    current price and right-axis numbers all use exactly the same transform.
+    """
+    top, bottom = CHART[1], CHART[3]
+    chart_height = max(1, bottom - top)
+
+    reference_ratio: float | None = None
+    if reference_y is not None:
+        reference_ratio = (float(reference_y) - top) / chart_height
+        reference_ratio = max(0.0, min(1.0, reference_ratio))
+    else:
+        model_ratio = _number(analysis.get("current_price_y_ratio"))
+        if model_ratio is not None:
+            reference_ratio = max(0.0, min(1.0, float(model_ratio)))
+
+    current = _number(analysis.get("current_price"))
 
     exact_model = _exact_image_axis_model(analysis)
     if exact_model is not None:
-        price_min = float(exact_model["price_min"])
-        price_max = float(exact_model["price_max"])
+        price_per_ratio = float(exact_model["slope"])
+        if current is not None and reference_ratio is not None:
+            price_max = float(current) + price_per_ratio * reference_ratio
+            anchor_source = "current_line"
+        else:
+            price_max = float(exact_model["price_max"])
+            anchor_source = "axis_fit"
+        price_min = price_max - price_per_ratio
         if price_max > price_min and price_max - price_min >= 0.1:
-            analysis["_calibrated_axis_model"] = dict(exact_model)
+            analysis["_calibrated_axis_model"] = {
+                **exact_model,
+                "mode": "exact",
+                "price_per_ratio": float(price_per_ratio),
+                "price_max": float(price_max),
+                "price_min": float(price_min),
+                "anchor_source": anchor_source,
+                "reference_ratio": reference_ratio,
+            }
+            analysis["axis_alignment_mode"] = "single_transform"
             return price_min, price_max
 
     model = _image_axis_step_model(analysis)
@@ -641,7 +693,12 @@ def _dynamic_image_axis_range(
     ratio_step = float(model["ratio_step"])
     price_per_ratio = price_step / ratio_step
 
-    price_max = top_price + top_ratio * price_per_ratio
+    if current is not None and reference_ratio is not None:
+        price_max = float(current) + price_per_ratio * reference_ratio
+        anchor_source = "current_line"
+    else:
+        price_max = top_price + top_ratio * price_per_ratio
+        anchor_source = "axis_fit"
     price_min = price_max - price_per_ratio
     if price_max <= price_min or price_max - price_min < 0.1:
         return None
@@ -652,8 +709,11 @@ def _dynamic_image_axis_range(
         "price_per_ratio": float(price_per_ratio),
         "price_max": float(price_max),
         "price_min": float(price_min),
+        "anchor_source": anchor_source,
+        "reference_ratio": reference_ratio,
     }
     analysis["axis_calibration_mode"] = "reconstructed"
+    analysis["axis_alignment_mode"] = "single_transform"
     return price_min, price_max
 
 
@@ -925,8 +985,15 @@ def _anchored_price_range(
 
 
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Resize and crop an image to cover the target area cleanly."""
-    return ImageOps.fit(source, size, method=Image.Resampling.LANCZOS, centering=(0.5, 0.5))
+    """Resize without cropping so normalized source Y positions stay exact.
+
+    ``ImageOps.fit`` previously removed pixels from the top and bottom whenever
+    the uploaded screenshot aspect ratio differed from the SaleeM chart.  The
+    vision model reports axis positions as ratios of the complete visible chart,
+    so that crop shifted the pasted candles away from the redrawn right axis.
+    A direct resize preserves every vertical ratio exactly.
+    """
+    return source.resize(size, resample=Image.Resampling.LANCZOS)
 
 
 def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1066,22 +1133,16 @@ def _axis_checked_current_reference_y(
     price_max: float,
     detected_y: int | None,
 ) -> int | None:
-    """Keep the real green line when it agrees with the calculated image axis.
+    """Return the current-price Y from the shared calibrated transform.
 
-    If pixel detection accidentally selects a candle or a colored zone far from
-    the mathematically expected current-price position, the image-axis model is
-    safer.  Small differences are preserved so the badge remains on the real
-    line visible in the uploaded chart.
+    ``_dynamic_image_axis_range`` already uses the detected green line as an
+    anchor when possible.  Returning the calculated value here prevents the
+    badge from bypassing the axis transform and creating a second scale.
     """
     current = _number(analysis.get("current_price"))
     if current is None:
         return detected_y
-    calculated_y = _price_y(float(current), price_min, price_max)
-    if detected_y is None:
-        return calculated_y
-    # User preference: whenever a real current-price line is visible in the
-    # uploaded chart, the green badge must stay attached to that line.
-    return int(detected_y)
+    return _price_y(float(current), price_min, price_max)
 
 
 def _is_candle_colored_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1348,7 +1409,7 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int]]:
-    exact_labels = _exact_source_axis_labels(analysis)
+    exact_labels = _exact_source_axis_labels(analysis, price_min, price_max)
     if len(exact_labels) >= 3:
         return exact_labels
 
