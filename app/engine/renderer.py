@@ -795,6 +795,56 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 
+def _draw_right_price_axis(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+    *,
+    current_y: int | None = None,
+    top_price_box: tuple[int, int, int, int] | None = None,
+) -> None:
+    current = _number(analysis.get("current_price"))
+    image_high = _number(analysis.get("image_price_high"))
+    left, top, right, bottom = CHART
+
+    # عند توفر أعلى سعر من الصورة والسعر الحالي، نُظهر محورًا بصريًا يمينًا
+    # مبنيًا على العلاقة بينهما حتى تكون المسافة مفهومة للمستخدم.
+    if (
+        current is not None
+        and image_high is not None
+        and image_high > current
+        and current_y is not None
+        and top_price_box is not None
+    ):
+        top_tick_y = top_price_box[3] + 14
+        green_y = int(max(top_tick_y + 22, min(bottom - 18, current_y)))
+        gap = image_high - current
+        step = _nice_step(max(gap, 0.25), 6)
+        top_tick = math.floor(image_high / step) * step
+        current_tick = math.floor(current / step) * step
+        if top_tick <= current_tick:
+            top_tick = current_tick + step
+        price_span = max(step, top_tick - current_tick)
+        px_per_price = max(12.0, (green_y - top_tick_y) / price_span)
+
+        axis_x = PRICE_AXIS_X + 12
+        value = top_tick
+        while value >= price_min - step * 0.05:
+            y = int(round(top_tick_y + (top_tick - value) * px_per_price))
+            if y > bottom - 6:
+                break
+            if y >= top + 8:
+                draw.text((axis_x, y), _fmt_price(value), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
+            value -= step
+        return
+
+    for price in _axis_values(price_min, price_max):
+        y = _price_y(price, price_min, price_max)
+        draw.text((PRICE_AXIS_X, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
+
+
+
 def _draw_grid(draw: ImageDraw.ImageDraw, price_min: float, price_max: float, *, background_mode: bool = False) -> None:
     draw.rounded_rectangle(CHART_CARD, radius=21, fill=(6, 17, 40, 255), outline=BORDER, width=1)
     left, top, right, bottom = CHART
@@ -808,7 +858,6 @@ def _draw_grid(draw: ImageDraw.ImageDraw, price_min: float, price_max: float, *,
         y = _price_y(price, price_min, price_max)
         if not background_mode:
             draw.line((left, y, right, y), fill=GRID, width=1)
-        draw.text((PRICE_AXIS_X, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
     # لا توجد خطوط عمودية حتى لا يزدحم الرسم.
     draw.rectangle((left, top, right, bottom), outline=(77, 96, 131, 175), width=1)
@@ -1362,6 +1411,11 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     draw = ImageDraw.Draw(image)
     if not using_chart_background:
         _draw_candles(draw, candles, price_min, price_max)
+    current_value = _number(analysis.get("current_price"))
+    current_axis_y = None
+    if current_value is not None:
+        current_axis_y = int(max(CHART[1] + 1, min(CHART[3] - 1, detected_green_line_y if detected_green_line_y is not None else _price_y(current_value, price_min, price_max))))
+    _draw_right_price_axis(draw, analysis, price_min, price_max, current_y=current_axis_y, top_price_box=top_price_box)
     _draw_current_price(draw, analysis, price_min, price_max, y_override=detected_green_line_y, top_price_box=top_price_box)
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
