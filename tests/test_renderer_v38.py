@@ -2,7 +2,6 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image
 
-<<<<<<< main
 from app.engine.renderer import (
     CHART,
     CHART_CARD,
@@ -14,9 +13,6 @@ from app.engine.renderer import (
     _price_y,
     render_result,
 )
-=======
-from app.engine.renderer import CHART, CHART_CARD, NOTES, _axis_values, _detect_green_reference_line_y, _price_range, render_result
->>>>>>> origin/main
 
 
 def _candles(start=4142.0, count=30):
@@ -171,7 +167,6 @@ def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
         sample = image.getpixel((150, 72 + line_y))
         assert sample[1] > sample[0]
         assert sample[1] >= sample[2] - 20
-<<<<<<< main
 
 
 def test_all_price_drawings_share_green_line_anchored_transform():
@@ -203,5 +198,3 @@ def test_all_price_drawings_share_green_line_anchored_transform():
     assert all(CHART[1] <= y <= CHART[3] for y in ys)
     assert ys[0] > current_y  # الدعم أسفل السعر الحالي
     assert ys[1] < current_y  # المقاومة أعلى السعر الحالي
-=======
->>>>>>> origin/main
