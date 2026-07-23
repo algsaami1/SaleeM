@@ -50,14 +50,24 @@ TP_GREEN = (25, 211, 112, 255)
 TP_GREEN_FILL = (25, 211, 112, 52)
 
 # تخطيط صورة النتيجة: الشارت هو العنصر الرئيسي ويبدأ من أعلى الصورة،
-# ثم يأتي صندوق ملاحظات التحليل وحده في الأسفل.
+# ثم يأتي صندوق ملاحظات التحليل أسفل الشارت وبفاصل واضح حتى يكون خارج
+# صورة التحليل نفسها وليس فوقها.
 CHART_CARD = (20, 20, 1060, 1352)
 CHART = (56, 72, 928, 1280)
 PRICE_AXIS_X = 952
-NOTES = (36, 1370, 1044, 1884)
+NOTES = (36, 1392, 1044, 1886)
 TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
+
+# ضبط خاصية صورة الشارت المرفوعة: نقص جزءًا من اليسار، نحافظ على
+# النسبة الأصلية بدون ضغط، ثم نغطي الأجزاء العلوية والسفلية غير المهمة
+# حتى يبقى الشارت واضحًا ويظهر إلى جواره محور السعر اليميني بوضوح.
+UPLOADED_BG_LEFT_CROP_RATIO = 0.0
+UPLOADED_BG_RIGHT_TRIM_RATIO = 0.01
+UPLOADED_BG_TOP_MASK_RATIO = 0.055
+UPLOADED_BG_BOTTOM_MASK_RATIO = 0.10
+UPLOADED_BG_MIN_LEFT_CROP_PX = 0
 
 
 class AxisCalibrationError(RuntimeError):
@@ -985,15 +995,46 @@ def _anchored_price_range(
 
 
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Resize without cropping so normalized source Y positions stay exact.
+    """Prepare the uploaded chart without vertical distortion.
 
-    ``ImageOps.fit`` previously removed pixels from the top and bottom whenever
-    the uploaded screenshot aspect ratio differed from the SaleeM chart.  The
-    vision model reports axis positions as ratios of the complete visible chart,
-    so that crop shifted the pasted candles away from the redrawn right axis.
-    A direct resize preserves every vertical ratio exactly.
+    The user asked to keep exactly the *visible* chart portion from the
+    uploaded screenshot without squeezing or stretching it. We therefore keep
+    the user-provided visible crop as-is, preserve the original aspect ratio
+    with uniform scaling, and align the result to the left inside the chart
+    frame so the custom SaleeM price axis remains clear.
     """
-    return source.resize(size, resample=Image.Resampling.LANCZOS)
+    target_w, target_h = size
+    source_w, source_h = source.size
+    if source_w <= 1 or source_h <= 1:
+        return source.resize(size, resample=Image.Resampling.LANCZOS)
+
+    left_crop = max(UPLOADED_BG_MIN_LEFT_CROP_PX, int(round(source_w * UPLOADED_BG_LEFT_CROP_RATIO)))
+    right_trim = int(round(source_w * UPLOADED_BG_RIGHT_TRIM_RATIO))
+    crop_left = min(max(0, left_crop), max(0, source_w - 2))
+    crop_right = max(crop_left + 1, source_w - right_trim)
+    focused = source.crop((crop_left, 0, crop_right, source_h))
+
+    # Uniform scaling preserves candle/body proportions and avoids the squeezed
+    # look that a direct width+height resize introduces.
+    scale = target_h / max(1, focused.size[1])
+    scaled_w = max(1, int(round(focused.size[0] * scale)))
+    scaled_h = max(1, int(round(focused.size[1] * scale)))
+    resized = focused.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+
+    canvas = Image.new('RGBA', (target_w, target_h), (6, 17, 40, 255))
+
+    if scaled_w >= target_w:
+        # Keep the right side from the source visible, but because we already
+        # cropped the source's far left area, this still feels visually shifted
+        # left and leaves the SaleeM custom right axis readable.
+        window = resized.crop((0, 0, target_w, target_h))
+        canvas.alpha_composite(window, (0, 0))
+    else:
+        # Leave the extra width on the right so the chart feels left-shifted.
+        y = max(0, (target_h - scaled_h) // 2)
+        canvas.alpha_composite(resized, (0, y))
+
+    return canvas
 
 
 def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1239,10 +1280,17 @@ def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) ->
 
     image.alpha_composite(fitted, (left, top))
 
-    # تعتيم خفيف حتى تبقى طبقات التحليل والملصقات أوضح فوق الشارت الأصلي.
+    # تعتيم خفيف حتى تبقى طبقات التحليل والملصقات أوضح فوق الشارت الأصلي،
+    # مع تغطية أعلى وأسفل الصورة المرفوعة كما طلب المستخدم.
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     d.rounded_rectangle((left, top, right, bottom), radius=6, fill=(0, 10, 26, 70))
+
+    chart_h = bottom - top
+    top_mask_h = max(26, int(chart_h * UPLOADED_BG_TOP_MASK_RATIO))
+    bottom_mask_h = max(52, int(chart_h * UPLOADED_BG_BOTTOM_MASK_RATIO))
+    d.rounded_rectangle((left + 1, top + 1, right - 1, top + top_mask_h), radius=6, fill=(2, 11, 25, 170))
+    d.rounded_rectangle((left + 1, bottom - bottom_mask_h, right - 1, bottom - 1), radius=6, fill=(2, 11, 25, 188))
     d.rectangle((left, top, right, bottom), outline=(112, 133, 168, 165), width=1)
     image.alpha_composite(overlay)
 
