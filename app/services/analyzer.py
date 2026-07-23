@@ -100,7 +100,7 @@ ANALYSIS_SCHEMA = {
         "current_price": NUM_NULL,
         "image_price_high": NUM_NULL,
         "image_price_low": NUM_NULL,
-        "image_axis_labels": {"type": "array", "items": AXIS_LABEL, "maxItems": 12},
+        "image_axis_labels": {"type": "array", "items": AXIS_LABEL, "maxItems": 20},
         "support_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "resistance_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
         "entry": NUM_NULL,
@@ -881,7 +881,7 @@ def _normalize_axis_labels(labels: Any, *, image_high: float | None = None, imag
             continue
         cleaned.append(item)
         last_price = price
-    return cleaned[:12]
+    return cleaned[:20]
 
 
 def _validate_analysis(
@@ -1071,7 +1071,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 4) image_axis_labels: قائمة أسعار محور الصورة نفسها من الأعلى إلى الأسفل. لكل عنصر أعد:
    - price: الرقم الظاهر على محور السعر في الصورة.
    - y_ratio: موضعه الرأسي النسبي داخل منطقة الشارت المرئية، حيث 0.0 أعلى الشارت و1.0 أسفله.
-   أعد فقط الأرقام التي تراها بوضوح، ويفضل بين 4 و10 قيم إن أمكن.
+   أعد جميع الأرقام الواضحة التي تراها على محور السعر من الأعلى إلى الأسفل، ويفضل أكبر عدد ممكن بين 6 و14 قيمة متتالية إن أمكن. إذا ظهرت سلسلة متتابعة من الأرقام فحافظ عليها كاملة ولا تتخطَّ بينها إلا إذا كان الرقم غير واضح.
 تأكد أن image_price_low < current_price < image_price_high. إذا تعذر رقم الحد الأعلى أو الأدنى فقط فأعده null، لكن ابذل محاولة دقيقة لقراءته.
 لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
 السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.

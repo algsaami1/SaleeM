@@ -321,7 +321,7 @@ def _strength_name(strength: int) -> str:
     return "متوسطة"
 
 
-def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
+def _image_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
     labels = analysis.get("image_axis_labels") or []
     points: list[tuple[float, float]] = []
     for item in labels:
@@ -333,41 +333,36 @@ def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
             continue
         y_ratio = max(0.0, min(1.0, float(y_ratio)))
         points.append((float(price), y_ratio))
+    points.sort(key=lambda item: item[1])
+    return points
+
+
+def _image_axis_range(analysis: dict[str, Any]) -> tuple[float, float] | None:
+    points = _image_axis_points(analysis)
     if len(points) < 2:
         return None
 
-    # انحدار خطي بسيط: price = intercept + slope * y_ratio
-    n = float(len(points))
-    sum_y = sum(y for _, y in points)
-    sum_p = sum(price for price, _ in points)
-    sum_yy = sum(y * y for _, y in points)
-    sum_yp = sum(price * y for price, y in points)
-    denom = n * sum_yy - sum_y * sum_y
-    if abs(denom) < 1e-9:
-        return None
-    slope = (n * sum_yp - sum_y * sum_p) / denom
-    intercept = (sum_p - slope * sum_y) / n
+    top_price, top_ratio = points[0]
+    bottom_price, bottom_ratio = points[-1]
+    ratio_span = max(0.05, bottom_ratio - top_ratio)
+    slope = (bottom_price - top_price) / ratio_span
     if slope >= 0:
         return None
 
-    price_max = intercept
-    price_min = intercept + slope
-    if price_max <= price_min:
-        return None
+    # نستنتج سعر أعلى الشارت وأسفله عبر إسقاط أول وآخر نقطة على النطاق الكامل 0..1.
+    price_max = top_price - slope * top_ratio
+    price_min = top_price + slope * (1.0 - top_ratio)
 
-    # هامش خفيف حتى لا تتجاوز بطاقة أعلى السعر حدود المحور.
     image_high = _number(analysis.get("image_price_high"))
     image_low = _number(analysis.get("image_price_low"))
-    span = price_max - price_min
-    pad = max(span * 0.015, 0.08)
+    span = max(0.0001, price_max - price_min)
+    pad = max(span * 0.008, 0.04)
     if image_high is not None:
-        price_max = max(price_max, float(image_high)) + pad
-    else:
-        price_max += pad
+        price_max = max(price_max, float(image_high) + pad)
     if image_low is not None:
-        price_min = min(price_min, float(image_low)) - pad
-    else:
-        price_min -= pad
+        price_min = min(price_min, float(image_low) - pad)
+    if price_max <= price_min:
+        return None
     return price_min, price_max
 
 
@@ -849,25 +844,17 @@ def _draw_input_top_price(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -
 
 
 
-def _right_axis_values(analysis: dict[str, Any], price_min: float, price_max: float) -> list[float]:
-    """قيم محور اليمين.
-
-    إذا قرأنا أرقام المحور من صورة المستخدم نستخدمها كما هي، وإلا نرجع
-    للتوليد التلقائي المعتاد.
-    """
-    labels = analysis.get("image_axis_labels") or []
-    values: list[float] = []
-    for item in labels:
-        if not isinstance(item, dict):
-            continue
-        price = _number(item.get("price"))
-        if price is None:
-            continue
-        if price_min <= price <= price_max:
-            values.append(round(float(price), 6))
-    if len(values) >= 2:
-        return values
-    return _axis_values(price_min, price_max)
+def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[float, int]]:
+    points = _image_axis_points(analysis)
+    if len(points) >= 2:
+        labels: list[tuple[float, int]] = []
+        for price, y_ratio in points:
+            if price_min <= price <= price_max:
+                y = int(CHART[1] + y_ratio * (CHART[3] - CHART[1]))
+                labels.append((round(price, 6), y))
+        if len(labels) >= 2:
+            return labels
+    return [(price, _price_y(price, price_min, price_max)) for price in _axis_values(price_min, price_max)]
 
 
 
@@ -880,8 +867,7 @@ def _draw_right_price_axis(
     current_y: int | None = None,
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
-    for price in _right_axis_values(analysis, price_min, price_max):
-        y = _price_y(price, price_min, price_max)
+    for price, y in _right_axis_labels(analysis, price_min, price_max):
         if CHART[1] + 8 <= y <= CHART[3] - 6:
             draw.text((PRICE_AXIS_X + 12, y), _fmt_price(price), font=F_AXIS, fill=(194, 207, 229, 255), anchor="lm")
 
@@ -896,8 +882,7 @@ def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: f
     _draw_rtl(draw, (CHART_CARD[2] - 26, top - 34), "محور السعر", F_SMALL, MUTED)
     draw.text((left, top - 34), "XAUUSD · M5", font=F_STATUS, fill=(208, 220, 240, 255), anchor="la")
 
-    for price in _right_axis_values(analysis, price_min, price_max):
-        y = _price_y(price, price_min, price_max)
+    for price, y in _right_axis_labels(analysis, price_min, price_max):
         if not background_mode and CHART[1] + 4 <= y <= CHART[3] - 4:
             draw.line((left, y, right, y), fill=GRID, width=1)
 
