@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 from app.engine.memory_engine import memory_context
 from app.engine.renderer import AxisCalibrationError, render_result, validate_uploaded_axis
@@ -60,10 +60,10 @@ def _is_candle_like_pixel(pixel: tuple[int, int, int, int]) -> bool:
 def _detect_chart_box(image: Image.Image) -> tuple[int, int, int, int] | None:
     """Best-effort detection of the visible chart rectangle inside app screenshots.
 
-    We look for the densest region of candle-colored pixels, then expand that
-    region to include the full plotting box and the right price axis. This
-    avoids hard-coding one iPhone size and allows full-screen app screenshots
-    to work without forcing the user to crop manually.
+    The crop rule is strict: keep the chart *together with* its original right
+    price axis, then allow the final renderer to shift that captured part left.
+    Losing a slice from the far left is acceptable; losing the right price axis
+    is not.
     """
     rgba = image.convert("RGBA")
     width, height = rgba.size
@@ -112,19 +112,39 @@ def _detect_chart_box(image: Image.Image) -> tuple[int, int, int, int] | None:
     candle_right = max(active_cols)
     candle_width = max(40, candle_right - candle_left)
 
-    left = max(0, candle_left - int(candle_width * 0.32))
-    right = min(width, candle_right + int(candle_width * 0.40))
+    # نحتفظ بهامش أصغر يسارًا لأن اختفاء جزء يسير من اليسار مقبول، بينما
+    # يجب الحفاظ على محور الأسعار اليميني الأصلي كاملًا قدر الإمكان.
+    left = max(0, candle_left - int(candle_width * 0.18))
+    right = min(width, candle_right + int(candle_width * 0.62))
     top = max(0, candle_top - int(candle_height * 0.26))
     bottom = min(height, candle_bottom + int(candle_height * 0.34))
 
     # Prefer a visible right-side price axis when present.
-    min_axis_width = max(42, int(width * 0.08))
+    min_axis_width = max(60, int(width * 0.11))
     if right - candle_right < min_axis_width:
         right = min(width, candle_right + min_axis_width)
+
+    if width - right < int(width * 0.04):
+        right = width
 
     if right - left < int(width * 0.35) or bottom - top < int(height * 0.35):
         return None
     return int(left), int(top), int(right), int(bottom)
+
+
+def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
+    """Improve readability of source-axis digits without changing geometry."""
+    enhanced = crop.convert("RGBA")
+    enhanced = ImageEnhance.Contrast(enhanced).enhance(1.08)
+    enhanced = ImageEnhance.Sharpness(enhanced).enhance(1.18)
+
+    axis_start = max(0, int(enhanced.width * 0.74))
+    axis_strip = enhanced.crop((axis_start, 0, enhanced.width, enhanced.height))
+    axis_strip = ImageEnhance.Contrast(axis_strip).enhance(1.30)
+    axis_strip = ImageEnhance.Sharpness(axis_strip).enhance(1.90)
+    axis_strip = ImageEnhance.Brightness(axis_strip).enhance(1.02)
+    enhanced.paste(axis_strip, (axis_start, 0))
+    return enhanced
 
 
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
@@ -1186,7 +1206,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 ===== نهاية بيانات السوق =====
 
 استخدم H4 لتحديد الاتجاه الرئيسي، وH1 لبنية السوق، وM15 لمنطقة التفعيل، وM5 لتوقيت الدخول.
-إذا كانت الصورة المرفوعة لقطة شاشة كاملة للتطبيق أو الهاتف، فركّز فقط على بوكس الشارت المرئي داخله، وتجاهل رؤوس الصفحة والأزرار والبطاقات والنصوص خارج منطقة الشارت.
+إذا كانت الصورة المرفوعة لقطة شاشة كاملة للتطبيق أو الهاتف، فركّز فقط على بوكس الشارت المرئي داخله، وتجاهل رؤوس الصفحة والأزرار والبطاقات والنصوص خارج منطقة الشارت. يجب أن تشمل قراءتك جسم الشارت ومحور الأسعار اليميني الأصلي معًا. إذا اختفى جزء من يسار الشارت أو كان مقصوصًا قليلًا فلا بأس، لكن لا تتجاهل محور الأسعار الأيمن.
 لا تستنتج اتجاه الفريمات العليا من صورة M5؛ بيانات Twelve Data هي مرجع الاتجاه والبنية فقط.
 قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
 إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
@@ -1364,7 +1384,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     if crop_meta.get("used_smart_crop"):
         analysis["axis_warning"] = (
             (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
-        ) + "استخدم التطبيق قصًا ذكيًا تلقائيًا لمنطقة الشارت داخل الصورة المرفوعة."
+        ) + "استخدم التطبيق قصًا ذكيًا تلقائيًا لمنطقة الشارت مع محور الأسعار الأصلي، ثم أزاح الجزء الملتقط لليسار كما هو مطلوب."
 
     png = render_result(analysis, chart_background_path=prepared_image_path)
     return {
