@@ -12,6 +12,8 @@ from typing import Any, Mapping
 
 import httpx
 
+from app import __version__
+
 
 DEFAULT_FRAME_COUNTS: dict[str, int] = {
     "M5": 200,
@@ -117,7 +119,7 @@ class TwelveDataClient:
             timeout=self.config.timeout_seconds,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "SaleeM-Gold-Analyst/2.4",
+                "User-Agent": f"SaleeM-Gold-Analyst/{__version__}",
             },
         )
         self.last_credit_info: dict[str, str | None] = {

@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
+from app import __version__
 from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
@@ -25,7 +26,7 @@ load_final_spec()
 
 app = FastAPI(
     title="SaleeM",
-    version="3.8.0",
+    version=__version__,
     description="Analyzes XAUUSD M5 with automatic M15/H1/H4 market context and a fixed SaleeM visual template.",
 )
 
@@ -52,12 +53,13 @@ def page_context(request: Request, *, result=None, error=None, axis_retry=False)
         "axis_retry": axis_retry,
         "summary": feedback_store.summary(),
         "owner_email": owner_email(),
+        "app_version": __version__,
     }
 
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("index.html", page_context(request))
+    return templates.TemplateResponse(request, "index.html", page_context(request))
 
 
 @app.get("/health")
@@ -65,7 +67,7 @@ async def health():
     return {
         "status": "ok",
         "app": "SaleeM",
-        "version": "3.8.0",
+        "version": __version__,
         "timeframe": "M5",
         "symbol": "XAUUSD",
         "window": "flexible market candle window",
@@ -79,7 +81,7 @@ async def health():
         "cache_policy": "M5=4m,M15=14m,H1=55m,H4=4h",
         "cache_path": os.getenv("MARKET_DATA_CACHE_PATH", "/tmp/saleem_market_data_cache.json"),
         "feedback_store_path": os.getenv("SALEEM_FEEDBACK_STORE_PATH", "/tmp/saleem_feedback_store.json"),
-        "owner_email": owner_email(),
+        "owner_email_configured": bool(owner_email()),
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
@@ -151,6 +153,13 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
 
         with Image.open(temp_path) as source:
             source.verify()
+        with Image.open(temp_path) as source:
+            width, height = source.size
+            if width * height > 40_000_000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="أبعاد الصورة كبيرة جدًا. استخدم صورة لا تتجاوز 40 مليون بكسل.",
+                )
 
         result = await run_in_threadpool(
             analyze_chart_image,
@@ -159,6 +168,7 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
             "M5",
         )
         return templates.TemplateResponse(
+            request,
             "index.html",
             page_context(request, result=result),
         )
@@ -166,6 +176,7 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
         raise
     except AxisCalibrationError as exc:
         return templates.TemplateResponse(
+            request,
             "index.html",
             page_context(request, error=str(exc), axis_retry=True),
             status_code=422,
@@ -196,6 +207,7 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                 "تم تسجيل السبب في Railway للمراجعة."
             )
         return templates.TemplateResponse(
+            request,
             "index.html",
             page_context(request, error=error_message),
             status_code=500,

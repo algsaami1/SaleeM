@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=3.6.0">
+  <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
 </head>
 <body data-has-result="{{ 'true' if result else 'false' }}">
   <main class="app-shell">
@@ -235,12 +235,12 @@
         <div class="feedback-counter"><span id="feedback-count">0</span>/1500</div>
 
         <button class="feedback-submit notes-submit" type="submit">إرسال الملاحظات والاقتراحات</button>
-        <p class="feedback-email-note">تُرسل نسخة إلى بريد مالك التطبيق <b>{{ owner_email }}</b></p>
+        <p class="feedback-email-note">{% if owner_email %}تُرسل نسخة إلى بريد مالك التطبيق <b>{{ owner_email }}</b>{% else %}تُحفظ الملاحظة داخل التطبيق. فعّل APP_OWNER_EMAIL وSMTP لإرسال نسخة بالبريد.{% endif %}</p>
         <p class="feedback-status" id="notes-status" role="status" aria-live="polite"></p>
       </form>
     </section>
     {% endif %}
   </main>
-  <script src="/static/app.js?v=3.5.0" defer></script>
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
 </body>
 </html>

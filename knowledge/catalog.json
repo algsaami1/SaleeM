@@ -85,20 +85,6 @@
         "range_market.svg",
         "support_resistance.svg"
       ]
-    },
-    {
-      "folder": "rules",
-      "json_files": [
-        "core_rules.json"
-      ],
-      "reference_files": []
-    },
-    {
-      "folder": "scenarios",
-      "json_files": [
-        "basic_scenarios.json"
-      ],
-      "reference_files": []
     }
   ]
 }
