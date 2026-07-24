@@ -102,6 +102,13 @@
       <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه من بيانات السوق مع السيناريو الفني">
     </section>
 
+{% if result.axis_warning %}
+    <section class="card axis-soft-warning">
+      <strong>تمت المتابعة تلقائيًا</strong>
+      <p>{{ result.axis_warning }}</p>
+    </section>
+    {% endif %}
+
     <section class="card analysis-notes-card" id="analysis-notes-card">
       <div class="feedback-heading">
         <span class="feedback-icon" aria-hidden="true">≣</span>

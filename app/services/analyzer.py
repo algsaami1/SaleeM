@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from PIL import Image
 
 from app.engine.memory_engine import memory_context
 from app.engine.renderer import AxisCalibrationError, render_result, validate_uploaded_axis
@@ -39,6 +40,113 @@ MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
 MAX_STOP_DISTANCE = 4.0
 STOP_ATR_MULTIPLIER = 1.10
+
+
+def _is_candle_like_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    r, g, b, a = pixel
+    if a < 120:
+        return False
+    brightness = (r + g + b) / 3.0
+    if brightness < 45 or brightness > 245:
+        return False
+    chroma = max(r, g, b) - min(r, g, b)
+    if chroma < 26:
+        return False
+    greenish = g >= r + 6 and g >= b - 8
+    reddish = r >= g + 16 and r >= b + 8
+    return greenish or reddish
+
+
+def _detect_chart_box(image: Image.Image) -> tuple[int, int, int, int] | None:
+    """Best-effort detection of the visible chart rectangle inside app screenshots.
+
+    We look for the densest region of candle-colored pixels, then expand that
+    region to include the full plotting box and the right price axis. This
+    avoids hard-coding one iPhone size and allows full-screen app screenshots
+    to work without forcing the user to crop manually.
+    """
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    if width < 120 or height < 160:
+        return None
+
+    px = rgba.load()
+    row_step = 2 if height > 1200 else 1
+    col_step = 2 if width > 700 else 1
+
+    search_top = int(height * 0.10)
+    search_bottom = int(height * 0.92)
+    row_hits: list[int] = []
+    min_row_hits = max(3, int(width * 0.004))
+    for y in range(search_top, search_bottom, row_step):
+        hits = 0
+        for x in range(0, width, col_step):
+            if _is_candle_like_pixel(px[x, y]):
+                hits += 1
+        row_hits.append(hits)
+
+    active_rows = [search_top + idx * row_step for idx, hits in enumerate(row_hits) if hits >= min_row_hits]
+    if len(active_rows) < 8:
+        return None
+
+    candle_top = min(active_rows)
+    candle_bottom = max(active_rows)
+    candle_height = max(40, candle_bottom - candle_top)
+
+    col_top = max(0, candle_top - int(candle_height * 0.18))
+    col_bottom = min(height, candle_bottom + int(candle_height * 0.18))
+    min_col_hits = max(4, int((col_bottom - col_top) / max(20, 1 / row_step)))
+    active_cols: list[int] = []
+    for x in range(0, width, col_step):
+        hits = 0
+        for y in range(col_top, col_bottom, row_step):
+            if _is_candle_like_pixel(px[x, y]):
+                hits += 1
+        if hits >= min_col_hits:
+            active_cols.append(x)
+
+    if len(active_cols) < 6:
+        return None
+
+    candle_left = min(active_cols)
+    candle_right = max(active_cols)
+    candle_width = max(40, candle_right - candle_left)
+
+    left = max(0, candle_left - int(candle_width * 0.32))
+    right = min(width, candle_right + int(candle_width * 0.40))
+    top = max(0, candle_top - int(candle_height * 0.26))
+    bottom = min(height, candle_bottom + int(candle_height * 0.34))
+
+    # Prefer a visible right-side price axis when present.
+    min_axis_width = max(42, int(width * 0.08))
+    if right - candle_right < min_axis_width:
+        right = min(width, candle_right + min_axis_width)
+
+    if right - left < int(width * 0.35) or bottom - top < int(height * 0.35):
+        return None
+    return int(left), int(top), int(right), int(bottom)
+
+
+def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
+    """Create a smart chart crop when the upload contains surrounding app UI."""
+    meta: dict[str, Any] = {"used_smart_crop": False}
+    try:
+        with Image.open(image_path) as image:
+            box = _detect_chart_box(image)
+            if not box:
+                return image_path, meta
+            left, top, right, bottom = box
+            crop = image.convert("RGBA").crop((left, top, right, bottom))
+            crop_path = image_path.with_name(f"{image_path.stem}_chartcrop.png")
+            crop.save(crop_path)
+            meta.update({
+                "used_smart_crop": True,
+                "smart_crop_box": [left, top, right, bottom],
+                "smart_crop_size": [right - left, bottom - top],
+            })
+            return crop_path, meta
+    except Exception:
+        return image_path, meta
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -1078,6 +1186,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 ===== نهاية بيانات السوق =====
 
 استخدم H4 لتحديد الاتجاه الرئيسي، وH1 لبنية السوق، وM15 لمنطقة التفعيل، وM5 لتوقيت الدخول.
+إذا كانت الصورة المرفوعة لقطة شاشة كاملة للتطبيق أو الهاتف، فركّز فقط على بوكس الشارت المرئي داخله، وتجاهل رؤوس الصفحة والأزرار والبطاقات والنصوص خارج منطقة الشارت.
 لا تستنتج اتجاه الفريمات العليا من صورة M5؛ بيانات Twelve Data هي مرجع الاتجاه والبنية فقط.
 قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
 إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
@@ -1095,7 +1204,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
 السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
 يجب أن يطابق current_price_y_ratio الخط الأفقي الحقيقي الخارج من ملصق السعر الحالي، لأن البرنامج سيستخدمه كنقطة تثبيت لجميع خطوط الرسم ومحور السعر الأيمن.
-اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي. إذا لم تستطع قراءة نقاط محور متناسقة، فأعد image_axis_labels=[] ولا تخمّن الأرقام؛ التطبيق سيطلب من المستخدم إعادة التقاط الصورة بدل رسم محور غير موثوق.
+اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي. إذا لم تستطع قراءة نقاط محور متناسقة، فأعد image_axis_labels=[] ولا تخمّن الأرقام. لا تفشل بسبب نقص بعض القراءات؛ أعد أفضل ما يمكنك قراءته من بوكس الشارت، فالتطبيق سيكمل بالاحتياطات الداخلية بدل إيقاف التحليل.
 
 التحليل المطلوب:
 - اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
@@ -1114,7 +1223,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة، لن يرسم البرنامج محورًا غير موثوق؛ سيطلب من المستخدم التقاط صورة جديدة. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
+النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
@@ -1240,17 +1349,27 @@ def _analyze(path: Path) -> dict[str, Any]:
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
-    analysis = _analyze(image_path)
-    axis_ok, axis_reason = validate_uploaded_axis(analysis, image_path)
+    prepared_image_path, crop_meta = _prepare_analysis_image(image_path)
+    analysis = _analyze(prepared_image_path)
+    axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
     if not axis_ok:
-        raise AxisCalibrationError(
-            "تعذر ضبط محور الأسعار بدقة. استخدم Reset Vertical Scale أو فعّل Auto-scale / «الضبط التلقائي» "
-            "في الشارت، وتأكد من ظهور محور الأسعار كاملًا وخط السعر الحالي، "
-            f"ثم التقط صورة جديدة وأعد المحاولة. السبب: {axis_reason}"
+        analysis["axis_warning"] = (
+            "تم استخدام وضع احتياطي لأن قراءة محور الأسعار من الصورة لم تكن كاملة: " + axis_reason
         )
-    png = render_result(analysis, chart_background_path=image_path)
+        analysis["axis_validation_passed"] = False
+    else:
+        analysis["axis_warning"] = ""
+        analysis["axis_validation_passed"] = True
+
+    if crop_meta.get("used_smart_crop"):
+        analysis["axis_warning"] = (
+            (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
+        ) + "استخدم التطبيق قصًا ذكيًا تلقائيًا لمنطقة الشارت داخل الصورة المرفوعة."
+
+    png = render_result(analysis, chart_background_path=prepared_image_path)
     return {
         **analysis,
+        **crop_meta,
         "symbol": "XAUUSD",
         "timeframe": "M5",
         "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",

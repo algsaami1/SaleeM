@@ -89,6 +89,10 @@ button{font-family:inherit}
 .axis-retry-steps b{width:23px;height:23px;flex:0 0 23px;display:grid;place-items:center;border-radius:50%;background:#f5b942;color:#fff;font-size:11px}
 .axis-retry-button{display:block;width:100%;border:0;border-radius:14px;padding:14px;background:linear-gradient(135deg,#f2b53b,#d99212);color:#fff;font:inherit;font-weight:700;cursor:pointer;box-shadow:0 8px 20px rgba(217,146,18,.22)}
 
+.axis-soft-warning{padding:15px 17px;border-color:#d6e8da;background:linear-gradient(180deg,#f9fff9,#f2fff4);color:#27613a}
+.axis-soft-warning>strong{display:block;font-size:16px;color:#2e7d46;margin-bottom:6px}
+.axis-soft-warning>p{margin:0;line-height:1.9;font-size:12px;color:#3d6248}
+
 .result-card{padding:15px}
 .result-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}
 .result-heading span{color:var(--purple);font-size:11px}
