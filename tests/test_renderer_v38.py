@@ -140,15 +140,15 @@ def test_result_preserves_full_iphone_canvas_and_native_viewport():
 
 
 
-def test_native_iphone_crop_keeps_pixels_without_scaling():
+def test_native_iphone_crop_trims_left_top_bottom_then_rescales():
     source = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
-    # Mark the exact top-left and bottom-right pixels expected after taking the
-    # rightmost 1111 px and the centered 2243 px slice.
-    source.putpixel((209, 312), (11, 22, 33, 255))
-    source.putpixel((1319, 2554), (44, 55, 66, 255))
+    # Fill the exact region that should remain after the fixed trimming rule.
+    for x in range(245, 1320):
+        for y in range(339, 2515):
+            source.putpixel((x, y), (44, 55, 66, 255))
     visible = _fit_cover(source, (1111, 2243))
     assert visible.size == (1111, 2243)
-    assert visible.getpixel((0, 0)) == (11, 22, 33, 255)
+    assert visible.getpixel((0, 0)) == (44, 55, 66, 255)
     assert visible.getpixel((1110, 2242)) == (44, 55, 66, 255)
 
 def test_ratio_crop_normalizes_full_screenshot_from_other_iphone_size():
@@ -169,8 +169,11 @@ def test_ratio_crop_normalizes_full_screenshot_from_other_iphone_size():
 
 
 
-def test_already_cropped_viewport_is_preserved_across_devices():
-    source = Image.new("RGBA", (992, 2004), (33, 66, 99, 255))
+def test_already_cropped_viewport_is_trimmed_then_scaled_consistently():
+    source = Image.new("RGBA", (992, 2004), (7, 7, 7, 255))
+    for x in range(32, 992):
+        for y in range(24, 1968):
+            source.putpixel((x, y), (33, 66, 99, 255))
     visible = _fit_cover(source, (1111, 2243))
     assert visible.size == (1111, 2243)
     assert visible.getpixel((0, 0)) == (33, 66, 99, 255)

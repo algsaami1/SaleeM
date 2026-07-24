@@ -76,6 +76,12 @@ VISIBLE_HEIGHT_RATIO = SOURCE_VISIBLE_HEIGHT / REFERENCE_SCREENSHOT_HEIGHT
 FULL_SCREEN_ASPECT = REFERENCE_SCREENSHOT_WIDTH / REFERENCE_SCREENSHOT_HEIGHT
 VISIBLE_VIEWPORT_ASPECT = SOURCE_VISIBLE_WIDTH / SOURCE_VISIBLE_HEIGHT
 
+# قاعدة الإظهار النهائية: نقص قليلًا من أعلى وأسفل ويسار الجزء الملتقط،
+# ثم نضعه مزاحًا لليسار داخل الكانفس حتى تتوافر مساحة المحور اليميني الإضافي.
+FINAL_VISIBLE_LEFT_TRIM_RATIO = 0.032
+FINAL_VISIBLE_TOP_TRIM_RATIO = 0.012
+FINAL_VISIBLE_BOTTOM_TRIM_RATIO = 0.018
+
 
 class AxisCalibrationError(RuntimeError):
     """Raised when the uploaded chart cannot produce a trustworthy price axis."""
@@ -1022,13 +1028,12 @@ def _background_axis_shift() -> int:
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
     """Normalize the uploaded screenshot to one consistent visible viewport.
 
-    The final SaleeM image must look the same whether the user uploaded a
-    Pro, Pro Max, or any other iPhone screenshot. We therefore:
+    The final SaleeM image must always follow the same rule:
 
-    1) detect whether the upload is a full screenshot or an already-cropped
-       visible chart area,
-    2) extract the chart viewport using *ratios* rather than fixed pixels,
-    3) resize that viewport to the canonical SaleeM visible window.
+    1) keep the chart together with its original right price axis,
+    2) crop a little from the left, top, and bottom,
+    3) place that result left-aligned in the final canvas so the extra right
+       SaleeM axis has its own reserved strip.
 
     This keeps the same logical area of the chart across devices while still
     preserving proportions and avoiding any stretching.
@@ -1064,6 +1069,11 @@ def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
         crop_left = max(0, source_w - crop_w)
         crop_top = max(0, (source_h - crop_h) // 2)
         viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
+
+    trim_left = min(max(0, int(round(viewport.width * FINAL_VISIBLE_LEFT_TRIM_RATIO))), max(0, viewport.width - 2))
+    trim_top = min(max(0, int(round(viewport.height * FINAL_VISIBLE_TOP_TRIM_RATIO))), max(0, viewport.height - 2))
+    trim_bottom = min(max(0, int(round(viewport.height * FINAL_VISIBLE_BOTTOM_TRIM_RATIO))), max(0, viewport.height - trim_top - 1))
+    viewport = viewport.crop((trim_left, trim_top, viewport.width, viewport.height - trim_bottom))
 
     if viewport.size != (target_w, target_h):
         viewport = viewport.resize((target_w, target_h), resample=Image.Resampling.LANCZOS)
