@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from app.engine.renderer import (
     CHART,
@@ -17,6 +17,8 @@ from app.engine.renderer import (
     _detect_top_trade_controls_band,
     _hide_top_trade_controls,
     _header_pattern_lines,
+    _horizontal_card_lanes,
+    _draw_trade_axis_card,
     _trade_display_items,
     _exact_image_axis_model,
     _price_range,
@@ -469,3 +471,39 @@ def test_conditional_mode_keeps_entry_sl_and_three_targets():
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "conditional"
     assert [item[0] for item in items] == ["Entry", "SL", "TP", "TP", "TP"]
+
+
+def test_overlapping_trade_cards_move_horizontally_only():
+    items = [
+        ("Entry", 4058.0, 1000, (38, 117, 247, 255)),
+        ("TP", 4058.2, 1020, (25, 211, 112, 255)),
+        ("SL", 4057.8, 1040, (245, 63, 70, 255)),
+    ]
+    lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
+    assert lanes[0] == 0
+    assert lanes[1] == 1
+    assert lanes[2] == 2
+    assert [item[2] for item in items] == [1000, 1020, 1040]
+
+
+def test_trade_axis_card_center_matches_exact_price_y():
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas)
+    exact_y = 1234
+    rect = _draw_trade_axis_card(
+        draw,
+        label="Entry",
+        price=4058.0,
+        exact_y=exact_y,
+        color=(38, 117, 247, 255),
+        x_lane=1,
+    )
+    assert (rect[1] + rect[3]) // 2 == exact_y
+
+
+def test_current_price_binding_uses_shared_transform_even_without_detected_line():
+    analysis = _analysis("صاعد")
+    low, high = _price_range(analysis)
+    expected = _price_y(analysis["current_price"], low, high)
+    chosen = _axis_checked_current_reference_y(analysis, low, high, detected_y=None)
+    assert chosen == expected

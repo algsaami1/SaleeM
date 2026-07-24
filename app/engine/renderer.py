@@ -1999,29 +1999,63 @@ def _draw_current_price(
     draw.text(((source_axis_left + source_axis_right) // 2, y), _fmt_price(current), font=F_TRADE_CARD_PRICE, fill=(4, 27, 33, 255), anchor="mm")
 
 
+def _horizontal_card_lanes(
+    items: list[tuple[str, float, int, tuple[int, int, int, int]]],
+    *,
+    card_height: int = 66,
+    vertical_gap: int = 8,
+) -> dict[int, int]:
+    """Assign horizontal lanes while preserving every card's exact Y.
+
+    The original chart axis is the sole vertical reference. When two cards are
+    close enough to overlap, the later card moves left into another horizontal
+    lane. Its center never moves up or down.
+    """
+    lanes_last_y: list[int] = []
+    assignments: dict[int, int] = {}
+    minimum_gap = card_height + vertical_gap
+    for index in sorted(range(len(items)), key=lambda idx: items[idx][2]):
+        exact_y = int(items[index][2])
+        lane = 0
+        while lane < len(lanes_last_y) and exact_y - lanes_last_y[lane] < minimum_gap:
+            lane += 1
+        if lane == len(lanes_last_y):
+            lanes_last_y.append(exact_y)
+        else:
+            lanes_last_y[lane] = exact_y
+        assignments[index] = lane
+    return assignments
+
+
 def _draw_trade_axis_card(
     draw: ImageDraw.ImageDraw,
     *,
     label: str,
     price: float,
-    shown_y: int,
     exact_y: int,
     color: tuple[int, int, int, int],
+    x_lane: int = 0,
 ) -> tuple[int, int, int, int]:
-    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
+    """Draw one execution card centered exactly on its real price Y.
+
+    Vertical displacement is forbidden. Overlap is resolved by moving the card
+    left through ``x_lane`` only.
+    """
+    axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
     card_w = min(162, axis_right - axis_left + 4)
     card_h = 66
-    x2 = axis_right - 14
+    lane_gap = 10
+    x2 = axis_right - 14 - x_lane * (card_w + lane_gap)
     x1 = x2 - card_w
-    y1 = max(axis_top + 10, min(axis_bottom - card_h - 10, shown_y - card_h // 2))
+    y1 = int(exact_y - card_h // 2)
     y2 = y1 + card_h
 
+    # Connector remains on the exact price line. No vertical elbow is needed
+    # because card center and price level are identical by construction.
     connector_start = CHART[2] + 4
     connector_end = x1 - 7
     draw.line((connector_start, exact_y, connector_end, exact_y), fill=color, width=2)
-    if abs((y1 + y2) // 2 - exact_y) > 3:
-        draw.line((connector_end, exact_y, connector_end, (y1 + y2) // 2), fill=color, width=2)
-        draw.line((connector_end, (y1 + y2) // 2, x1, (y1 + y2) // 2), fill=color, width=2)
+    draw.line((connector_end, exact_y, x1, exact_y), fill=color, width=2)
 
     draw.rounded_rectangle((x1, y1, x2, y2), radius=7, fill=(255, 255, 255, 255), outline=color, width=3)
     draw.text(((x1 + x2) // 2, y1 + 20), label, font=F_TRADE_CARD_LABEL, fill=color, anchor="mm")
@@ -2073,10 +2107,16 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         else:
             draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
 
-    positions = _spaced_positions([(f"trade-{index}", exact_y) for index, (_label, _price, exact_y, _color) in enumerate(items)], min_gap=78)
+    lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
     for index, (label, price, exact_y, color) in enumerate(items):
-        shown_y = positions.get(f"trade-{index}", exact_y)
-        _draw_trade_axis_card(draw, label=label, price=price, shown_y=shown_y, exact_y=exact_y, color=color)
+        _draw_trade_axis_card(
+            draw,
+            label=label,
+            price=price,
+            exact_y=exact_y,
+            color=color,
+            x_lane=lanes.get(index, 0),
+        )
 
     # No directional arrow in watch mode. Conditional arrows are dashed;
     # confirmed/active arrows are solid.
@@ -2282,12 +2322,19 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     dynamic_axis_range = _dynamic_image_axis_range(analysis, current_reference_y)
     if dynamic_axis_range is not None:
         price_min, price_max = dynamic_axis_range
-        current_reference_y = _axis_checked_current_reference_y(
-            analysis,
-            price_min,
-            price_max,
-            current_reference_y,
-        )
+
+    # Mandatory single-axis binding: even when exact OCR calibration is not
+    # available, the current price and every overlay are projected through the
+    # same final price->Y transform. The detected pixel line is only an anchor
+    # used while building that transform, never a second independent scale.
+    current_reference_y = _axis_checked_current_reference_y(
+        analysis,
+        price_min,
+        price_max,
+        current_reference_y,
+    )
+    analysis["price_axis_binding"] = "original_chart_single_transform"
+    analysis["price_axis_overlap_policy"] = "horizontal_only"
 
     analysis["_using_chart_background"] = using_chart_background
     _draw_grid(draw, analysis, price_min, price_max, background_mode=using_chart_background)
