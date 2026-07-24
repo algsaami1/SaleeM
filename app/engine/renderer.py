@@ -2092,31 +2092,45 @@ def _draw_trade_axis_card(
 
 
 
-def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 52, min_gap: int = 10) -> list[int]:
-    """Stack cards vertically with clear spacing and no overlap."""
+def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 48, min_gap: int = 8) -> list[int]:
+    """Stack cards vertically in a visually comfortable way without overlap."""
     _axis_left, axis_top, _axis_right, axis_bottom = _saleem_axis_box()
-    lower = axis_top + card_height // 2 + 8
-    upper = axis_bottom - card_height // 2 - 8
+    lower = axis_top + card_height // 2 + 10
+    upper = axis_bottom - card_height // 2 - 10
     if not items:
         return []
 
-    ordered = sorted([(idx, int(item[2])) for idx, item in enumerate(items)], key=lambda item: item[1])
+    sorted_items = sorted(((idx, int(item[2])) for idx, item in enumerate(items)), key=lambda item: item[1])
     positions: dict[int, int] = {}
-    previous: int | None = None
-    for idx, exact in ordered:
-        y = max(lower, min(upper, exact))
-        if previous is not None:
-            y = max(y, previous + card_height + min_gap)
-        positions[idx] = y
-        previous = y
+    prev_center: int | None = None
+    for idx, exact_y in sorted_items:
+        center = max(lower, min(upper, exact_y))
+        if prev_center is not None:
+            center = max(center, prev_center + card_height + min_gap)
+        positions[idx] = center
+        prev_center = center
 
-    overflow = max(positions.values(), default=upper) - upper
-    if overflow > 0:
+    overflow = max(0, max(positions.values(), default=upper) - upper)
+    if overflow:
         positions = {idx: y - overflow for idx, y in positions.items()}
 
-    underflow = lower - min(positions.values(), default=lower)
-    if underflow > 0:
-        positions = {idx: y + underflow for idx, y in positions.items()}
+    # if the whole stack still starts too high/low, nudge it back into range.
+    min_center = min(positions.values(), default=lower)
+    if min_center < lower:
+        shift = lower - min_center
+        positions = {idx: y + shift for idx, y in positions.items()}
+
+    # final pass to guarantee non-overlap after shifting.
+    prev_center = None
+    for idx, _exact_y in sorted_items:
+        center = positions[idx]
+        if prev_center is not None and center < prev_center + card_height + min_gap:
+            center = prev_center + card_height + min_gap
+        positions[idx] = center
+        prev_center = center
+    overflow = max(0, max(positions.values(), default=upper) - upper)
+    if overflow:
+        positions = {idx: y - overflow for idx, y in positions.items()}
 
     return [positions[idx] for idx in range(len(items))]
 
@@ -2132,29 +2146,29 @@ def _draw_trade_axis_card_stacked(
 ) -> tuple[int, int, int, int]:
     axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
     text = f"{label}-{_fmt_card_price(price)}"
-    card_h = 52
-    pad_x = 16
-    card_left_padding = 18
-    card_right_padding = 20
-    x1 = axis_left + card_left_padding
-    x2 = axis_right - card_right_padding
+    card_h = 48
+    pad_x = 14
+    x1 = axis_left + 14
+    x2 = axis_right - 26
     card_w = x2 - x1
-    text_w = _text_width(draw, text, F_TRADE_SMALL_LATIN, rtl=False)
-    if text_w + pad_x * 2 > card_w:
-        # keep within the axis but use the whole available width
-        shown = _fit_text(draw, text, F_TRADE_SMALL_LATIN, card_w - pad_x * 2 - 6, rtl=False)
-    else:
-        shown = text
+    shown = _fit_text(draw, text, F_TRADE_SMALL_LATIN, card_w - pad_x * 2, rtl=False)
     y1 = int(center_y - card_h // 2)
     y2 = y1 + card_h
-    connector_x = x1 - 12
+
+    connector_x = x1 - 10
     draw.line((CHART[2] + 4, exact_y, connector_x, exact_y), fill=color, width=2)
     if center_y != exact_y:
         draw.line((connector_x, exact_y, connector_x, center_y), fill=color, width=2)
     draw.line((connector_x, center_y, x1, center_y), fill=color, width=2)
-    fill = (color[0], color[1], color[2], 34)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=fill, outline=color, width=2)
-    draw.text(((x1 + x2) // 2, center_y), shown, font=F_TRADE_SMALL_LATIN, fill=color, anchor="mm")
+
+    fill = (color[0], color[1], color[2], 30)
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=fill, outline=color, width=2)
+    # subtle inner highlight for softer look
+    draw.rounded_rectangle((x1 + 1, y1 + 1, x2 - 1, y2 - 1), radius=7, outline=(255, 255, 255, 26), width=1)
+    text_fill = (23, 37, 64, 255)
+    draw.text(((x1 + x2) // 2, center_y), shown, font=F_TRADE_SMALL_LATIN, fill=text_fill, anchor="mm")
+    # color accent line on the left for quick scanning
+    draw.line((x1 + 8, y1 + 8, x1 + 8, y2 - 8), fill=color, width=3)
     return x1, y1, x2, y2
 
 
@@ -2285,7 +2299,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         else:
             draw.line((zone_x1, exact_y, right, exact_y), fill=color, width=2)
 
-    centers = _vertical_axis_card_centers(items, card_height=52, min_gap=10)
+    centers = _vertical_axis_card_centers(items, card_height=48, min_gap=8)
     for center_y, (label, price, exact_y, color) in zip(centers, items):
         _draw_trade_axis_card_stacked(
             draw,
