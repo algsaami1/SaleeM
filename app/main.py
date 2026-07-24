@@ -74,7 +74,7 @@ async def health():
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
         "renderer": "saleem-approved-scalping-layout-v1.1",
-        "ui": "saleem-compact-upload-result-first-v3.9",
+        "ui": "saleem-permanent-analysis-prompt-v3.9.1",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),

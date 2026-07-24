@@ -160,9 +160,13 @@
         <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ result.confirmation or 'انتظار تأكيد واضح' }}</b></div>
         <div class="analysis-note-row"><span>وقف الخسارة</span><b>{% if result.draw_mode != 'watch' and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
         <div class="analysis-note-row"><span>الأهداف</span><b>{% if result.draw_mode != 'watch' %}{% if result.target_1 is not none %}TP1: {{ '%.2f'|format(result.target_1) }}{% endif %}{% if result.target_2 is not none %} | TP2: {{ '%.2f'|format(result.target_2) }}{% endif %}{% if result.target_3 is not none %} | TP3: {{ '%.2f'|format(result.target_3) }}{% endif %}{% else %}بانتظار وضوح السيناريو{% endif %}</b></div>
-        <div class="analysis-note-row"><span>أقرب سيناريو</span><b>{{ result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد' }}</b></div>
+        <div class="analysis-note-row"><span>السيناريو المختار</span><b>{{ result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد' }}</b></div>
+        <div class="analysis-note-row scenario-up"><span>سيناريو الصعود</span><b>{{ result.bullish_scenario or 'IF يثبت السعر فوق المقاومة الأقرب THEN يتجه نحو الهدف الصاعد التالي' }}</b></div>
+        <div class="analysis-note-row scenario-down"><span>سيناريو الهبوط</span><b>{{ result.bearish_scenario or 'IF يغلق السعر تحت الدعم الأقرب THEN يتجه نحو الهدف الهابط التالي' }}</b></div>
+        <div class="analysis-note-row"><span>إلغاء السيناريو</span><b>{{ result.invalidation_condition or 'عند كسر مستوى الإبطال المقابل' }}</b></div>
+        <div class="analysis-note-row"><span>الأخبار والدولار</span><b>{{ result.macro_note or 'لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية' }}</b></div>
       </div>
-      <p class="analysis-notes-footnote">تحليل فني تعليمي، وليس توصية استثمارية.</p>
+      <p class="analysis-notes-footnote">تحليل فني تعليمي منظم، وليس توصية استثمارية أو ضمانًا للربح.</p>
     </details>
 
     <section class="card feedback-card" id="feedback-card" aria-labelledby="feedback-title">

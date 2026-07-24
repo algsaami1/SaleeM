@@ -249,3 +249,9 @@ details[open] .details-arrow{transform:rotate(180deg)}
   .summary-bar-wrap{grid-template-columns:1fr;gap:7px}.summary-bar-side b{display:inline;margin-left:3px}
 }
 @media(max-width:360px){.result-actions{grid-template-columns:1fr}.home-secondary{grid-template-columns:1fr}.result-status-strip{grid-template-columns:1fr 1fr 1fr}}
+
+/* Permanent two-scenario analysis rule */
+.analysis-note-row.scenario-up{border-inline-start:3px solid #2fbf71}
+.analysis-note-row.scenario-down{border-inline-start:3px solid #df5b5b}
+.analysis-note-row.scenario-up span{color:#208a52}
+.analysis-note-row.scenario-down span{color:#b63b3b}

@@ -20,5 +20,9 @@ def normalize_analysis(data: dict[str, Any]) -> dict[str, Any]:
     data["sell_probability"] = sell
     data["note"] = " ".join(str(data.get("note", "")).split())[:82]
     data["direction"] = data.get("direction", "غير واضح")
-    data["scenario"] = str(data.get("scenario", "غير واضح"))[:70]
+    data["scenario"] = str(data.get("scenario", "غير واضح"))[:92]
+    data["bullish_scenario"] = str(data.get("bullish_scenario", ""))[:150]
+    data["bearish_scenario"] = str(data.get("bearish_scenario", ""))[:150]
+    data["invalidation_condition"] = str(data.get("invalidation_condition", ""))[:110]
+    data["macro_note"] = str(data.get("macro_note", ""))[:150]
     return data

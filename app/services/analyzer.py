@@ -26,6 +26,7 @@ OPENAI_URL = "https://api.openai.com/v1/responses"
 BASE_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 SPEC_PATH = BASE_DIR / "SALEEM_FINAL_SPEC.md"
+PERMANENT_PROMPT_PATH = KNOWLEDGE_DIR / "09_rules" / "PERMANENT_ANALYSIS_PROMPT.md"
 
 
 def load_final_spec() -> str:
@@ -33,6 +34,16 @@ def load_final_spec() -> str:
     if not SPEC_PATH.exists():
         raise RuntimeError("ملف SALEEM_FINAL_SPEC.md غير موجود في المجلد الرئيسي للمشروع.")
     return SPEC_PATH.read_text(encoding="utf-8").strip()
+
+
+def load_permanent_analysis_prompt() -> str:
+    """قراءة قاعدة التحليل الدائمة التي تُحقن في كل طلب تحليل."""
+    if not PERMANENT_PROMPT_PATH.exists():
+        raise RuntimeError(
+            "ملف قاعدة التحليل الدائمة PERMANENT_ANALYSIS_PROMPT.md غير موجود."
+        )
+    return PERMANENT_PROMPT_PATH.read_text(encoding="utf-8").strip()
+
 
 CONFIRMED_PROBABILITY = 65
 CONDITIONAL_PROBABILITY = 55
@@ -249,6 +260,10 @@ ANALYSIS_SCHEMA = {
         "pattern_lines": {"type": "array", "items": LINE, "maxItems": 4},
         "pattern_path": {"type": "array", "items": POINT, "maxItems": 12},
         "scenario": {"type": "string"},
+        "bullish_scenario": {"type": "string"},
+        "bearish_scenario": {"type": "string"},
+        "invalidation_condition": {"type": "string"},
+        "macro_note": {"type": "string"},
         "note": {"type": "string"},
         "memory_matches": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     },
@@ -258,7 +273,8 @@ ANALYSIS_SCHEMA = {
         "image_price_low", "image_axis_labels", "support_levels", "resistance_levels", "entry", "stop_loss",
         "stop_reason", "target_1", "target_2",
         "target_3", "pattern_type", "pattern_confidence", "pattern_lines", "pattern_path",
-        "scenario", "note", "memory_matches",
+        "scenario", "bullish_scenario", "bearish_scenario",
+        "invalidation_condition", "macro_note", "note", "memory_matches",
     ],
 }
 
@@ -1117,11 +1133,31 @@ def _validate_analysis(
         data["pattern_path"] = []
         data["pattern_type"] = "لا يوجد"
 
-    scenario = " ".join(str(data.get("scenario") or "").split())[:70]
+    scenario = " ".join(str(data.get("scenario") or "").split())[:92]
+    bullish_scenario = " ".join(str(data.get("bullish_scenario") or "").split())[:150]
+    bearish_scenario = " ".join(str(data.get("bearish_scenario") or "").split())[:150]
+    invalidation_condition = " ".join(
+        str(data.get("invalidation_condition") or "").split()
+    )[:110]
+    macro_note = " ".join(str(data.get("macro_note") or "").split())[:150]
+
+    if not bullish_scenario:
+        bullish_scenario = "IF يثبت السعر فوق المقاومة الأقرب THEN يتجه نحو الهدف الصاعد التالي"
+    if not bearish_scenario:
+        bearish_scenario = "IF يغلق السعر تحت الدعم الأقرب THEN يتجه نحو الهدف الهابط التالي"
+    if not invalidation_condition:
+        invalidation_condition = (
+            f"إلغاء السيناريو عند تجاوز وقف الخسارة {stop:.2f}"
+            if draw_mode != "watch"
+            else "إلغاء الفكرة عند كسر البنية المقابلة قبل ظهور شرط التفعيل"
+        )
+    if not macro_note:
+        macro_note = "لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية"
+
     if draw_mode == "watch":
-        scenario = "مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد"
+        scenario = "IF تتوافق الفريمات وتظهر شمعة تأكيد THEN يُفعّل أقرب سيناريو"
     elif not scenario:
-        scenario = "استمرار السيناريو بعد تحقق شرط الدخول"
+        scenario = "IF يتحقق شرط الدخول THEN يستمر السيناريو نحو الأهداف المحددة"
 
     data.update(
         {
@@ -1153,7 +1189,12 @@ def _validate_analysis(
             "target_2": targets[1],
             "target_3": targets[2],
             "scenario": scenario,
-            "note": " ".join(str(data.get("note") or "").split())[:80],
+            "bullish_scenario": bullish_scenario,
+            "bearish_scenario": bearish_scenario,
+            "invalidation_condition": invalidation_condition,
+            "macro_note": macro_note,
+            "analysis_style": "سكالب تعليمي — XAUUSD — تنفيذ M5 مع مراجعة M15/H1/H4",
+            "note": " ".join(str(data.get("note") or "").split())[:100],
             "market_data_source": (market_summary or {}).get("source"),
             "market_data_fetched_at": (market_summary or {}).get("fetched_at"),
             "market_timezone": (market_summary or {}).get("timezone", "Asia/Muscat"),
@@ -1197,6 +1238,10 @@ def _analyze(path: Path) -> dict[str, Any]:
 {load_final_spec()}
 ===== نهاية الدستور =====
 
+===== قاعدة التحليل الدائمة لكل تحليل =====
+{load_permanent_analysis_prompt()}
+===== نهاية القاعدة الدائمة =====
+
 ===== بيانات السوق الحية المجلوبة تلقائيًا =====
 الملخص الحسابي للفريمات:
 {json.dumps(market_summary, ensure_ascii=False)}
@@ -1227,7 +1272,9 @@ def _analyze(path: Path) -> dict[str, Any]:
 اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي. إذا لم تستطع قراءة نقاط محور متناسقة، فأعد image_axis_labels=[] ولا تخمّن الأرقام. لا تفشل بسبب نقص بعض القراءات؛ أعد أفضل ما يمكنك قراءته من بوكس الشارت، فالتطبيق سيكمل بالاحتياطات الداخلية بدل إيقاف التحليل.
 
 التحليل المطلوب:
-- اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
+- حلّل سيناريو الصعود وسيناريو الهبوط في كل مرة بصيغة IF / THEN، ثم اختر للرسم سيناريو واحدًا فقط وهو الأعلى احتمالًا والأقرب للتفعيل.
+- املأ bullish_scenario بسيناريو الصعود المختصر، وbearish_scenario بسيناريو الهبوط المختصر، وinvalidation_condition بشرط إلغاء السيناريو المختار.
+- املأ macro_note بملاحظة الأخبار أو الدولار فقط عند وجود بيانات موثوقة ضمن المدخلات؛ وإلا اكتب: لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية.
 - BUY وSELL مجموعهما 100، ولا تستخدم 0 أو 100.
 - عند ضعف التأكيد، لا تقل لا توجد صفقة؛ أعطِ أقرب نقطة تفعيل مشروطة مع اتجاه متوقع.
 - حدد أقرب دعمين وأقرب مقاومتين مهمين اعتمادًا على بيانات السوق المرفقة وموضع السعر الظاهر في الصورة.
@@ -1241,7 +1288,8 @@ def _analyze(path: Path) -> dict[str, Any]:
 - W/قاعان يدعم الصعود بعد اختراق خط العنق أو إعادة اختبار ناجحة.
 - pattern_lines وpattern_path إحداثيات نسبية داخل مساحة الشارت المعاد رسمها: 0,0 أعلى اليسار و1,1 أسفل اليمين.
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
-- confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
+- confirmation وscenario وbullish_scenario وbearish_scenario وinvalidation_condition وmacro_note وnote نصوص عربية قصيرة وواضحة.
+- اجعل scenario هو السيناريو المختار للرسم بصيغة شرطية مختصرة، ولا تضع السيناريو البديل داخل الرسم نفسه.
 
 النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
 
