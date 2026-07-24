@@ -71,7 +71,7 @@ async def health():
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-strict-image-axis-autoscale-retry-v3.8.2",
+        "renderer": "saleem-approved-scalping-layout-v1.1",
         "ui": "saleem-clean-hero-progress-feedback-summary",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),

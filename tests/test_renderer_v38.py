@@ -442,8 +442,8 @@ def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
     assert band is not None
     cleaned = _hide_top_trade_controls(image)
     top, bottom = band
-    assert cleaned.getpixel((100, (top + bottom) // 2))[:3] == (0, 0, 0)
-    assert cleaned.getpixel((450, (top + bottom) // 2))[:3] == (0, 0, 0)
-    assert cleaned.getpixel((900, (top + bottom) // 2))[:3] == (0, 0, 0)
+    assert cleaned.getpixel((100, (top + bottom) // 2))[:3] == (3, 17, 35)
+    assert cleaned.getpixel((450, (top + bottom) // 2))[:3] == (3, 17, 35)
+    assert cleaned.getpixel((900, (top + bottom) // 2))[:3] == (3, 17, 35)
     # Chart body below the toolbar remains untouched.
     assert cleaned.getpixel((450, 180))[:3] == (245, 245, 245)
