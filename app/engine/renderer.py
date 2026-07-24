@@ -1537,7 +1537,22 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
     probability = int(analysis.get("trade_probability") or max(analysis.get("buy_probability") or 50, analysis.get("sell_probability") or 50))
     probability = max(0, min(100, probability))
-    session = _active_session_label(analysis)
+    trade_side = str(analysis.get("trade_side") or "مراقبة")
+    if state == "conditional":
+        trade_type = "بشرط"
+        trade_type_color = ORANGE
+    elif state == "watch":
+        trade_type = "مراقبة"
+        trade_type_color = BLUE
+    elif trade_side == "شراء":
+        trade_type = "شراء"
+        trade_type_color = GREEN
+    elif trade_side == "بيع":
+        trade_type = "بيع"
+        trade_type_color = RED
+    else:
+        trade_type = "مراقبة"
+        trade_type_color = BLUE
 
     cards = [
         ("الاتجاه", [direction_value], direction_color, True),
@@ -1545,7 +1560,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         ("التوافق", [f"{frame_count}/4"], PURPLE, False),
         ("النموذج", pattern_lines, CYAN, True),
         ("الاحتمال", [f"{probability}%"], GOLD, False),
-        ("الجلسة", [session], BLUE, True),
+        ("نوع الصفقة", [trade_type], trade_type_color, True),
     ]
 
     margin = 28
@@ -1830,7 +1845,7 @@ def _select_directional_order_block(
 
 def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
     left, top, right, bottom = CHART
-    if not candles or str(analysis.get("draw_mode") or "watch") == "watch":
+    if not candles:
         return
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -1844,6 +1859,9 @@ def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: 
 
     # Order Block remains secondary: compact, recent, strong, and near entry.
     selected_order_block = _select_directional_order_block(analysis, candles, focal_price, atr)
+    if selected_order_block is None:
+        detected_blocks = _detect_order_blocks(candles)
+        selected_order_block = detected_blocks[-1] if detected_blocks else None
     if selected_order_block is not None:
         index, low, high, strength = selected_order_block
         if not (high < price_min or low > price_max):
@@ -2064,72 +2082,120 @@ def _draw_trade_axis_card(
 
 
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
-    """Return mode and visible axis cards without drawing them."""
+    """Return the fixed three-state trade cards: صفقة، بشرط، أو مراقبة."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-    if direction not in {"صاعد", "هابط"}:
-        return draw_mode, []
-
     entry = _number(analysis.get("entry"))
     stop = _number(analysis.get("stop_loss"))
-    if entry is None or not _is_visible_price(entry, price_min, price_max):
-        return draw_mode, []
 
-    entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Trigger", entry, entry_y, BLUE)]
-        if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Invalid", stop, _price_y(stop, price_min, price_max), RED))
+        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+        buy_trigger = _number(analysis.get("watch_buy_trigger"))
+        sell_trigger = _number(analysis.get("watch_sell_trigger"))
+        if buy_trigger is not None and _is_visible_price(buy_trigger, price_min, price_max):
+            items.append(("تفعيل شراء", buy_trigger, _price_y(buy_trigger, price_min, price_max), GREEN))
+        if sell_trigger is not None and _is_visible_price(sell_trigger, price_min, price_max):
+            items.append(("تفعيل بيع", sell_trigger, _price_y(sell_trigger, price_min, price_max), RED))
         return draw_mode, items
 
-    items = [("Entry", entry, entry_y, BLUE)]
+    if direction not in {"صاعد", "هابط"} or entry is None or not _is_visible_price(entry, price_min, price_max):
+        return draw_mode, []
+
+    if draw_mode == "conditional":
+        items = [("تفعيل", entry, _price_y(entry, price_min, price_max), ORANGE)]
+        if stop is not None and _is_visible_price(stop, price_min, price_max):
+            items.append(("إلغاء", stop, _price_y(stop, price_min, price_max), RED))
+        return draw_mode, items
+
+    items = [("دخول", entry, _price_y(entry, price_min, price_max), GREEN if direction == "صاعد" else RED)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
-        items.append(("SL", stop, _price_y(stop, price_min, price_max), RED))
-    for key in ("target_1", "target_2", "target_3"):
+        items.append(("وقف", stop, _price_y(stop, price_min, price_max), RED))
+    for index, key in enumerate(("target_1", "target_2", "target_3"), start=1):
         target = _number(analysis.get(key))
         if target is not None and _is_visible_price(target, price_min, price_max):
-            items.append(("TP", target, _price_y(target, price_min, price_max), TP_GREEN))
+            items.append((f"TP{index}", target, _price_y(target, price_min, price_max), TP_GREEN))
     return draw_mode, items
+
+def _draw_projected_candle(
+    draw: ImageDraw.ImageDraw, x: int, open_price: float, close_price: float,
+    price_min: float, price_max: float, body_width: int = 11,
+) -> None:
+    span = max(0.12, abs(close_price - open_price))
+    wick = max(0.08, span * 0.28)
+    bullish = close_price >= open_price
+    color = GREEN if bullish else RED
+    high = max(open_price, close_price) + wick
+    low = min(open_price, close_price) - wick
+    open_y = _price_y(open_price, price_min, price_max)
+    close_y = _price_y(close_price, price_min, price_max)
+    high_y = _price_y(high, price_min, price_max)
+    low_y = _price_y(low, price_min, price_max)
+    draw.line((x, high_y, x, low_y), fill=color, width=2)
+    y1, y2 = sorted((open_y, close_y))
+    if y2 - y1 < 4:
+        y2 = y1 + 4
+    draw.rectangle((x - body_width // 2, y1, x + body_width // 2, y2), fill=color, outline=color)
+
+
+def _draw_expected_candles(
+    draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int
+) -> None:
+    """Add prediction candles only; never alter the uploaded chart candles."""
+    mode = str(analysis.get("draw_mode") or "watch")
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return
+    x0 = min(CHART[2] - 92, candle_right + 24)
+    gap = 21
+
+    def path(start: float, end: float, first_x: int) -> None:
+        steps = 3
+        previous = start
+        for i in range(steps):
+            close = start + (end - start) * (i + 1) / steps
+            _draw_projected_candle(draw, first_x + i * gap, previous, close, price_min, price_max)
+            previous = close
+
+    if mode == "watch":
+        buy_trigger = _number(analysis.get("watch_buy_trigger"))
+        sell_trigger = _number(analysis.get("watch_sell_trigger"))
+        if buy_trigger is not None:
+            buy_end = min(price_max, buy_trigger + max(0.35, (price_max - price_min) * 0.035))
+            path(buy_trigger, buy_end, x0)
+        if sell_trigger is not None:
+            sell_end = max(price_min, sell_trigger - max(0.35, (price_max - price_min) * 0.035))
+            path(sell_trigger, sell_end, x0 + 68)
+        return
+
+    entry = _number(analysis.get("entry"))
+    if entry is None:
+        return
+    target = _number(analysis.get("target_2")) or _number(analysis.get("target_1"))
+    if target is None:
+        direction = str(analysis.get("analysis_direction") or "صاعد")
+        target = entry + (0.8 if direction == "صاعد" else -0.8)
+    path(entry, target, x0)
 
 
 def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int) -> None:
-    left, top, right, bottom = CHART
-    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     draw_mode, items = _trade_display_items(analysis, price_min, price_max)
-    if not items or direction not in {"صاعد", "هابط"}:
+    if not items:
+        _draw_expected_candles(draw, analysis, price_min, price_max, candle_right)
         return
 
-    trade_line_left = min(right - 165, max(candle_right + 8, int(left + (right - left) * 0.58)))
+    trade_line_left = min(CHART[2] - 165, max(candle_right + 8, int(CHART[0] + (CHART[2] - CHART[0]) * 0.58)))
     dashed = draw_mode in {"watch", "conditional"}
-    for label, _price, exact_y, color in items:
+    for _label, _price, exact_y, color in items:
         if dashed:
-            _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
+            _dash_line(draw, (trade_line_left, exact_y), (CHART[2], exact_y), color, width=2, dash=10, gap=7)
         else:
-            draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
+            draw.line((trade_line_left, exact_y, CHART[2], exact_y), fill=color, width=2)
 
     lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
     for index, (label, price, exact_y, color) in enumerate(items):
-        _draw_trade_axis_card(
-            draw,
-            label=label,
-            price=price,
-            exact_y=exact_y,
-            color=color,
-            x_lane=lanes.get(index, 0),
-        )
+        _draw_trade_axis_card(draw, label=label, price=price, exact_y=exact_y, color=color, x_lane=lanes.get(index, 0))
 
-    # No directional arrow in watch mode. Conditional arrows are dashed;
-    # confirmed/active arrows are solid.
-    if draw_mode != "watch":
-        entry_item = next((item for item in items if item[0] == "Entry"), None)
-        targets = [item for item in items if item[0] == "TP"]
-        if entry_item and targets:
-            entry_y = entry_item[2]
-            target_y = targets[-1][2]
-            start_point = (trade_line_left + 15, entry_y)
-            end_point = (max(start_point[0] + 55, right - 130), target_y)
-            _draw_arrow(draw, start_point, end_point, TP_GREEN if direction == "صاعد" else RED, dashed=draw_mode == "conditional")
-
+    _draw_expected_candles(draw, analysis, price_min, price_max, candle_right)
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
     raw = os.getenv(name, default).strip()

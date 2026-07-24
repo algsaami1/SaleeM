@@ -1123,6 +1123,17 @@ def _validate_analysis(
     elif not scenario:
         scenario = "استمرار السيناريو بعد تحقق شرط الدخول"
 
+    # في وضع المراقبة نعرض أقرب احتمالين فقط: شراء فوق أقرب مقاومة وبيع تحت أقرب دعم.
+    resistance_prices = sorted(
+        [float(level.get("price")) for level in resistances if _number(level.get("price")) is not None and float(level.get("price")) > current]
+    )
+    support_prices = sorted(
+        [float(level.get("price")) for level in supports if _number(level.get("price")) is not None and float(level.get("price")) < current],
+        reverse=True,
+    )
+    watch_buy_trigger = round(resistance_prices[0], 2) if resistance_prices else round(current + max(0.35, abs(current - stop) * 0.45), 2)
+    watch_sell_trigger = round(support_prices[0], 2) if support_prices else round(current - max(0.35, abs(current - stop) * 0.45), 2)
+
     data.update(
         {
             "chart_readable": bool(image_was_readable and image_current is not None),
@@ -1140,6 +1151,9 @@ def _validate_analysis(
             "direction": direction,
             "analysis_direction": working_direction,
             "trade_side": "مراقبة" if draw_mode == "watch" else ("شراء" if working_direction == "صاعد" else "بيع"),
+            "trade_type": "مراقبة" if draw_mode == "watch" else ("بشرط" if draw_mode == "conditional" else ("شراء" if working_direction == "صاعد" else "بيع")),
+            "watch_buy_trigger": watch_buy_trigger,
+            "watch_sell_trigger": watch_sell_trigger,
             "trade_probability": probability,
             "draw_mode": draw_mode,
             "support_levels": supports,
