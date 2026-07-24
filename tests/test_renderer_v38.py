@@ -16,6 +16,8 @@ from app.engine.renderer import (
     _fit_cover,
     _detect_top_trade_controls_band,
     _hide_top_trade_controls,
+    _header_pattern_lines,
+    _trade_display_items,
     _exact_image_axis_model,
     _price_range,
     _price_y,
@@ -447,3 +449,23 @@ def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
     assert cleaned.getpixel((900, (top + bottom) // 2))[:3] == (3, 17, 35)
     # Chart body below the toolbar remains untouched.
     assert cleaned.getpixel((450, 180))[:3] == (245, 245, 245)
+
+
+def test_header_pattern_uses_two_lines_for_long_break_retest_name():
+    assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
+
+
+def test_watch_mode_exposes_trigger_and_invalid_only():
+    analysis = _analysis("صاعد")
+    analysis["draw_mode"] = "watch"
+    mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
+    assert mode == "watch"
+    assert [item[0] for item in items] == ["Trigger", "Invalid"]
+
+
+def test_conditional_mode_keeps_entry_sl_and_three_targets():
+    analysis = _analysis("صاعد")
+    analysis["draw_mode"] = "conditional"
+    mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
+    assert mode == "conditional"
+    assert [item[0] for item in items] == ["Entry", "SL", "TP", "TP", "TP"]
