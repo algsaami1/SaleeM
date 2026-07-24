@@ -76,6 +76,13 @@ VISIBLE_HEIGHT_RATIO = SOURCE_VISIBLE_HEIGHT / REFERENCE_SCREENSHOT_HEIGHT
 FULL_SCREEN_ASPECT = REFERENCE_SCREENSHOT_WIDTH / REFERENCE_SCREENSHOT_HEIGHT
 VISIBLE_VIEWPORT_ASPECT = SOURCE_VISIBLE_WIDTH / SOURCE_VISIBLE_HEIGHT
 
+# إخفاء لوحة التداول العلوية التي قد تحتوي على BUY/SELL وحقل اللوت.
+# يُكتشف الشريط الأزرق داخل أعلى الصورة، ثم تُغطى كامل المنطقة الأفقية
+# باللون الأسود حتى لا تبقى أجزاء بيضاء مثل خانة 0.01.
+TOP_CONTROL_SCAN_RATIO = 0.18
+TOP_CONTROL_MIN_BLUE_RATIO = 0.035
+TOP_CONTROL_PADDING_RATIO = 0.008
+
 # قاعدة الإظهار النهائية: نقص قليلًا من أعلى وأسفل ويسار الجزء الملتقط،
 # ثم نضعه مزاحًا لليسار داخل الكانفس حتى تتوافر مساحة المحور اليميني الإضافي.
 
@@ -1312,10 +1319,70 @@ def _prepare_chart_background(
     return prepared, detected_absolute_y, visible_candles
 
 
+def _is_broker_trade_blue(pixel: tuple[int, int, int, int]) -> bool:
+    r, g, b, a = pixel
+    if a < 120 or b < 135:
+        return False
+    # MT5 trade panels use a saturated royal/cobalt blue.
+    return b >= r + 45 and b >= g + 18 and (max(r, g, b) - min(r, g, b)) >= 55
+
+
+def _detect_top_trade_controls_band(prepared: Image.Image) -> tuple[int, int] | None:
+    """Detect the top BUY/SELL/lot toolbar without touching the chart body."""
+    width, height = prepared.size
+    if width < 120 or height < 160:
+        return None
+
+    scan_bottom = max(32, int(height * TOP_CONTROL_SCAN_RATIO))
+    step_x = 2 if width >= 700 else 1
+    min_blue = max(6, int((width / step_x) * TOP_CONTROL_MIN_BLUE_RATIO))
+    pixels = prepared.load()
+    active_rows: list[int] = []
+    for y in range(scan_bottom):
+        blue_count = 0
+        for x in range(0, width, step_x):
+            if _is_broker_trade_blue(pixels[x, y]):
+                blue_count += 1
+        if blue_count >= min_blue:
+            active_rows.append(y)
+
+    if not active_rows:
+        return None
+
+    # Select the first meaningful contiguous band near the top.
+    bands: list[list[int]] = []
+    for y in active_rows:
+        if not bands or y > bands[-1][-1] + 2:
+            bands.append([y])
+        else:
+            bands[-1].append(y)
+    band = max(bands, key=len)
+    if len(band) < max(3, int(height * 0.004)):
+        return None
+
+    padding = max(8, int(height * TOP_CONTROL_PADDING_RATIO))
+    top = max(0, band[0] - padding)
+    bottom = min(height, band[-1] + padding + 1)
+    return top, bottom
+
+
+def _hide_top_trade_controls(prepared: Image.Image) -> Image.Image:
+    """Hide blue BUY/SELL boxes and the lot field as one complete row."""
+    band = _detect_top_trade_controls_band(prepared)
+    if band is None:
+        return prepared
+    cleaned = prepared.copy()
+    draw = ImageDraw.Draw(cleaned)
+    top, bottom = band
+    draw.rectangle((0, top, cleaned.width, bottom), fill=BG)
+    return cleaned
+
+
 def _paste_prepared_chart_background(image: Image.Image, prepared: Image.Image) -> None:
-    """Paste native chart pixels unchanged; leave every other area black."""
+    """Paste chart+source axis after hiding broker trade controls."""
     visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
-    image.alpha_composite(prepared, (visible_left, visible_top))
+    cleaned = _hide_top_trade_controls(prepared)
+    image.alpha_composite(cleaned, (visible_left, visible_top))
 
     # The source image's own axis remains visible in the final part. The new
     # SaleeM axis is a separate dark strip immediately to its right.

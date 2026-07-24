@@ -14,6 +14,8 @@ from app.engine.renderer import (
     _dynamic_image_axis_range,
     _estimate_visible_candle_count,
     _fit_cover,
+    _detect_top_trade_controls_band,
+    _hide_top_trade_controls,
     _exact_image_axis_model,
     _price_range,
     _price_y,
@@ -426,3 +428,22 @@ def test_exact_axis_range_maps_clean_source_labels_near_their_original_y():
         fitted_y = _price_y(price, low, high)
         source_y = CHART[1] + round(chart_height * ratio)
         assert abs(fitted_y - source_y) <= 2
+
+
+def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
+    image = Image.new("RGBA", (1111, 2243), (245, 245, 245, 255))
+    # Simulate blue BUY/SELL boxes separated by a white lot field.
+    for y in range(18, 118):
+        for x in range(0, 250):
+            image.putpixel((x, y), (55, 118, 235, 255))
+        for x in range(600, 1111):
+            image.putpixel((x, y), (55, 118, 235, 255))
+    band = _detect_top_trade_controls_band(image)
+    assert band is not None
+    cleaned = _hide_top_trade_controls(image)
+    top, bottom = band
+    assert cleaned.getpixel((100, (top + bottom) // 2))[:3] == (0, 0, 0)
+    assert cleaned.getpixel((450, (top + bottom) // 2))[:3] == (0, 0, 0)
+    assert cleaned.getpixel((900, (top + bottom) // 2))[:3] == (0, 0, 0)
+    # Chart body below the toolbar remains untouched.
+    assert cleaned.getpixel((450, 180))[:3] == (245, 245, 245)
