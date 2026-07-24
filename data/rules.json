@@ -1,5 +1,5 @@
 {
-  "version": "0.2",
+  "version": "0.1",
   "market": "GOLD",
   "default_timeframe": "M5",
   "rules": [
@@ -35,27 +35,5 @@
       ],
       "base_score": 68
     }
-  ],
-  "display_policy": {
-    "states": [
-      "صفقة",
-      "بشرط",
-      "مراقبة"
-    ],
-    "preserve_original_chart": true,
-    "forecast_candles_only": true,
-    "arrows": false,
-    "visible_zones": [
-      "support",
-      "resistance",
-      "OB",
-      "FVG"
-    ],
-    "transaction_type_colors": {
-      "بشرط": "orange",
-      "مراقبة": "blue",
-      "شراء": "green",
-      "بيع": "red"
-    }
-  }
+  ]
 }
