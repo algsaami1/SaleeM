@@ -1438,16 +1438,15 @@ def _paste_prepared_chart_background(image: Image.Image, prepared: Image.Image) 
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
-    d.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(3, 12, 29, 255))
+    d.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(242, 242, 244, 255))
     d.line((visible_right - 1, visible_top, visible_right - 1, visible_bottom), fill=(83, 105, 145, 220), width=2)
     image.alpha_composite(overlay)
 
-    _copy_source_axis_to_right_margin(image, cleaned)
 
     edge_overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     e = ImageDraw.Draw(edge_overlay)
-    e.line((axis_left - 1, axis_top, axis_left - 1, axis_bottom), fill=(83, 105, 145, 165), width=1)
-    e.line((axis_right - 1, axis_top, axis_right - 1, axis_bottom), fill=(83, 105, 145, 180), width=1)
+    e.line((axis_left - 1, axis_top, axis_left - 1, axis_bottom), fill=(44, 55, 88, 220), width=2)
+    e.line((axis_right - 1, axis_top, axis_right - 1, axis_bottom), fill=(210, 214, 222, 255), width=1)
     image.alpha_composite(edge_overlay)
 
 
@@ -2093,30 +2092,25 @@ def _draw_trade_axis_card(
 
 
 
-def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 44, min_gap: int = 10) -> list[int]:
-    """Move cards vertically inside the right axis while keeping order stable."""
+def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 44, min_gap: int = 2) -> list[int]:
+    """Move cards vertically inside the right axis, overlap is allowed if needed."""
     _axis_left, axis_top, _axis_right, axis_bottom = _saleem_axis_box()
     lower = axis_top + card_height // 2 + 6
     upper = axis_bottom - card_height // 2 - 6
-    centers = [max(lower, min(upper, int(item[2]))) for item in items]
+    if not items:
+        return []
+    exact = [int(item[2]) for item in items]
+    centers = [max(lower, min(upper, y)) for y in exact]
     ordered = sorted(range(len(items)), key=lambda idx: centers[idx])
-    for pos, idx in enumerate(ordered):
-        if pos == 0:
-            centers[idx] = max(lower, centers[idx])
-            continue
+    for pos in range(1, len(ordered)):
         prev_idx = ordered[pos - 1]
-        centers[idx] = max(centers[idx], centers[prev_idx] + card_height + min_gap)
-    for pos in range(len(ordered) - 2, -1, -1):
         idx = ordered[pos]
-        next_idx = ordered[pos + 1]
-        max_allowed = centers[next_idx] - (card_height + min_gap)
-        centers[idx] = min(centers[idx], max_allowed)
-    shift = min(0, lower - min(centers, default=lower))
-    if shift:
-        centers = [c + shift for c in centers]
-    overflow = max(centers, default=upper) - upper
+        min_center = centers[prev_idx] + min_gap
+        if centers[idx] < min_center:
+            centers[idx] = min_center
+    overflow = max(centers) - upper
     if overflow > 0:
-        centers = [c - overflow for c in centers]
+        centers = [max(lower, c - overflow) for c in centers]
     return centers
 
 
@@ -2144,8 +2138,9 @@ def _draw_trade_axis_card_stacked(
     if center_y != exact_y:
         draw.line((connector_x, exact_y, connector_x, center_y), fill=color, width=2)
     draw.line((connector_x, center_y, x1, center_y), fill=color, width=2)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=3, fill=(255, 255, 255, 252), outline=color, width=2)
-    draw.text(((x1 + x2) // 2, center_y), text, font=F_TRADE_SMALL_LATIN, fill=(12, 27, 48, 255), anchor="mm")
+    fill = (color[0], color[1], color[2], 24)
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=3, fill=fill, outline=color, width=2)
+    draw.text(((x1 + x2) // 2, center_y), text, font=F_TRADE_SMALL_LATIN, fill=color, anchor="mm")
     return x1, y1, x2, y2
 
 
@@ -2156,44 +2151,35 @@ def _draw_projection_candles(
     price_max: float,
     candle_right: int,
 ) -> None:
+    """Draw exactly three projected candles, each extending toward one TP."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     if draw_mode == "watch" or direction not in {"صاعد", "هابط"}:
         return
-    entry = _number(analysis.get("entry"))
     current = _number(analysis.get("current_price"))
-    target = _number(analysis.get("target_3") or analysis.get("target_2") or analysis.get("target_1"))
-    if entry is None or current is None or target is None:
+    targets = [_number(analysis.get("target_1")), _number(analysis.get("target_2")), _number(analysis.get("target_3"))]
+    if current is None or any(t is None for t in targets):
         return
 
     left, _top, right, _bottom = CHART
-    start_x = max(candle_right + 10, int(left + (right - left) * 0.58))
-    end_x = right - 34
-    if end_x - start_x < 54:
+    start_x = max(candle_right + 10, int(left + (right - left) * 0.60))
+    end_x = right - 36
+    if end_x - start_x < 42:
         return
-    count = 7
+    count = 3
     slot = (end_x - start_x) / count
-    body_w = max(10, min(16, int(slot * 0.46)))
-    prices: list[tuple[float, float, float, float]] = []
+    body_w = max(12, min(18, int(slot * 0.42)))
     prev_close = current
-    span = target - current
-    for idx in range(count):
-        step = span * ((idx + 1) / count)
-        ideal_close = current + step
+    for idx, target in enumerate(targets):
+        assert target is not None
+        open_ = prev_close
+        close = target
         if direction == "صاعد":
-            open_ = prev_close - (0.10 if idx % 3 == 1 else -0.06)
-            close = max(open_ + 0.04, ideal_close)
-            high = close + 0.18
-            low = open_ - 0.15
+            high = max(open_, close) + 0.16
+            low = min(open_, close) - 0.10
         else:
-            open_ = prev_close + (0.10 if idx % 3 == 1 else -0.06)
-            close = min(open_ - 0.04, ideal_close)
-            high = open_ + 0.15
-            low = close - 0.18
-        prices.append((open_, high, low, close))
-        prev_close = close
-
-    for idx, (open_, high, low, close) in enumerate(prices):
+            high = max(open_, close) + 0.10
+            low = min(open_, close) - 0.16
         x = int(start_x + slot * (idx + 0.5))
         bullish = close >= open_
         color = GREEN if bullish else RED
@@ -2206,6 +2192,7 @@ def _draw_projection_candles(
         if y2 - y1 < 3:
             y2 = y1 + 3
         draw.rectangle((x - body_w // 2, y1, x + body_w // 2, y2), fill=color, outline=color)
+        prev_close = close
 
 
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
