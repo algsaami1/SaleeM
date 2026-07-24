@@ -454,23 +454,25 @@ def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
 
 
 def test_header_pattern_uses_two_lines_for_long_break_retest_name():
-    assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
+    assert _header_pattern_lines("كسر وإعادة اختبار") == ["Breakout", "Retest"]
 
 
-def test_watch_mode_exposes_trigger_and_invalid_only():
+def test_watch_mode_exposes_two_potential_trade_triggers():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
+    analysis["watch_buy_trigger"] = analysis["current_price"] + 1
+    analysis["watch_sell_trigger"] = analysis["current_price"] - 1
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["Trigger", "Invalid"]
+    assert [item[0] for item in items] == ["Buy", "Sell"]
 
 
-def test_conditional_mode_keeps_entry_sl_and_three_targets():
+def test_conditional_mode_exposes_activation_and_cancellation_only():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "conditional"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "conditional"
-    assert [item[0] for item in items] == ["Entry", "SL", "TP", "TP", "TP"]
+    assert [item[0] for item in items] == ["Active", "Cancel"]
 
 
 def test_overlapping_trade_cards_move_horizontally_only():

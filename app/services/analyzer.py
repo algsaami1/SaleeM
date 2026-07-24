@@ -1119,9 +1119,51 @@ def _validate_analysis(
 
     scenario = " ".join(str(data.get("scenario") or "").split())[:70]
     if draw_mode == "watch":
-        scenario = "مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد"
+        scenario = "مراقبة حتى يظهر تفعيل واضح للشراء أو البيع"
     elif not scenario:
-        scenario = "استمرار السيناريو بعد تحقق شرط الدخول"
+        scenario = "استمرار الحركة بعد تحقق التفعيل"
+
+    # قاعدة المراقبة الدائمة: إظهار أقرب احتمالين غير مؤكدين للشراء والبيع.
+    atr = max(0.20, _atr(candles))
+    resistance_prices = sorted(
+        [float(level.get("price")) for level in resistances if _number(level.get("price")) is not None and float(level.get("price")) > current]
+    )
+    support_prices = sorted(
+        [float(level.get("price")) for level in supports if _number(level.get("price")) is not None and float(level.get("price")) < current],
+        reverse=True,
+    )
+    watch_buy_trigger = round(resistance_prices[0], 2) if resistance_prices else round(current + max(0.30, atr * 0.42), 2)
+    watch_sell_trigger = round(support_prices[0], 2) if support_prices else round(current - max(0.30, atr * 0.42), 2)
+    watch_buy_cancel = round(support_prices[0], 2) if support_prices and support_prices[0] < watch_buy_trigger else round(watch_buy_trigger - max(0.65, atr * 0.90), 2)
+    watch_sell_cancel = round(resistance_prices[0], 2) if resistance_prices and resistance_prices[0] > watch_sell_trigger else round(watch_sell_trigger + max(0.65, atr * 0.90), 2)
+    buy_risk = max(0.35, watch_buy_trigger - watch_buy_cancel)
+    sell_risk = max(0.35, watch_sell_cancel - watch_sell_trigger)
+    watch_setups = [
+        {
+            "side": "شراء",
+            "direction": "صاعد",
+            "activation": watch_buy_trigger,
+            "cancellation": watch_buy_cancel,
+            "visual_target": round(watch_buy_trigger + buy_risk * 1.35, 2),
+            "probability": buy,
+            "confirmed": False,
+        },
+        {
+            "side": "بيع",
+            "direction": "هابط",
+            "activation": watch_sell_trigger,
+            "cancellation": watch_sell_cancel,
+            "visual_target": round(watch_sell_trigger - sell_risk * 1.35, 2),
+            "probability": sell,
+            "confirmed": False,
+        },
+    ]
+    result_case = "watch" if draw_mode == "watch" else ("trade" if draw_mode == "confirmed" else "conditional")
+    transaction_type = (
+        "مراقبة"
+        if draw_mode == "watch"
+        else ("بشرط" if draw_mode == "conditional" else ("شراء" if working_direction == "صاعد" else "بيع"))
+    )
 
     data.update(
         {
@@ -1140,6 +1182,16 @@ def _validate_analysis(
             "direction": direction,
             "analysis_direction": working_direction,
             "trade_side": "مراقبة" if draw_mode == "watch" else ("شراء" if working_direction == "صاعد" else "بيع"),
+            "trade_type": transaction_type,
+            "transaction_type": transaction_type,
+            "result_case": result_case,
+            "activation_price": round(entry, 2),
+            "cancellation_price": round(stop, 2),
+            "watch_buy_trigger": watch_buy_trigger,
+            "watch_sell_trigger": watch_sell_trigger,
+            "watch_buy_cancel": watch_buy_cancel,
+            "watch_sell_cancel": watch_sell_cancel,
+            "watch_setups": watch_setups if draw_mode == "watch" else [],
             "trade_probability": probability,
             "draw_mode": draw_mode,
             "support_levels": supports,
@@ -1226,10 +1278,13 @@ def _analyze(path: Path) -> dict[str, Any]:
 يجب أن يطابق current_price_y_ratio الخط الأفقي الحقيقي الخارج من ملصق السعر الحالي، لأن البرنامج سيستخدمه كنقطة تثبيت لجميع خطوط الرسم ومحور السعر الأيمن.
 اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي. إذا لم تستطع قراءة نقاط محور متناسقة، فأعد image_axis_labels=[] ولا تخمّن الأرقام. لا تفشل بسبب نقص بعض القراءات؛ أعد أفضل ما يمكنك قراءته من بوكس الشارت، فالتطبيق سيكمل بالاحتياطات الداخلية بدل إيقاف التحليل.
 
-التحليل المطلوب:
-- اختر سيناريو واحدًا فقط، وهو الأعلى احتمالًا.
+القاعدة الدائمة لناتج التحليل:
+- لا توجد إلا ثلاث حالات: صفقة، بشرط، مراقبة.
+- صفقة: عندما تكون الإشارة قوية وواضحة؛ حدد شراء أو بيع ودخولًا ووقفًا وTP1 وTP2 وTP3.
+- بشرط: عندما تحتاج الفرصة إلى تأكيد؛ اختر أقرب اتجاه واحد فقط (شراء مشروط أو بيع مشروط)، وحدد أقرب تفعيل وإلغاء.
+- مراقبة: عندما لا تكتمل الشروط؛ لا تُنشئ صفقة مؤكدة، وحافظ على احتمال شراء واحتمال بيع غير مؤكدين ليعرضهما البرنامج معًا.
 - BUY وSELL مجموعهما 100، ولا تستخدم 0 أو 100.
-- عند ضعف التأكيد، لا تقل لا توجد صفقة؛ أعطِ أقرب نقطة تفعيل مشروطة مع اتجاه متوقع.
+- لا تستخدم كلمة «سيناريو» في النص الظاهر للمستخدم؛ استخدم «تفعيل» و«إلغاء».
 - حدد أقرب دعمين وأقرب مقاومتين مهمين اعتمادًا على بيانات السوق المرفقة وموضع السعر الظاهر في الصورة.
 - strength من 0 إلى 100 حسب عدد اللمسات، قوة الرفض، حداثة المستوى، وتوافقه مع بنية السوق.
 - touches عدد اللمسات أو الاختبارات الواضحة.
@@ -1243,7 +1298,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
 - confirmation وscenario وnote نصوص عربية قصيرة وواضحة.
 
-النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. السهم يتبع الاتجاه الفعلي صعودًا أو هبوطًا ولا يكون صاعدًا افتراضيًا. يظهر Order Block كعنصر ثانوي فقط: أسفل السعر في السيناريو الصاعد أو أعلى السعر في السيناريو الهابط. ثم يرسم FVG وشريط الجلسات والدخول والوقف وثلاثة أهداف والملاحظات بوضوح.
+النتيجة النهائية تُبنى كطبقات فوق صورة الشارت الأصلية من دون تغييرها أو إعادة رسم شموعها. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode تحويلًا خطيًا واحدًا لجميع الأسعار، وإلا يستخدم Reconstructed Axis Mode. تُضاف فقط شموع التوقع بعد آخر شمعة حقيقية وقريبة من بداية الانطلاق: في حالة صفقة تبدأ بعد آخر شمعة، وفي حالة بشرط تبدأ من سعر التفعيل، وفي المراقبة يظهر مساران صغيران غير مؤكدين للشراء والبيع. يمنع رسم الأسهم أو المسارات المنحنية أو كتابة كلمة «سيناريو». يجب أن تبقى الدعوم والمقاومات وOrder Block وFVG ظاهرة دائمًا. بطاقات التنفيذ تستخدم الكلمات العربية «تفعيل» و«إلغاء» في الحالة المشروطة أو المراقبة.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}
