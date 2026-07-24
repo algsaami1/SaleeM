@@ -457,20 +457,20 @@ def test_header_pattern_uses_two_lines_for_long_break_retest_name():
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
 
 
-def test_watch_mode_exposes_active_and_cancel_only():
+def test_watch_mode_exposes_trigger_and_invalid_only():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["Active", "Cancel"]
+    assert [item[0] for item in items] == ["Trigger", "Invalid"]
 
 
-def test_conditional_mode_keeps_compact_axis_cards():
+def test_conditional_mode_keeps_entry_sl_and_three_targets():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "conditional"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "conditional"
-    assert [item[0] for item in items] == ["Entry", "Active", "SL", "Cancel", "TP1", "TP2", "TP3"]
+    assert [item[0] for item in items] == ["Entry", "SL", "TP", "TP", "TP"]
 
 
 def test_overlapping_trade_cards_move_horizontally_only():

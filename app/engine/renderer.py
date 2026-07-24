@@ -1438,15 +1438,16 @@ def _paste_prepared_chart_background(image: Image.Image, prepared: Image.Image) 
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
     axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
-    d.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(242, 242, 244, 255))
+    d.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(3, 12, 29, 255))
     d.line((visible_right - 1, visible_top, visible_right - 1, visible_bottom), fill=(83, 105, 145, 220), width=2)
     image.alpha_composite(overlay)
 
+    _copy_source_axis_to_right_margin(image, cleaned)
 
     edge_overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     e = ImageDraw.Draw(edge_overlay)
-    e.line((axis_left - 1, axis_top, axis_left - 1, axis_bottom), fill=(44, 55, 88, 220), width=2)
-    e.line((axis_right - 1, axis_top, axis_right - 1, axis_bottom), fill=(210, 214, 222, 255), width=1)
+    e.line((axis_left - 1, axis_top, axis_left - 1, axis_bottom), fill=(83, 105, 145, 165), width=1)
+    e.line((axis_right - 1, axis_top, axis_right - 1, axis_bottom), fill=(83, 105, 145, 180), width=1)
     image.alpha_composite(edge_overlay)
 
 
@@ -1860,53 +1861,56 @@ def _select_directional_order_block(
 
 
 def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
-    """Always show one OB and one FVG as clear rectangular blocks."""
     left, top, right, bottom = CHART
-    if not candles:
+    if not candles or str(analysis.get("draw_mode") or "watch") == "watch":
         return
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
-    zone_start = max(candle_right + 10, int(left + (right - left) * 0.50))
     zone_end = right - 18
     reference = float(candles[-1]["close"])
     entry = _number(analysis.get("entry"))
     focal_price = entry if entry is not None else reference
     atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles])
+    recent_floor = max(0, len(candles) - 14)
 
-    def _fit_zone_rect(index: int, low: float, high: float, *, width: int, min_h: int, max_h: int):
-        x1 = max(zone_start, int(left + slot * max(0, index - 0.2)))
-        x2 = min(zone_end, max(x1 + width, zone_end - 18))
-        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
-        center_y = (y1 + y2) // 2
-        height = max(min_h, min(max_h, y2 - y1))
-        return x1, center_y - height // 2, x2, center_y + height // 2
-
-    order_block = _select_directional_order_block(analysis, candles, focal_price, atr)
-    if order_block is None:
-        detected = _detect_order_blocks(candles)
-        if detected:
-            order_block = sorted(
-                detected,
-                key=lambda zone: (abs(((zone[1] + zone[2]) / 2) - focal_price), -zone[3], -zone[0]),
-            )[0]
-    if order_block is not None:
-        index, low, high, _strength = order_block
+    # Order Block remains secondary: compact, recent, strong, and near entry.
+    selected_order_block = _select_directional_order_block(analysis, candles, focal_price, atr)
+    if selected_order_block is not None:
+        index, low, high, strength = selected_order_block
         if not (high < price_min or low > price_max):
-            x1, y1, x2, y2 = _fit_zone_rect(index, low, high, width=220, min_h=32, max_h=92)
-            ld.rectangle((x1, y1, x2, y2), fill=(90, 143, 255, 20), outline=(110, 153, 255, 110), width=1)
-            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "OB", font=F_ZONE, fill=(115, 152, 250, 220), anchor="mm")
+            x1 = max(left + 150, int(left + slot * max(0, index - 0.25)))
+            x2 = min(zone_end, x1 + 185)
+            y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+            center_y = (y1 + y2) // 2
+            height = max(26, min(88, y2 - y1))
+            y1, y2 = center_y - height // 2, center_y + height // 2
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(75, 99, 190, 24), outline=(100, 139, 255, 96), width=1)
+            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "OB", font=F_ZONE, fill=(185, 207, 255, 210), anchor="mm")
 
-    fvgs = _detect_fvg(candles)
-    selected_fvg: tuple[int, float, float] | None = None
-    if fvgs:
-        selected_fvg = sorted(fvgs, key=lambda zone: (abs(((zone[1] + zone[2]) / 2) - focal_price), -zone[0]))[0]
-    if selected_fvg is not None:
-        index, low, high = selected_fvg
+    # FVG is lighter and smaller; it appears only when recent and close to entry.
+    max_fvg_distance = max(0.8, atr * 2.4)
+    fvg_candidates: list[tuple[float, tuple[int, float, float]]] = []
+    for zone in _detect_fvg(candles):
+        index, low, high = zone
+        center = (low + high) / 2
+        if index < recent_floor or abs(center - focal_price) > max_fvg_distance:
+            continue
+        score = -abs(center - focal_price) + index * 0.02
+        fvg_candidates.append((score, zone))
+    fvg_candidates.sort(key=lambda item: item[0], reverse=True)
+
+    if fvg_candidates:
+        _, (index, low, high) = fvg_candidates[0]
         if not (high < price_min or low > price_max):
-            x1, y1, x2, y2 = _fit_zone_rect(index, low, high, width=190, min_h=28, max_h=74)
-            ld.rectangle((x1, y1, x2, y2), fill=(246, 180, 87, 18), outline=(246, 180, 87, 95), width=1)
-            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=F_ZONE, fill=(246, 180, 87, 220), anchor="mm")
+            x1 = max(left + 150, int(left + slot * max(0, index - 0.2)))
+            x2 = min(zone_end, x1 + 165)
+            y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+            center_y = (y1 + y2) // 2
+            height = max(24, min(66, y2 - y1))
+            y1, y2 = center_y - height // 2, center_y + height // 2
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(244, 169, 62, 24), outline=(244, 169, 62, 105), width=1)
+            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=F_ZONE, fill=(255, 214, 145, 215), anchor="mm")
 
     image.alpha_composite(layer)
 
@@ -2091,140 +2095,8 @@ def _draw_trade_axis_card(
     return x1, y1, x2, y2
 
 
-
-def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 48, min_gap: int = 8) -> list[int]:
-    """Stack cards vertically in a visually comfortable way without overlap."""
-    _axis_left, axis_top, _axis_right, axis_bottom = _saleem_axis_box()
-    lower = axis_top + card_height // 2 + 10
-    upper = axis_bottom - card_height // 2 - 10
-    if not items:
-        return []
-
-    sorted_items = sorted(((idx, int(item[2])) for idx, item in enumerate(items)), key=lambda item: item[1])
-    positions: dict[int, int] = {}
-    prev_center: int | None = None
-    for idx, exact_y in sorted_items:
-        center = max(lower, min(upper, exact_y))
-        if prev_center is not None:
-            center = max(center, prev_center + card_height + min_gap)
-        positions[idx] = center
-        prev_center = center
-
-    overflow = max(0, max(positions.values(), default=upper) - upper)
-    if overflow:
-        positions = {idx: y - overflow for idx, y in positions.items()}
-
-    # if the whole stack still starts too high/low, nudge it back into range.
-    min_center = min(positions.values(), default=lower)
-    if min_center < lower:
-        shift = lower - min_center
-        positions = {idx: y + shift for idx, y in positions.items()}
-
-    # final pass to guarantee non-overlap after shifting.
-    prev_center = None
-    for idx, _exact_y in sorted_items:
-        center = positions[idx]
-        if prev_center is not None and center < prev_center + card_height + min_gap:
-            center = prev_center + card_height + min_gap
-        positions[idx] = center
-        prev_center = center
-    overflow = max(0, max(positions.values(), default=upper) - upper)
-    if overflow:
-        positions = {idx: y - overflow for idx, y in positions.items()}
-
-    return [positions[idx] for idx in range(len(items))]
-
-
-def _draw_trade_axis_card_stacked(
-    draw: ImageDraw.ImageDraw,
-    *,
-    label: str,
-    price: float,
-    exact_y: int,
-    center_y: int,
-    color: tuple[int, int, int, int],
-) -> tuple[int, int, int, int]:
-    axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
-    text = f"{label}-{_fmt_card_price(price)}"
-    card_h = 48
-    pad_x = 14
-    x1 = axis_left + 14
-    x2 = axis_right - 26
-    card_w = x2 - x1
-    shown = _fit_text(draw, text, F_TRADE_SMALL_LATIN, card_w - pad_x * 2, rtl=False)
-    y1 = int(center_y - card_h // 2)
-    y2 = y1 + card_h
-
-    connector_x = x1 - 10
-    draw.line((CHART[2] + 4, exact_y, connector_x, exact_y), fill=color, width=2)
-    if center_y != exact_y:
-        draw.line((connector_x, exact_y, connector_x, center_y), fill=color, width=2)
-    draw.line((connector_x, center_y, x1, center_y), fill=color, width=2)
-
-    fill = (color[0], color[1], color[2], 30)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=fill, outline=color, width=2)
-    # subtle inner highlight for softer look
-    draw.rounded_rectangle((x1 + 1, y1 + 1, x2 - 1, y2 - 1), radius=7, outline=(255, 255, 255, 26), width=1)
-    text_fill = (23, 37, 64, 255)
-    draw.text(((x1 + x2) // 2, center_y), shown, font=F_TRADE_SMALL_LATIN, fill=text_fill, anchor="mm")
-    # color accent line on the left for quick scanning
-    draw.line((x1 + 8, y1 + 8, x1 + 8, y2 - 8), fill=color, width=3)
-    return x1, y1, x2, y2
-
-
-def _draw_projection_candles(
-    draw: ImageDraw.ImageDraw,
-    analysis: dict[str, Any],
-    price_min: float,
-    price_max: float,
-    candle_right: int,
-) -> None:
-    """Draw exactly three projected candles, each extending toward one TP."""
-    draw_mode = str(analysis.get("draw_mode") or "watch")
-    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-    if draw_mode == "watch" or direction not in {"صاعد", "هابط"}:
-        return
-    current = _number(analysis.get("current_price"))
-    targets = [_number(analysis.get("target_1")), _number(analysis.get("target_2")), _number(analysis.get("target_3"))]
-    if current is None or any(t is None for t in targets):
-        return
-
-    left, _top, right, _bottom = CHART
-    start_x = max(candle_right + 10, int(left + (right - left) * 0.60))
-    end_x = right - 36
-    if end_x - start_x < 42:
-        return
-    count = 3
-    slot = (end_x - start_x) / count
-    body_w = max(12, min(18, int(slot * 0.42)))
-    prev_close = current
-    for idx, target in enumerate(targets):
-        assert target is not None
-        open_ = prev_close
-        close = target
-        if direction == "صاعد":
-            high = max(open_, close) + 0.16
-            low = min(open_, close) - 0.10
-        else:
-            high = max(open_, close) + 0.10
-            low = min(open_, close) - 0.16
-        x = int(start_x + slot * (idx + 0.5))
-        bullish = close >= open_
-        color = GREEN if bullish else RED
-        open_y = _price_y(open_, price_min, price_max)
-        close_y = _price_y(close, price_min, price_max)
-        high_y = _price_y(high, price_min, price_max)
-        low_y = _price_y(low, price_min, price_max)
-        draw.line((x, high_y, x, low_y), fill=color, width=2)
-        y1, y2 = sorted((open_y, close_y))
-        if y2 - y1 < 3:
-            y2 = y1 + 3
-        draw.rectangle((x - body_w // 2, y1, x + body_w // 2, y2), fill=color, outline=color)
-        prev_close = close
-
-
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
-    """Return visible execution cards in the compact approved style."""
+    """Return mode and visible axis cards without drawing them."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     if direction not in {"صاعد", "هابط"}:
@@ -2237,20 +2109,18 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 
     entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Active", entry, entry_y, BLUE)]
+        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Trigger", entry, entry_y, BLUE)]
         if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), RED))
+            items.append(("Invalid", stop, _price_y(stop, price_min, price_max), RED))
         return draw_mode, items
 
-    items = [("Entry", entry, entry_y, BLUE), ("Active", entry, entry_y, BLUE)]
+    items = [("Entry", entry, entry_y, BLUE)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
-        stop_y = _price_y(stop, price_min, price_max)
-        items.append(("SL", stop, stop_y, RED))
-        items.append(("Cancel", stop, stop_y, RED))
-    for index, key in enumerate(("target_1", "target_2", "target_3"), start=1):
+        items.append(("SL", stop, _price_y(stop, price_min, price_max), RED))
+    for key in ("target_1", "target_2", "target_3"):
         target = _number(analysis.get(key))
         if target is not None and _is_visible_price(target, price_min, price_max):
-            items.append((f"TP{index}", target, _price_y(target, price_min, price_max), TP_GREEN))
+            items.append(("TP", target, _price_y(target, price_min, price_max), TP_GREEN))
     return draw_mode, items
 
 
@@ -2261,56 +2131,36 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     if not items or direction not in {"صاعد", "هابط"}:
         return
 
-    entry = _number(analysis.get("entry"))
-    stop = _number(analysis.get("stop_loss"))
-    visible_targets = [
-        _number(analysis.get(key))
-        for key in ("target_1", "target_2", "target_3")
-        if _number(analysis.get(key)) is not None and _is_visible_price(_number(analysis.get(key)), price_min, price_max)
-    ]
-    zone_x1 = max(candle_right + 10, int(left + (right - left) * 0.58))
-    zone_x2 = right - 16
-    if entry is not None and stop is not None and _is_visible_price(entry, price_min, price_max) and _is_visible_price(stop, price_min, price_max):
-        layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        ld = ImageDraw.Draw(layer)
-        y1 = _price_y(entry, price_min, price_max)
-        y2 = _price_y(stop, price_min, price_max)
-        top_y, bottom_y = sorted((y1, y2))
-        ld.rectangle((zone_x1, top_y, zone_x2, bottom_y), fill=RED_FILL)
-        if visible_targets:
-            target_price = visible_targets[-1]
-            gy1 = _price_y(entry, price_min, price_max)
-            gy2 = _price_y(target_price, price_min, price_max)
-            top_g, bottom_g = sorted((gy1, gy2))
-            ld.rectangle((zone_x1, top_g, zone_x2, bottom_g), fill=GREEN_FILL)
-        image.alpha_composite(layer)
-        draw = ImageDraw.Draw(image)
-
+    trade_line_left = min(right - 165, max(candle_right + 8, int(left + (right - left) * 0.58)))
     dashed = draw_mode in {"watch", "conditional"}
-    visible_lines = {}
     for label, _price, exact_y, color in items:
-        # one line per visible price is enough even when cards are duplicated.
-        key = (color, exact_y)
-        if key in visible_lines:
-            continue
-        visible_lines[key] = True
         if dashed:
-            _dash_line(draw, (zone_x1, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
+            _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
         else:
-            draw.line((zone_x1, exact_y, right, exact_y), fill=color, width=2)
+            draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
 
-    centers = _vertical_axis_card_centers(items, card_height=48, min_gap=8)
-    for center_y, (label, price, exact_y, color) in zip(centers, items):
-        _draw_trade_axis_card_stacked(
+    lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
+    for index, (label, price, exact_y, color) in enumerate(items):
+        _draw_trade_axis_card(
             draw,
             label=label,
             price=price,
             exact_y=exact_y,
-            center_y=center_y,
             color=color,
+            x_lane=lanes.get(index, 0),
         )
 
-    _draw_projection_candles(draw, analysis, price_min, price_max, candle_right)
+    # No directional arrow in watch mode. Conditional arrows are dashed;
+    # confirmed/active arrows are solid.
+    if draw_mode != "watch":
+        entry_item = next((item for item in items if item[0] == "Entry"), None)
+        targets = [item for item in items if item[0] == "TP"]
+        if entry_item and targets:
+            entry_y = entry_item[2]
+            target_y = targets[-1][2]
+            start_point = (trade_line_left + 15, entry_y)
+            end_point = (max(start_point[0] + 55, right - 130), target_y)
+            _draw_arrow(draw, start_point, end_point, TP_GREEN if direction == "صاعد" else RED, dashed=draw_mode == "conditional")
 
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
