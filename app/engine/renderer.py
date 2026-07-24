@@ -78,9 +78,6 @@ VISIBLE_VIEWPORT_ASPECT = SOURCE_VISIBLE_WIDTH / SOURCE_VISIBLE_HEIGHT
 
 # قاعدة الإظهار النهائية: نقص قليلًا من أعلى وأسفل ويسار الجزء الملتقط،
 # ثم نضعه مزاحًا لليسار داخل الكانفس حتى تتوافر مساحة المحور اليميني الإضافي.
-FINAL_VISIBLE_LEFT_TRIM_RATIO = 0.032
-FINAL_VISIBLE_TOP_TRIM_RATIO = 0.012
-FINAL_VISIBLE_BOTTOM_TRIM_RATIO = 0.018
 
 
 class AxisCalibrationError(RuntimeError):
@@ -1026,17 +1023,16 @@ def _background_axis_shift() -> int:
 
 
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Normalize the uploaded screenshot to one consistent visible viewport.
+    """Return one canonical chart viewport without distorting it.
 
-    The final SaleeM image must always follow the same rule:
+    The rule is intentionally simple and stable:
+    - keep the chart and its original right price axis together,
+    - crop the needed area from the full screenshot using ratios,
+    - do not apply a second crop and do not stretch the result.
 
-    1) keep the chart together with its original right price axis,
-    2) crop a little from the left, top, and bottom,
-    3) place that result left-aligned in the final canvas so the extra right
-       SaleeM axis has its own reserved strip.
-
-    This keeps the same logical area of the chart across devices while still
-    preserving proportions and avoiding any stretching.
+    When scaling is needed for another device size, use one uniform scale only,
+    then right-align and vertically center the crop so the price axis is never
+    removed.
     """
     target_w, target_h = size
     source_w, source_h = source.size
@@ -1045,21 +1041,14 @@ def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
 
     source_aspect = source_w / source_h
 
-    # Case 1: the user already uploaded the isolated visible chart part.
     if abs(source_aspect - VISIBLE_VIEWPORT_ASPECT) / VISIBLE_VIEWPORT_ASPECT <= 0.05:
-        viewport = source
-
-    # Case 2: a full iPhone screenshot. Extract the same visual region using
-    # normalized ratios so Pro / Pro Max / other sizes behave the same.
+        viewport = source.convert("RGBA")
     elif abs(source_aspect - FULL_SCREEN_ASPECT) / FULL_SCREEN_ASPECT <= 0.08:
         crop_w = min(source_w, max(1, int(round(source_w * VISIBLE_WIDTH_RATIO))))
         crop_h = min(source_h, max(1, int(round(source_h * VISIBLE_HEIGHT_RATIO))))
         crop_left = max(0, source_w - crop_w)
         crop_top = max(0, (source_h - crop_h) // 2)
-        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
-
-    # Case 3: unknown layout. Fall back to the largest right-aligned crop with
-    # the canonical visible aspect ratio.
+        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h)).convert("RGBA")
     else:
         crop_w = min(source_w, int(round(source_h * VISIBLE_VIEWPORT_ASPECT)))
         crop_h = int(round(crop_w / VISIBLE_VIEWPORT_ASPECT))
@@ -1068,16 +1057,21 @@ def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
             crop_w = int(round(crop_h * VISIBLE_VIEWPORT_ASPECT))
         crop_left = max(0, source_w - crop_w)
         crop_top = max(0, (source_h - crop_h) // 2)
-        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
+        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h)).convert("RGBA")
 
-    trim_left = min(max(0, int(round(viewport.width * FINAL_VISIBLE_LEFT_TRIM_RATIO))), max(0, viewport.width - 2))
-    trim_top = min(max(0, int(round(viewport.height * FINAL_VISIBLE_TOP_TRIM_RATIO))), max(0, viewport.height - 2))
-    trim_bottom = min(max(0, int(round(viewport.height * FINAL_VISIBLE_BOTTOM_TRIM_RATIO))), max(0, viewport.height - trim_top - 1))
-    viewport = viewport.crop((trim_left, trim_top, viewport.width, viewport.height - trim_bottom))
+    if viewport.size == (target_w, target_h):
+        return viewport
 
-    if viewport.size != (target_w, target_h):
-        viewport = viewport.resize((target_w, target_h), resample=Image.Resampling.LANCZOS)
-    return viewport
+    # Uniform cover scaling: no stretching and no internal black bars. Any
+    # tiny excess is removed from the left and equally from top/bottom, keeping
+    # the original right price axis intact.
+    scale = max(target_w / viewport.width, target_h / viewport.height)
+    scaled_w = max(target_w, int(round(viewport.width * scale)))
+    scaled_h = max(target_h, int(round(viewport.height * scale)))
+    resized = viewport.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    crop_left = max(0, scaled_w - target_w)
+    crop_top = max(0, (scaled_h - target_h) // 2)
+    return resized.crop((crop_left, crop_top, crop_left + target_w, crop_top + target_h))
 
 
 def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:

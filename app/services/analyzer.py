@@ -1386,7 +1386,9 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
             (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
         ) + "استخدم التطبيق قصًا ذكيًا تلقائيًا لمنطقة الشارت مع محور الأسعار الأصلي، ثم أزاح الجزء الملتقط لليسار كما هو مطلوب."
 
-    png = render_result(analysis, chart_background_path=prepared_image_path)
+    # The smart crop is used only to help read prices. The final image always uses
+    # the original upload so the fixed production layout remains identical.
+    png = render_result(analysis, chart_background_path=image_path)
     return {
         **analysis,
         **crop_meta,
