@@ -13,6 +13,7 @@ from app.engine.renderer import (
     _detect_green_reference_line_y,
     _dynamic_image_axis_range,
     _estimate_visible_candle_count,
+    _fit_cover,
     _exact_image_axis_model,
     _price_range,
     _price_y,
@@ -115,7 +116,7 @@ def test_renderer_produces_phone_png(tmp_path):
     output = tmp_path / "preview.png"
     output.write_bytes(render_result(_analysis("صاعد")))
     with Image.open(output) as image:
-        assert image.size == (900, 1600)
+        assert image.size == (1320, 2868)
         assert image.format == "PNG"
 
 
@@ -126,15 +127,54 @@ def test_renderer_accepts_chart_background(tmp_path):
     output = tmp_path / "preview_bg.png"
     output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
     with Image.open(output) as image:
-        assert image.size == (900, 1600)
+        assert image.size == (1320, 2868)
         assert image.format == "PNG"
 
 
-def test_result_chart_fills_most_of_phone_canvas():
-    assert CHART_CARD[1] <= 24
-    assert CHART[1] <= 80
-    assert CHART[3] - CHART[1] >= 1450
-    assert CHART_CARD[3] >= 1580
+def test_result_preserves_full_iphone_canvas_and_native_viewport():
+    assert CHART_CARD == (0, 320, 1320, 2563)
+    assert CHART[1] == 320
+    assert CHART[3] - CHART[1] == 2243
+    assert CHART_CARD[2] == 1320
+
+
+
+
+def test_native_iphone_crop_keeps_pixels_without_scaling():
+    source = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
+    # Mark the exact top-left and bottom-right pixels expected after taking the
+    # rightmost 1111 px and the centered 2243 px slice.
+    source.putpixel((209, 312), (11, 22, 33, 255))
+    source.putpixel((1319, 2554), (44, 55, 66, 255))
+    visible = _fit_cover(source, (1111, 2243))
+    assert visible.size == (1111, 2243)
+    assert visible.getpixel((0, 0)) == (11, 22, 33, 255)
+    assert visible.getpixel((1110, 2242)) == (44, 55, 66, 255)
+
+def test_ratio_crop_normalizes_full_screenshot_from_other_iphone_size():
+    source = Image.new("RGBA", (1179, 2556), (0, 0, 0, 255))
+    crop_w = round(1179 * (1111 / 1320))
+    crop_h = round(2556 * (2243 / 2868))
+    crop_left = 1179 - crop_w
+    crop_top = (2556 - crop_h) // 2
+
+    for x in range(crop_left, 1179):
+        for y in range(crop_top, crop_top + crop_h):
+            source.putpixel((x, y), (90, 120, 150, 255))
+
+    visible = _fit_cover(source, (1111, 2243))
+    assert visible.size == (1111, 2243)
+    assert visible.getpixel((0, 0)) == (90, 120, 150, 255)
+    assert visible.getpixel((1110, 2242)) == (90, 120, 150, 255)
+
+
+
+def test_already_cropped_viewport_is_preserved_across_devices():
+    source = Image.new("RGBA", (992, 2004), (33, 66, 99, 255))
+    visible = _fit_cover(source, (1111, 2243))
+    assert visible.size == (1111, 2243)
+    assert visible.getpixel((0, 0)) == (33, 66, 99, 255)
+    assert visible.getpixel((1110, 2242)) == (33, 66, 99, 255)
 
 
 def test_detect_green_reference_line_row():
@@ -204,7 +244,7 @@ def test_image_axis_uses_exact_label_positions_when_available():
     top_y = _price_y(current + 6.0, low, high)
     second_y = _price_y(current + 4.0, low, high)
     expected_step_px = round((CHART[3] - CHART[1]) * 0.13)
-    assert abs((second_y - top_y) - expected_step_px) <= 2
+    assert abs((second_y - top_y) - expected_step_px) <= 3
 
     labels = _right_axis_labels(analysis, low, high)
     assert [price for _role, price, _y in labels] == [
@@ -312,7 +352,7 @@ def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
     output = tmp_path / "partial_trade_hidden.png"
     output.write_bytes(render_result(analysis))
     with Image.open(output) as image:
-        assert image.size == (900, 1600)
+        assert image.size == (1320, 2868)
         assert image.format == "PNG"
 
 

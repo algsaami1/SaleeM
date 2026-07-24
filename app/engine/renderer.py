@@ -19,11 +19,11 @@ except ImportError:  # pragma: no cover
     get_display = None
 
 # صورة عمودية مناسبة للهاتف، لكن جميع الإحداثيات داخلية وقابلة للتغيير.
-WIDTH = 900
-HEIGHT = 1600
+WIDTH = 1320
+HEIGHT = 2868
 
 # لوحة ألوان قريبة من التصميم المرجعي.
-BG = (4, 13, 30, 255)
+BG = (0, 0, 0, 255)
 WHITE = (255, 255, 255, 255)
 NAVY = (235, 241, 255, 255)
 TEXT = (226, 235, 247, 255)
@@ -49,31 +49,32 @@ TEAL = (60, 216, 196, 255)
 TP_GREEN = (25, 211, 112, 255)
 TP_GREEN_FILL = (25, 211, 112, 52)
 
-# تخطيط صورة النتيجة: صورة الشارت نفسها فقط، بحجم مناسب لعرض الآيفون
-# وبدون صندوق ملاحظات داخل الصورة حتى تبقى التفاصيل أوضح لاستخراج الأسعار.
-CHART_CARD = (12, 18, 888, 1588)
-CHART = (36, 60, 736, 1548)
-PRICE_AXIS_X = 824
-# تبقى الملاحظات خارج الصورة في واجهة الويب، لذا هذا الصندوق غير مستخدم في
-# الرسم النهائي ويُترك هنا فقط للتوافق مع بعض الاستدعاءات القديمة.
-NOTES = (24, 1604, 876, 1604)
-SOURCE_AXIS_VISIBLE_WIDTH = 114
-ADDITIONAL_RIGHT_AXIS_WIDTH = 58
-ADDITIONAL_RIGHT_AXIS_GAP = 6
+# تخطيط مطابق لصورة الآيفون المرفوعة: نحافظ على مقاس الصورة الكاملة
+# 1320×2868، ونُظهر داخلها الجزء المحدد 1111×2243 بالبكسل نفسه.
+# الجزء الظاهر يأخذ أقصى يمين المصدر (بما فيه محور الأسعار الأصلي)،
+# ويُحذف تلقائيًا 209 بكسل من اليسار وقرابة 312 بكسل من الأعلى والأسفل.
+# المساحة اليمنى المتبقية 209 بكسل مخصصة للمحور الإضافي، وباقي المساحات سوداء.
+CHART_CARD = (0, 320, 1320, 2563)
+CHART = (0, 320, 930, 2563)
+PRICE_AXIS_X = 1125
+NOTES = (0, 2868, 0, 2868)
+SOURCE_VISIBLE_WIDTH = 1111
+SOURCE_VISIBLE_HEIGHT = 2243
+SOURCE_AXIS_VISIBLE_WIDTH = SOURCE_VISIBLE_WIDTH - CHART[2]
+SALEEM_AXIS_EXTRA_WIDTH = WIDTH - SOURCE_VISIBLE_WIDTH
 TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
 
-# ضبط خاصية صورة الشارت المرفوعة: نقص جزءًا من اليسار، نحافظ على
-# النسبة الأصلية بدون ضغط، ثم نغطي الأجزاء العلوية والسفلية غير المهمة
-# حتى يبقى الشارت واضحًا ويظهر إلى جواره محور السعر اليميني بوضوح.
-UPLOADED_BG_LEFT_CROP_RATIO = 0.0
-UPLOADED_BG_RIGHT_TRIM_RATIO = 0.01
-UPLOADED_BG_TOP_MASK_RATIO = 0.055
-UPLOADED_BG_BOTTOM_MASK_RATIO = 0.10
-UPLOADED_BG_MIN_LEFT_CROP_PX = 0
-SOURCE_AXIS_VISIBLE_WIDTH = 60
-SALEEM_AXIS_EXTRA_WIDTH = 62
+# النتيجة يجب أن تبقى متطابقة على مختلف أجهزة الآيفون. لذلك لا نعتمد
+# على قص ثابت بالبكسل من الصورة المرفوعة، بل نستخرج الجزء المطلوب بنِسَب
+# مشتقة من صورة مرجعية، ثم نعيد تطبيعه إلى نفس نافذة العرض النهائية.
+REFERENCE_SCREENSHOT_WIDTH = 1320
+REFERENCE_SCREENSHOT_HEIGHT = 2868
+VISIBLE_WIDTH_RATIO = SOURCE_VISIBLE_WIDTH / REFERENCE_SCREENSHOT_WIDTH
+VISIBLE_HEIGHT_RATIO = SOURCE_VISIBLE_HEIGHT / REFERENCE_SCREENSHOT_HEIGHT
+FULL_SCREEN_ASPECT = REFERENCE_SCREENSHOT_WIDTH / REFERENCE_SCREENSHOT_HEIGHT
+VISIBLE_VIEWPORT_ASPECT = SOURCE_VISIBLE_WIDTH / SOURCE_VISIBLE_HEIGHT
 
 
 class AxisCalibrationError(RuntimeError):
@@ -1001,62 +1002,72 @@ def _anchored_price_range(
 
 
 def _source_background_box() -> tuple[int, int, int, int]:
-    """Visible area reserved for the uploaded screenshot itself.
-
-    This keeps the screenshot's own right price-axis visible. A separate new
-    SaleeM axis strip will be drawn to the right of that visible source axis.
-    """
-    source_right = CHART_CARD[2] - 12 - SALEEM_AXIS_EXTRA_WIDTH
-    return CHART[0], CHART[1], source_right, CHART[3]
-
+    """Exact native-size viewport kept from the uploaded iPhone screenshot."""
+    return 0, CHART[1], SOURCE_VISIBLE_WIDTH, CHART[1] + SOURCE_VISIBLE_HEIGHT
 
 
 def _saleem_axis_box() -> tuple[int, int, int, int]:
-    """Additional right-side strip for the redrawn SaleeM axis."""
-    left = CHART_CARD[2] - 12 - SALEEM_AXIS_EXTRA_WIDTH + 6
-    right = CHART_CARD[2] - 12
-    return left, CHART[1] - 10, right, CHART[3] + 10
-
+    """Black/right strip reserved for the additional synchronized axis."""
+    return SOURCE_VISIBLE_WIDTH, CHART[1], WIDTH, CHART[3]
 
 
 def _background_visible_box() -> tuple[int, int, int, int]:
-    """Backward-compatible alias for the visible screenshot area."""
     return _source_background_box()
 
 
-
 def _background_axis_shift() -> int:
-    """Shift screenshot left by the width of the additional new axis strip."""
     return SALEEM_AXIS_EXTRA_WIDTH
 
 
 def _fit_cover(source: Image.Image, size: tuple[int, int]) -> Image.Image:
-    """Prepare the uploaded chart with a left shift and no distortion.
+    """Normalize the uploaded screenshot to one consistent visible viewport.
 
-    The user wants the uploaded screenshot to remain undistorted, with its own
-    right price-axis area effectively replaced by the SaleeM axis. To achieve
-    that we:
+    The final SaleeM image must look the same whether the user uploaded a
+    Pro, Pro Max, or any other iPhone screenshot. We therefore:
 
-    1) scale the screenshot uniformly,
-    2) make it wide enough to cover the visible area *plus* the reserved
-       right-axis width,
-    3) later shift it left by exactly that axis width.
+    1) detect whether the upload is a full screenshot or an already-cropped
+       visible chart area,
+    2) extract the chart viewport using *ratios* rather than fixed pixels,
+    3) resize that viewport to the canonical SaleeM visible window.
 
-    This naturally hides a portion of the source image on the left, and when
-    the aspect ratios differ it also hides some of the top and bottom.
+    This keeps the same logical area of the chart across devices while still
+    preserving proportions and avoiding any stretching.
     """
-    visible_w, visible_h = size
-    axis_shift = _background_axis_shift()
-    target_w = visible_w + axis_shift
-
+    target_w, target_h = size
     source_w, source_h = source.size
     if source_w <= 1 or source_h <= 1:
-        return source.resize((target_w, visible_h), resample=Image.Resampling.LANCZOS)
+        return Image.new("RGBA", size, (0, 0, 0, 255))
 
-    scale = max(target_w / max(1, source_w), visible_h / max(1, source_h))
-    scaled_w = max(1, int(round(source_w * scale)))
-    scaled_h = max(1, int(round(source_h * scale)))
-    return source.resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    source_aspect = source_w / source_h
+
+    # Case 1: the user already uploaded the isolated visible chart part.
+    if abs(source_aspect - VISIBLE_VIEWPORT_ASPECT) / VISIBLE_VIEWPORT_ASPECT <= 0.05:
+        viewport = source
+
+    # Case 2: a full iPhone screenshot. Extract the same visual region using
+    # normalized ratios so Pro / Pro Max / other sizes behave the same.
+    elif abs(source_aspect - FULL_SCREEN_ASPECT) / FULL_SCREEN_ASPECT <= 0.08:
+        crop_w = min(source_w, max(1, int(round(source_w * VISIBLE_WIDTH_RATIO))))
+        crop_h = min(source_h, max(1, int(round(source_h * VISIBLE_HEIGHT_RATIO))))
+        crop_left = max(0, source_w - crop_w)
+        crop_top = max(0, (source_h - crop_h) // 2)
+        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
+
+    # Case 3: unknown layout. Fall back to the largest right-aligned crop with
+    # the canonical visible aspect ratio.
+    else:
+        crop_w = min(source_w, int(round(source_h * VISIBLE_VIEWPORT_ASPECT)))
+        crop_h = int(round(crop_w / VISIBLE_VIEWPORT_ASPECT))
+        if crop_h > source_h:
+            crop_h = source_h
+            crop_w = int(round(crop_h * VISIBLE_VIEWPORT_ASPECT))
+        crop_left = max(0, source_w - crop_w)
+        crop_top = max(0, (source_h - crop_h) // 2)
+        viewport = source.crop((crop_left, crop_top, crop_left + crop_w, crop_top + crop_h))
+
+    if viewport.size != (target_w, target_h):
+        viewport = viewport.resize((target_w, target_h), resample=Image.Resampling.LANCZOS)
+    return viewport
 
 
 def _is_green_reference_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1275,7 +1286,7 @@ def _estimate_visible_candle_count(chart_image: Image.Image) -> int | None:
 def _prepare_chart_background(
     chart_background_path: str | os.PathLike[str] | None,
 ) -> tuple[Image.Image | None, int | None, int | None]:
-    """Prepare the uploaded screenshot using the final visible geometry."""
+    """Extract the exact 1111×2243 visible viewport from the uploaded image."""
     if not chart_background_path:
         return None, None, None
     path = Path(chart_background_path)
@@ -1285,52 +1296,31 @@ def _prepare_chart_background(
     visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
     visible_w = visible_right - visible_left
     visible_h = visible_bottom - visible_top
-
     try:
         with Image.open(path) as chart_image:
-            chart_rgba = chart_image.convert("RGBA")
-            fitted = _fit_cover(chart_rgba, (visible_w, visible_h))
-            detected_local_y = _detect_green_reference_line_y(fitted)
-            visible_candles = _estimate_visible_candle_count(fitted)
+            prepared = _fit_cover(chart_image.convert("RGBA"), (visible_w, visible_h))
+            detected_local_y = _detect_green_reference_line_y(prepared)
+            visible_candles = _estimate_visible_candle_count(prepared)
     except Exception:  # pragma: no cover
         return None, None, None
 
-    crop_top = max(0, (fitted.size[1] - visible_h) // 2)
-    detected_absolute_y = None
-    if detected_local_y is not None:
-        projected = visible_top + detected_local_y - crop_top
-        detected_absolute_y = int(max(visible_top, min(visible_bottom - 1, projected)))
-    return fitted, detected_absolute_y, visible_candles
+    detected_absolute_y = None if detected_local_y is None else visible_top + detected_local_y
+    return prepared, detected_absolute_y, visible_candles
 
 
-
-def _paste_prepared_chart_background(image: Image.Image, fitted: Image.Image) -> None:
-    """Paste the shifted screenshot while keeping its original right axis visible."""
+def _paste_prepared_chart_background(image: Image.Image, prepared: Image.Image) -> None:
+    """Paste native chart pixels unchanged; leave every other area black."""
     visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
-    visible_w = visible_right - visible_left
-    visible_h = visible_bottom - visible_top
-    axis_shift = _background_axis_shift()
-    crop_top = max(0, (fitted.size[1] - visible_h) // 2)
+    image.alpha_composite(prepared, (visible_left, visible_top))
 
-    paste_x = visible_left - axis_shift
-    paste_y = visible_top - crop_top
-    image.alpha_composite(fitted, (paste_x, paste_y))
-
+    # The source image's own axis remains visible in the final part. The new
+    # SaleeM axis is a separate dark strip immediately to its right.
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(overlay)
-    d.rounded_rectangle((visible_left, visible_top, visible_right, visible_bottom), radius=6, fill=(0, 10, 26, 70))
-
-    chart_h = visible_bottom - visible_top
-    top_mask_h = max(26, int(chart_h * UPLOADED_BG_TOP_MASK_RATIO))
-    bottom_mask_h = max(52, int(chart_h * UPLOADED_BG_BOTTOM_MASK_RATIO))
-    d.rounded_rectangle((visible_left + 1, visible_top + 1, visible_right - 1, visible_top + top_mask_h), radius=6, fill=(2, 11, 25, 170))
-    d.rounded_rectangle((visible_left + 1, visible_bottom - bottom_mask_h, visible_right - 1, visible_bottom - 1), radius=6, fill=(2, 11, 25, 188))
-
-    # Only draw the additional SaleeM axis strip on the far right; the source
-    # image's own right axis stays visible immediately to its left.
     axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
-    d.rounded_rectangle((axis_left, axis_top, axis_right, axis_bottom), radius=12, fill=(5, 15, 34, 242))
-    d.rectangle((visible_left, visible_top, visible_right, visible_bottom), outline=(112, 133, 168, 165), width=1)
+    d.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(3, 12, 29, 255))
+    d.line((visible_right - 1, visible_top, visible_right - 1, visible_bottom), fill=(83, 105, 145, 220), width=2)
+    d.line((axis_right - 1, axis_top, axis_right - 1, axis_bottom), fill=(83, 105, 145, 180), width=1)
     image.alpha_composite(overlay)
 
 
@@ -1571,14 +1561,11 @@ def _draw_right_price_axis(
 
 
 def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, *, background_mode: bool = False) -> None:
-    draw.rounded_rectangle(CHART_CARD, radius=21, fill=(6, 17, 40, 255), outline=BORDER, width=1)
+    # المساحات خارج الجزء الأصلي تبقى سوداء بالكامل للتحرير عليها.
+    draw.rectangle((0, 0, WIDTH, HEIGHT), fill=(0, 0, 0, 255))
     left, top, right, bottom = CHART
-
-    # شريط إضافي لمحور السعر يظهر إلى يسار محور الأسعار الأصلي في الصورة.
     axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
-    draw.rounded_rectangle((axis_left, axis_top - 10, axis_right, axis_bottom + 10), radius=12, fill=(5, 15, 34, 212), outline=(76, 96, 131, 180), width=1)
-    _draw_rtl(draw, (axis_right - 6, top - 34), "محور إضافي", F_SMALL, MUTED)
-    draw.text((left, top - 34), "XAUUSD · M5", font=F_STATUS, fill=(208, 220, 240, 255), anchor="la")
+    draw.rectangle((axis_left, axis_top, axis_right, axis_bottom), fill=(3, 12, 29, 255))
 
     for role, price, y in _right_axis_labels(analysis, price_min, price_max):
         if not background_mode and CHART[1] + 4 <= y <= CHART[3] - 4:
@@ -2159,7 +2146,6 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
-    _draw_sessions(draw, candles, slot, str(analysis.get("market_timezone") or "Asia/Muscat"))
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
