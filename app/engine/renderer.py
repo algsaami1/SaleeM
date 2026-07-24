@@ -2092,26 +2092,33 @@ def _draw_trade_axis_card(
 
 
 
-def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 44, min_gap: int = 2) -> list[int]:
-    """Move cards vertically inside the right axis, overlap is allowed if needed."""
+def _vertical_axis_card_centers(items: list[tuple[str, float, int, tuple[int, int, int, int]]], *, card_height: int = 52, min_gap: int = 10) -> list[int]:
+    """Stack cards vertically with clear spacing and no overlap."""
     _axis_left, axis_top, _axis_right, axis_bottom = _saleem_axis_box()
-    lower = axis_top + card_height // 2 + 6
-    upper = axis_bottom - card_height // 2 - 6
+    lower = axis_top + card_height // 2 + 8
+    upper = axis_bottom - card_height // 2 - 8
     if not items:
         return []
-    exact = [int(item[2]) for item in items]
-    centers = [max(lower, min(upper, y)) for y in exact]
-    ordered = sorted(range(len(items)), key=lambda idx: centers[idx])
-    for pos in range(1, len(ordered)):
-        prev_idx = ordered[pos - 1]
-        idx = ordered[pos]
-        min_center = centers[prev_idx] + min_gap
-        if centers[idx] < min_center:
-            centers[idx] = min_center
-    overflow = max(centers) - upper
+
+    ordered = sorted([(idx, int(item[2])) for idx, item in enumerate(items)], key=lambda item: item[1])
+    positions: dict[int, int] = {}
+    previous: int | None = None
+    for idx, exact in ordered:
+        y = max(lower, min(upper, exact))
+        if previous is not None:
+            y = max(y, previous + card_height + min_gap)
+        positions[idx] = y
+        previous = y
+
+    overflow = max(positions.values(), default=upper) - upper
     if overflow > 0:
-        centers = [max(lower, c - overflow) for c in centers]
-    return centers
+        positions = {idx: y - overflow for idx, y in positions.items()}
+
+    underflow = lower - min(positions.values(), default=lower)
+    if underflow > 0:
+        positions = {idx: y + underflow for idx, y in positions.items()}
+
+    return [positions[idx] for idx in range(len(items))]
 
 
 def _draw_trade_axis_card_stacked(
@@ -2125,22 +2132,29 @@ def _draw_trade_axis_card_stacked(
 ) -> tuple[int, int, int, int]:
     axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
     text = f"{label}-{_fmt_card_price(price)}"
-    card_h = 44
-    pad_x = 12
+    card_h = 52
+    pad_x = 16
+    card_left_padding = 18
+    card_right_padding = 20
+    x1 = axis_left + card_left_padding
+    x2 = axis_right - card_right_padding
+    card_w = x2 - x1
     text_w = _text_width(draw, text, F_TRADE_SMALL_LATIN, rtl=False)
-    card_w = min(axis_right - axis_left - 18, max(108, text_w + pad_x * 2))
-    x1 = axis_right - card_w - 10
-    x2 = axis_right - 10
+    if text_w + pad_x * 2 > card_w:
+        # keep within the axis but use the whole available width
+        shown = _fit_text(draw, text, F_TRADE_SMALL_LATIN, card_w - pad_x * 2 - 6, rtl=False)
+    else:
+        shown = text
     y1 = int(center_y - card_h // 2)
     y2 = y1 + card_h
-    connector_x = x1 - 8
+    connector_x = x1 - 12
     draw.line((CHART[2] + 4, exact_y, connector_x, exact_y), fill=color, width=2)
     if center_y != exact_y:
         draw.line((connector_x, exact_y, connector_x, center_y), fill=color, width=2)
     draw.line((connector_x, center_y, x1, center_y), fill=color, width=2)
-    fill = (color[0], color[1], color[2], 24)
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=3, fill=fill, outline=color, width=2)
-    draw.text(((x1 + x2) // 2, center_y), text, font=F_TRADE_SMALL_LATIN, fill=color, anchor="mm")
+    fill = (color[0], color[1], color[2], 34)
+    draw.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=fill, outline=color, width=2)
+    draw.text(((x1 + x2) // 2, center_y), shown, font=F_TRADE_SMALL_LATIN, fill=color, anchor="mm")
     return x1, y1, x2, y2
 
 
@@ -2271,7 +2285,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         else:
             draw.line((zone_x1, exact_y, right, exact_y), fill=color, width=2)
 
-    centers = _vertical_axis_card_centers(items, card_height=44, min_gap=8)
+    centers = _vertical_axis_card_centers(items, card_height=52, min_gap=10)
     for center_y, (label, price, exact_y, color) in zip(centers, items):
         _draw_trade_axis_card_stacked(
             draw,
