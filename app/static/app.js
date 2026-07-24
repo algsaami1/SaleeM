@@ -14,6 +14,8 @@
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
   const axisRetryButton = document.getElementById('axis-retry-button');
+  const captureHelpButton = document.getElementById('capture-help-button');
+  const captureHelpModal = document.getElementById('capture-help-modal');
 
   const tradeFeedbackForm = document.getElementById('trade-feedback-form');
   const tradeStatus = document.getElementById('trade-feedback-status');
@@ -49,6 +51,24 @@
   };
 
   fileInput?.addEventListener('change', handleSelectedFile);
+
+  captureHelpButton?.addEventListener('click', () => {
+    if (typeof captureHelpModal?.showModal === 'function') captureHelpModal.showModal();
+    else captureHelpModal?.setAttribute('open', '');
+  });
+
+  captureHelpModal?.querySelectorAll('[data-close-modal]').forEach((button) => {
+    button.addEventListener('click', () => {
+      if (typeof captureHelpModal.close === 'function') captureHelpModal.close();
+      else captureHelpModal.removeAttribute('open');
+    });
+  });
+
+  captureHelpModal?.addEventListener('click', (event) => {
+    if (event.target !== captureHelpModal) return;
+    if (typeof captureHelpModal.close === 'function') captureHelpModal.close();
+    else captureHelpModal.removeAttribute('open');
+  });
 
   axisRetryButton?.addEventListener('click', () => {
     const uploadCard = document.querySelector('.upload-card');
@@ -123,6 +143,7 @@
       return;
     }
 
+    document.body.classList.add('is-analyzing');
     processingCard.hidden = false;
     processingCard.classList.add('is-running');
     if (analyzeButton) {
@@ -167,6 +188,7 @@
       document.close();
     } catch (error) {
       window.clearInterval(timer);
+      document.body.classList.remove('is-analyzing');
       processingCard.classList.remove('is-running');
       if (analyzeButton) {
         analyzeButton.disabled = false;

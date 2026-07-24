@@ -1572,7 +1572,16 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
     probability = int(analysis.get("trade_probability") or max(analysis.get("buy_probability") or 50, analysis.get("sell_probability") or 50))
     probability = max(0, min(100, probability))
-    session = _active_session_label(analysis)
+    if state == "watch":
+        trade_type_value, trade_type_color = "مراقبة", BLUE
+    elif state == "conditional":
+        trade_type_value, trade_type_color = "بشرط", ORANGE
+    elif direction == "صاعد":
+        trade_type_value, trade_type_color = "شراء", GREEN
+    elif direction == "هابط":
+        trade_type_value, trade_type_color = "بيع", RED
+    else:
+        trade_type_value, trade_type_color = "مراقبة", BLUE
 
     cards = [
         ("الاتجاه", [direction_value], direction_color, True),
@@ -1580,7 +1589,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
         ("التوافق", [f"{frame_count}/4"], PURPLE, False),
         ("النموذج", pattern_lines, CYAN, True),
         ("الاحتمال", [f"{probability}%"], GOLD, False),
-        ("الجلسة", [session], BLUE, True),
+        ("نوع الصفقة", [trade_type_value], trade_type_color, True),
     ]
 
     margin = 28
