@@ -23,6 +23,7 @@ from app.engine.renderer import (
     _exact_image_axis_model,
     _price_range,
     _price_y,
+    _projection_closes,
     _right_axis_labels,
     render_result,
 )
@@ -457,12 +458,12 @@ def test_header_pattern_uses_two_lines_for_long_break_retest_name():
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
 
 
-def test_watch_mode_exposes_trigger_and_invalid_only():
+def test_watch_mode_exposes_entry_and_cancel_only():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["Trigger", "Invalid"]
+    assert [item[0] for item in items] == ["Entry", "Cancel"]
 
 
 def test_conditional_mode_keeps_entry_sl_and_three_targets():
@@ -470,7 +471,7 @@ def test_conditional_mode_keeps_entry_sl_and_three_targets():
     analysis["draw_mode"] = "conditional"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "conditional"
-    assert [item[0] for item in items] == ["Entry", "SL", "TP", "TP", "TP"]
+    assert [item[0] for item in items] == ["Entry", "Stop", "TP1", "TP2", "TP3"]
 
 
 def test_overlapping_trade_cards_move_horizontally_only():
@@ -507,3 +508,21 @@ def test_current_price_binding_uses_shared_transform_even_without_detected_line(
     expected = _price_y(analysis["current_price"], low, high)
     chosen = _axis_checked_current_reference_y(analysis, low, high, detected_y=None)
     assert chosen == expected
+
+
+def test_projection_candles_reach_each_target_in_two_steps():
+    closes = _projection_closes(4050.0, [4051.0, 4052.0, 4053.0])
+    assert len(closes) == 6
+    assert closes[1] == 4051.0
+    assert closes[3] == 4052.0
+    assert closes[5] == 4053.0
+
+
+def test_trade_card_labels_do_not_use_trigger_or_active():
+    for mode in ("watch", "conditional", "confirmed"):
+        analysis = _analysis("صاعد")
+        analysis["draw_mode"] = mode
+        _, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
+        labels = {item[0] for item in items}
+        assert "Trigger" not in labels
+        assert "Active" not in labels

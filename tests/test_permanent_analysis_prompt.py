@@ -22,3 +22,11 @@ def test_structured_output_contains_permanent_prompt_fields():
     ):
         assert field in properties
         assert field in required
+
+
+def test_permanent_prompt_contains_unified_visual_template():
+    prompt = load_permanent_analysis_prompt()
+    assert "تستخدم كلمة `Entry` فقط" in prompt
+    assert "شموع سيناريو" in prompt
+    assert "تتحرك صعودًا وهبوطًا حسب السعر الحقيقي" in prompt
+    assert "ثلاثة مربعات تعليق ثابتة" in prompt

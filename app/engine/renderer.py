@@ -58,6 +58,13 @@ CHART_CARD = (0, 320, 1320, 2563)
 CHART = (0, 320, 930, 2563)
 PRICE_AXIS_X = 1125
 NOTES = (0, 2868, 0, 2868)
+# قالب التعليقات ثابت في كل تحليل. الذي يتغير هو النص فقط.
+COMMENT_SCENARIO_BOX = (338, 370, 625, 510)
+COMMENT_ENTRY_BOX = (338, 1115, 625, 1255)
+COMMENT_CANCEL_BOX = (338, 2265, 625, 2405)
+# شموع السيناريو لها عمود ثابت، لكن مواضعها الرأسية تتبع الأسعار الحقيقية.
+PROJECTION_X1 = 675
+PROJECTION_X2 = 902
 SOURCE_VISIBLE_WIDTH = 1111
 SOURCE_VISIBLE_HEIGHT = 2243
 SOURCE_AXIS_VISIBLE_WIDTH = SOURCE_VISIBLE_WIDTH - CHART[2]
@@ -165,6 +172,9 @@ F_LEVEL_CARD = _font(20, True, True)
 F_AXIS_EDGE = _font(17, False, True)
 F_SESSION_NAME = _font(23, True, True)
 F_SESSION_TIME = _font(17, False, True)
+F_COMMENT_TITLE = _font(18, True)
+F_COMMENT_BODY = _font(17)
+F_PROJECTION_LABEL = _font(15, True)
 
 
 def _number(value: Any) -> float | None:
@@ -1556,22 +1566,24 @@ def _draw_rtl_lines_centered(
 
 
 def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    """Draw six compact summary cards without changing the chart geometry."""
+    """Draw the approved four-card summary header.
+
+    The layout is identical for every result. Only values and state colors
+    change. Direction is represented by the trade type, so no separate
+    direction card is needed.
+    """
     panel = (10, 12, WIDTH - 10, CHART[1] - 35)
     draw.rounded_rectangle(panel, radius=22, fill=(7, 29, 54, 255), outline=(37, 67, 99, 255), width=2)
 
     direction = str(analysis.get("direction") or "غير واضح")
-    direction_value = {"صاعد": "صاعد", "هابط": "هابط", "عرضي": "عرضي"}.get(direction, "—")
-    direction_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else GOLD)
-
     state = str(analysis.get("draw_mode") or "watch")
-    state_value = {"confirmed": "نشطة", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
+    state_value = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
     state_color = GREEN if state == "confirmed" else (GOLD if state == "conditional" else BLUE)
 
-    frame_count = _frame_match_count(analysis)
     pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
     probability = int(analysis.get("trade_probability") or max(analysis.get("buy_probability") or 50, analysis.get("sell_probability") or 50))
     probability = max(0, min(100, probability))
+
     if state == "watch":
         trade_type_value, trade_type_color = "مراقبة", BLUE
     elif state == "conditional":
@@ -1583,21 +1595,18 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     else:
         trade_type_value, trade_type_color = "مراقبة", BLUE
 
+    # Left-to-right order; the rightmost card is "نوع الصفقة" in RTL reading.
     cards = [
-        ("الاتجاه", [direction_value], direction_color, True),
         ("الحالة", [state_value], state_color, True),
-        ("التوافق", [f"{frame_count}/4"], PURPLE, False),
         ("النموذج", pattern_lines, CYAN, True),
         ("الاحتمال", [f"{probability}%"], GOLD, False),
         ("نوع الصفقة", [trade_type_value], trade_type_color, True),
     ]
 
     margin = 28
-    gap = 11
-    available = WIDTH - margin * 2 - gap * 5
-    card_w = available // 6
-    # Cards are about 17% shorter than before, while the chart starts at the
-    # exact same Y coordinate.
+    gap = 14
+    available = WIDTH - margin * 2 - gap * 3
+    card_w = available // 4
     y1, y2 = 38, CHART[1] - 78
     for index, (label, values, color, is_rtl) in enumerate(cards):
         x1 = margin + index * (card_w + gap)
@@ -1992,22 +2001,156 @@ def _spaced_positions(items: list[tuple[str, int]], min_gap: int = 43) -> dict[s
     return positions
 
 
-def _draw_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], color, *, dashed: bool = False) -> None:
-    sx, sy = start
-    ex, ey = end
-    mx = int(sx + (ex - sx) * 0.48)
-    # انحناءة خفيفة في اتجاه الهدف بدل خط ضخم يغطي الشموع.
-    my = int(sy + (ey - sy) * 0.30)
-    if dashed:
-        _dash_line(draw, (sx, sy), (mx, my), color, width=3, dash=8, gap=6)
-        _dash_line(draw, (mx, my), (ex, ey), color, width=3, dash=8, gap=6)
-    else:
-        draw.line([(sx, sy), (mx, my), (ex, ey)], fill=color, width=3, joint="curve")
-    angle = math.atan2(ey - my, ex - mx)
-    size = 13
-    left_head = (ex - size * math.cos(angle - math.pi / 6), ey - size * math.sin(angle - math.pi / 6))
-    right_head = (ex - size * math.cos(angle + math.pi / 6), ey - size * math.sin(angle + math.pi / 6))
-    draw.polygon([(ex, ey), left_head, right_head], fill=color)
+def _projection_closes(entry: float, targets: list[float]) -> list[float]:
+    """Return two progressive scenario-candle closes per target."""
+    closes: list[float] = []
+    previous = float(entry)
+    for target in targets[:3]:
+        target = float(target)
+        midpoint = previous + (target - previous) * 0.52
+        closes.extend([midpoint, target])
+        previous = target
+    return closes
+
+
+def _draw_projection_candles(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> None:
+    """Replace the directional arrow with fixed-column scenario candles.
+
+    X positions are identical in every result. Y positions are calculated from
+    the shared price transform, so every candle travels from Entry through
+    TP1, TP2 and TP3 without changing the uploaded chart or its axis.
+    """
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    entry = _number(analysis.get("entry"))
+    if draw_mode == "watch" or direction not in {"صاعد", "هابط"} or entry is None:
+        return
+
+    targets: list[float] = []
+    for key in ("target_1", "target_2", "target_3"):
+        value = _number(analysis.get(key))
+        if value is None or not _is_visible_price(value, price_min, price_max):
+            continue
+        if direction == "صاعد" and value <= entry:
+            continue
+        if direction == "هابط" and value >= entry:
+            continue
+        targets.append(float(value))
+    if not targets:
+        return
+
+    closes = _projection_closes(float(entry), targets)
+    if not closes:
+        return
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    count = len(closes)
+    span = PROJECTION_X2 - PROJECTION_X1
+    slot = span / max(1, count)
+    body_w = max(12, min(24, int(slot * 0.48)))
+    alpha = 118 if draw_mode == "conditional" else 158
+    wick_alpha = min(220, alpha + 35)
+    main_rgb = TP_GREEN[:3] if direction == "صاعد" else RED[:3]
+    fill = (*main_rgb, alpha)
+    outline = (*main_rgb, min(235, alpha + 55))
+    wick = (*main_rgb, wick_alpha)
+
+    separator_x = PROJECTION_X1 - 18
+    _dash_line(draw, (separator_x, CHART[1] + 46), (separator_x, CHART[3] - 30), (89, 122, 155, 120), width=1, dash=8, gap=8)
+    _draw_rtl(draw, ((PROJECTION_X1 + PROJECTION_X2) // 2, CHART[1] + 28), "شموع السيناريو", F_PROJECTION_LABEL, (76, 110, 145, 220), anchor="mm")
+
+    previous = float(entry)
+    price_span = max(0.01, price_max - price_min)
+    for index, close in enumerate(closes):
+        open_price = previous
+        movement = close - open_price
+        wick_size = max(abs(movement) * 0.18, price_span * 0.0022)
+        high = max(open_price, close) + wick_size
+        low = min(open_price, close) - wick_size
+        x = int(PROJECTION_X1 + slot * (index + 0.5))
+        y_open = _price_y(open_price, price_min, price_max)
+        y_close = _price_y(close, price_min, price_max)
+        y_high = _price_y(high, price_min, price_max)
+        y_low = _price_y(low, price_min, price_max)
+        draw.line((x, y_high, x, y_low), fill=wick, width=2)
+        top = min(y_open, y_close)
+        bottom = max(y_open, y_close)
+        if bottom - top < 5:
+            bottom = top + 5
+        draw.rounded_rectangle((x - body_w // 2, top, x + body_w // 2, bottom), radius=2, fill=fill, outline=outline, width=2)
+        previous = close
+
+    image.alpha_composite(layer)
+
+
+def _wrap_fixed_rtl(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int = 2) -> list[str]:
+    """Wrap Arabic text into a fixed-size comment box without resizing it."""
+    words = " ".join(str(text or "").split()).split()
+    if not words:
+        return ["—"]
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = word if not current else f"{current} {word}"
+        if _text_width(draw, candidate, font, rtl=True) <= max_width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = word
+        if len(lines) == max_lines - 1:
+            break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    consumed = " ".join(lines)
+    original = " ".join(words)
+    if consumed != original and lines:
+        lines[-1] = _fit_text(draw, lines[-1] + "…", font, max_width, rtl=True)
+    return lines[:max_lines]
+
+
+def _comment_values(analysis: dict[str, Any]) -> tuple[str, str, str]:
+    scenario = str(analysis.get("scenario") or "ننتظر وضوح السيناريو الأقرب.")
+    entry_condition = str(analysis.get("confirmation") or "ننتظر تأكيدًا واضحًا عند مستوى الدخول.")
+    invalidation = str(analysis.get("invalidation_condition") or "تجاوز مستوى الإلغاء يبطل السيناريو.")
+    return scenario, entry_condition, invalidation
+
+
+def _draw_fixed_comment_box(
+    draw: ImageDraw.ImageDraw,
+    rect: tuple[int, int, int, int],
+    *,
+    title: str,
+    body: str,
+    accent: tuple[int, int, int, int],
+) -> None:
+    x1, y1, x2, y2 = rect
+    draw.rounded_rectangle(rect, radius=12, fill=(7, 25, 48, 214), outline=accent, width=2)
+    _draw_rtl(draw, (x2 - 16, y1 + 27), title, F_COMMENT_TITLE, accent, anchor="ra")
+    draw.line((x1 + 14, y1 + 46, x2 - 14, y1 + 46), fill=(*accent[:3], 115), width=1)
+    lines = _wrap_fixed_rtl(draw, body, F_COMMENT_BODY, (x2 - x1) - 28, max_lines=2)
+    start_y = y1 + 70
+    for index, line in enumerate(lines):
+        _draw_rtl(draw, (x2 - 16, start_y + index * 28), line, F_COMMENT_BODY, (231, 239, 249, 255), anchor="ra")
+
+
+def _draw_fixed_comments(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    """Draw the same three comment boxes in the same positions every time."""
+    scenario, entry_condition, invalidation = _comment_values(analysis)
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    mode = str(analysis.get("draw_mode") or "watch")
+    scenario_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else BLUE)
+    entry_color = ORANGE if mode == "conditional" else BLUE
+    _draw_fixed_comment_box(draw, COMMENT_SCENARIO_BOX, title="السيناريو الأقرب", body=scenario, accent=scenario_color)
+    _draw_fixed_comment_box(draw, COMMENT_ENTRY_BOX, title="شرط الدخول", body=entry_condition, accent=entry_color)
+    _draw_fixed_comment_box(draw, COMMENT_CANCEL_BOX, title="إلغاء السيناريو", body=invalidation, accent=RED)
+
 
 def _draw_current_price(
     draw: ImageDraw.ImageDraw,
@@ -2105,7 +2248,7 @@ def _draw_trade_axis_card(
 
 
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
-    """Return mode and visible axis cards without drawing them."""
+    """Return right-axis cards centered on their exact real-price Y."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     if direction not in {"صاعد", "هابط"}:
@@ -2118,31 +2261,33 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 
     entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Trigger", entry, entry_y, BLUE)]
+        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Entry", entry, entry_y, BLUE)]
         if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Invalid", stop, _price_y(stop, price_min, price_max), RED))
+            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), RED))
         return draw_mode, items
 
     items = [("Entry", entry, entry_y, BLUE)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
-        items.append(("SL", stop, _price_y(stop, price_min, price_max), RED))
-    for key in ("target_1", "target_2", "target_3"):
+        items.append(("Stop", stop, _price_y(stop, price_min, price_max), RED))
+    for index, key in enumerate(("target_1", "target_2", "target_3"), start=1):
         target = _number(analysis.get(key))
         if target is not None and _is_visible_price(target, price_min, price_max):
-            items.append(("TP", target, _price_y(target, price_min, price_max), TP_GREEN))
+            items.append((f"TP{index}", target, _price_y(target, price_min, price_max), TP_GREEN))
     return draw_mode, items
 
 
 def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int) -> None:
-    left, top, right, bottom = CHART
+    _left, _top, right, _bottom = CHART
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     draw_mode, items = _trade_display_items(analysis, price_min, price_max)
     if not items or direction not in {"صاعد", "هابط"}:
         return
 
-    trade_line_left = min(right - 165, max(candle_right + 8, int(left + (right - left) * 0.58)))
+    trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
     dashed = draw_mode in {"watch", "conditional"}
-    for label, _price, exact_y, color in items:
+    for _label, _price, exact_y, color in items:
+        # The line and card center share the exact same price Y. Cards move
+        # vertically with price; overlap is solved horizontally only.
         if dashed:
             _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
         else:
@@ -2159,17 +2304,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
             x_lane=lanes.get(index, 0),
         )
 
-    # No directional arrow in watch mode. Conditional arrows are dashed;
-    # confirmed/active arrows are solid.
-    if draw_mode != "watch":
-        entry_item = next((item for item in items if item[0] == "Entry"), None)
-        targets = [item for item in items if item[0] == "TP"]
-        if entry_item and targets:
-            entry_y = entry_item[2]
-            target_y = targets[-1][2]
-            start_point = (trade_line_left + 15, entry_y)
-            end_point = (max(start_point[0] + 55, right - 130), target_y)
-            _draw_arrow(draw, start_point, end_point, TP_GREEN if direction == "صاعد" else RED, dashed=draw_mode == "conditional")
+    _draw_projection_candles(image, analysis, price_min, price_max)
 
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
@@ -2400,6 +2535,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
+    _draw_fixed_comments(draw, analysis)
     _draw_session_footer(draw, analysis)
 
     output = io.BytesIO()
