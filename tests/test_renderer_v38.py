@@ -2,6 +2,8 @@ from datetime import datetime, timedelta, timezone
 
 from PIL import Image, ImageDraw
 
+import app.engine.renderer as renderer
+
 from app.engine.renderer import (
     AXIS_PRICE_CARD_HEIGHT,
     AXIS_PRICE_CARD_WIDTH,
@@ -535,6 +537,44 @@ def test_trade_axis_card_ignores_horizontal_lane_offsets():
     )
     assert first[0] == second[0]
     assert first[2] == second[2]
+
+
+def test_support_resistance_label_centers_match_exact_price_y(monkeypatch):
+    analysis = _analysis("صاعد")
+    current = analysis["current_price"]
+    # Deliberately cluster the levels so overlap is unavoidable. Exact price
+    # binding must win over collision avoidance.
+    analysis["resistance_levels"] = [
+        {"price": current + 0.18, "strength": 92},
+        {"price": current + 0.27, "strength": 84},
+    ]
+    analysis["support_levels"] = [
+        {"price": current - 0.16, "strength": 91},
+        {"price": current - 0.25, "strength": 80},
+    ]
+    low, high = current - 2.0, current + 2.0
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas)
+    captured = []
+    original = renderer._rounded_label
+
+    def capture(*args, **kwargs):
+        rect = original(*args, **kwargs)
+        captured.append(rect)
+        return rect
+
+    monkeypatch.setattr(renderer, "_rounded_label", capture)
+    renderer._draw_levels(draw, analysis, low, high)
+
+    expected_prices = [
+        analysis["resistance_levels"][0]["price"],
+        analysis["resistance_levels"][1]["price"],
+        analysis["support_levels"][0]["price"],
+        analysis["support_levels"][1]["price"],
+    ]
+    assert len(captured) == len(expected_prices)
+    for rect, price in zip(captured, expected_prices):
+        assert (rect[1] + rect[3]) // 2 == _price_y(price, low, high)
 
 
 def test_current_price_binding_uses_shared_transform_even_without_detected_line():

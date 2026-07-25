@@ -2203,23 +2203,22 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
                 continue
             all_levels.append((key, rank, level, price, _price_y(price, price_min, price_max), color, fill))
 
-    if _strict_axis_sync(analysis):
-        positions = {f"{key}-{rank}": y for key, rank, _, _, y, _, _ in all_levels}
-    else:
-        positions = _spaced_positions(
-            [(f"{key}-{rank}", y) for key, rank, _, _, y, _, _ in all_levels],
-            min_gap=46,
-        )
-
+    # Every support/resistance label is centered on the exact Y returned by
+    # the shared price transform.  We deliberately allow labels to overlap:
+    # visual collision handling must never change the represented price.
     for key, rank, level, price, exact_y, color, fill in all_levels:
         strength = max(0, min(100, int(level.get("strength") or 50)))
         prefix = "R" if key == "resistance_levels" else "S"
         label = f"{prefix}{rank}  {_fmt_card_price(price)}  {strength}%"
-        y_label = positions.get(f"{key}-{rank}", exact_y)
+        # Compute the real rendered height, then place the label so its center
+        # (not its top edge) equals the exact price line.
+        label_box = draw.textbbox((0, 0), label, font=F_LEVEL_CARD)
+        label_height = (label_box[3] - label_box[1]) + 10  # padding_y=5 on both sides
+        label_top = int(exact_y - label_height // 2)
         rect = _rounded_label(
             draw,
             left + 18,
-            y_label - 17,
+            label_top,
             label,
             F_LEVEL_CARD,
             fill=fill,
@@ -2232,8 +2231,6 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
         )
         line_start = min(right - 20, rect[2] + 8)
         draw.line((line_start, exact_y, right - 3, exact_y), fill=color, width=_strength_width(strength))
-        if abs(y_label - exact_y) > 3:
-            draw.line((rect[2], y_label, line_start, exact_y), fill=color, width=2)
 
 
 def _spaced_positions(items: list[tuple[str, int]], min_gap: int = 43) -> dict[str, int]:
@@ -2917,6 +2914,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     )
     analysis["price_axis_binding"] = "original_chart_single_transform"
     analysis["price_axis_overlap_policy"] = "fixed_x_vertical_overlap_allowed"
+    analysis["price_card_alignment"] = "card_center_equals_exact_price_y"
 
     analysis["_using_chart_background"] = using_chart_background
     _draw_grid(draw, analysis, price_min, price_max, background_mode=using_chart_background)
