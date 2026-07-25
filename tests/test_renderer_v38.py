@@ -470,20 +470,28 @@ def test_header_pattern_uses_two_lines_for_long_break_retest_name():
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
 
 
-def test_watch_mode_exposes_entry_and_cancel_only():
+def test_watch_mode_exposes_entry_only_without_cancel():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["Entry", "Cancel"]
+    assert [item[0] for item in items] == ["Entry"]
 
 
-def test_conditional_mode_keeps_entry_sl_and_three_targets():
+def test_conditional_mode_keeps_entry_cancel_and_three_targets():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "conditional"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "conditional"
-    assert [item[0] for item in items] == ["Entry", "Stop", "TP1", "TP2", "TP3"]
+    assert [item[0] for item in items] == ["Entry", "Cancel", "TP1", "TP2", "TP3"]
+
+
+def test_inactive_market_has_no_execution_cards():
+    analysis = _analysis("صاعد")
+    analysis["draw_mode"] = "inactive"
+    mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
+    assert mode == "inactive"
+    assert items == []
 
 
 def test_overlapping_trade_cards_stay_in_one_fixed_horizontal_lane():

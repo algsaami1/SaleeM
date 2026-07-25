@@ -869,7 +869,7 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
 
     trade_values: list[float] = []
-    if draw_mode != "watch":
+    if draw_mode in {"conditional", "confirmed"}:
         for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
             value = _number(analysis.get(key))
             if value is not None:
@@ -882,7 +882,7 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
             if price is not None:
                 level_values.append(price)
 
-    anchor = _number(analysis.get("entry")) if draw_mode != "watch" else current
+    anchor = _number(analysis.get("entry")) if draw_mode in {"conditional", "confirmed"} else current
     if anchor is None:
         anchor = current
     if anchor is None and candles:
@@ -923,7 +923,7 @@ def _price_range(analysis: dict[str, Any]) -> tuple[float, float]:
 
     # نضيف هامشًا معتدلًا في جهة الهدف من دون موازنة كامل التاريخ المقابل؛
     # لأن الموازنة القسرية كانت تنشئ فراغًا كبيرًا وتضغط الشموع.
-    active_trade = draw_mode != "watch" and direction in {"صاعد", "هابط"}
+    active_trade = draw_mode in {"conditional", "confirmed"} and direction in {"صاعد", "هابط"}
     if active_trade and direction == "صاعد":
         above = max(above * 1.10, below * 1.04, atr * 3.0)
     elif active_trade and direction == "هابط":
@@ -1592,8 +1592,13 @@ def _draw_rtl_lines_centered(
 
 def _analysis_state(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
     state = str(analysis.get("draw_mode") or "watch")
-    value = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
-    color = GREEN if state == "confirmed" else (GOLD if state == "conditional" else BLUE)
+    value = {
+        "confirmed": "مؤكد",
+        "conditional": "مشروط",
+        "watch": "مراقبة",
+        "inactive": "السوق مغلق",
+    }.get(state, "مراقبة")
+    color = GREEN if state == "confirmed" else (GOLD if state in {"conditional", "inactive"} else BLUE)
     return value, color
 
 
@@ -1636,6 +1641,8 @@ def _behavior_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int,
 
 
 def _momentum_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    if str(analysis.get("draw_mode") or "watch") == "inactive":
+        return "متوقف", GOLD
     candles = analysis.get("candles") or []
     probability = int(analysis.get("trade_probability") or 50)
     if len(candles) >= 5:
@@ -1710,6 +1717,8 @@ def _candle_shape_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, 
 
 def _close_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
     state = str(analysis.get("draw_mode") or "watch")
+    if state == "inactive":
+        return "غير محدث", GOLD
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     level = _number(analysis.get("entry"))
     if state == "watch" or level is None or direction not in {"صاعد", "هابط"}:
@@ -1781,6 +1790,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     direction = str(analysis.get("direction") or "غير واضح")
     direction_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else BLUE)
     probability = max(0, min(100, int(analysis.get("trade_probability") or 50)))
+    probability_text = "—" if str(analysis.get("draw_mode") or "watch") == "inactive" else f"{probability}%"
     pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
     close_value, close_color = _close_label(analysis)
     zone_value, zone_color = _nearest_zone_label(analysis)
@@ -1795,7 +1805,7 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
             ("الاتجاه", [direction], direction_color, False),
             ("الحالة", [state_value], state_color, False),
             ("الإغلاق", [close_value], close_color, False),
-            ("الاحتمال", [f"{probability}%"], GOLD, True),
+            ("الاحتمال", [probability_text], GOLD, True),
             ("النموذج", pattern_lines, CYAN, False),
         ],
         [
@@ -1830,8 +1840,8 @@ def _draw_signal(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
 
     x, y = 42, 410
     badge_w, badge_h, gap = 178, 64, 12
-    buy_active = state != "watch" and direction == "صاعد"
-    sell_active = state != "watch" and direction == "هابط"
+    buy_active = state in {"conditional", "confirmed"} and direction == "صاعد"
+    sell_active = state in {"conditional", "confirmed"} and direction == "هابط"
 
     buy_fill = GREEN if buy_active else (8, 42, 42, 255)
     sell_fill = RED if sell_active else (47, 24, 36, 255)
@@ -1845,7 +1855,12 @@ def _draw_signal(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     _draw_rtl(draw, (sell_x + badge_w - 20, y + badge_h // 2), "بيع", F_CARD, sell_text_color, anchor="rm")
     draw.text((sell_x + 22, y + badge_h // 2), f"{sell}%", font=F_PERCENT, fill=sell_text_color, anchor="lm")
 
-    state_text = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
+    state_text = {
+        "confirmed": "مؤكد",
+        "conditional": "مشروط",
+        "watch": "مراقبة",
+        "inactive": "السوق مغلق",
+    }.get(state, "مراقبة")
     state_color = GREEN if state == "confirmed" else (ORANGE if state == "conditional" else GOLD)
     state_x = x + badge_w * 2 + gap + 22
     state_w = max(142, _text_width(draw, state_text, F_CARD, rtl=True) + 54)
@@ -2443,7 +2458,7 @@ def _draw_projection_candles(
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     entry = _number(analysis.get("entry"))
-    if draw_mode == "watch" or direction not in {"صاعد", "هابط"} or entry is None:
+    if draw_mode not in {"conditional", "confirmed"} or direction not in {"صاعد", "هابط"} or entry is None:
         return
 
     targets: list[float] = []
@@ -2604,6 +2619,8 @@ def _draw_trade_axis_card(
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
     """Return right-axis cards centered on their exact real-price Y."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
+    if draw_mode == "inactive":
+        return draw_mode, []
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     if direction not in {"صاعد", "هابط"}:
         return draw_mode, []
@@ -2615,14 +2632,14 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 
     entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Entry", entry, entry_y, ENTRY_CARD)]
-        if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), CANCEL_CARD))
-        return draw_mode, items
+        return draw_mode, [("Entry", entry, entry_y, ENTRY_CARD)]
 
     items = [("Entry", entry, entry_y, ENTRY_CARD)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
-        items.append(("Stop", stop, _price_y(stop, price_min, price_max), STOP_CARD))
+        if draw_mode == "conditional":
+            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), CANCEL_CARD))
+        else:
+            items.append(("Stop", stop, _price_y(stop, price_min, price_max), STOP_CARD))
     target_colors = (TP1_CARD, TP2_CARD, TP3_CARD)
     for index, key in enumerate(("target_1", "target_2", "target_3"), start=1):
         target = _number(analysis.get(key))
@@ -2762,14 +2779,19 @@ def _draw_bottom_summary(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) ->
 
     state = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("direction") or "غير واضح")
-    entry_value = "جاهز" if state == "confirmed" else ("مشروط" if state == "conditional" else "مراقبة")
-    entry_color = GREEN if state == "confirmed" else (ORANGE if state == "conditional" else BLUE)
-    confirmation_value = "مكتمل" if state == "confirmed" else "بانتظار"
-    confirmation_color = GREEN if state == "confirmed" else ORANGE
+    if state == "inactive":
+        entry_value, entry_color = "متوقف", GOLD
+        confirmation_value, confirmation_color = "بيانات قديمة", GOLD
+        decision_value, decision_color = "انتظار السوق", GOLD
+    else:
+        entry_value = "جاهز" if state == "confirmed" else ("مشروط" if state == "conditional" else "مراقبة")
+        entry_color = GREEN if state == "confirmed" else (ORANGE if state == "conditional" else BLUE)
+        confirmation_value = "مكتمل" if state == "confirmed" else "بانتظار"
+        confirmation_color = GREEN if state == "confirmed" else ORANGE
     if state == "confirmed":
         decision_value = "شراء" if direction == "صاعد" else ("بيع" if direction == "هابط" else "انتظار")
         decision_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else ORANGE)
-    else:
+    elif state != "inactive":
         decision_value, decision_color = "انتظار", ORANGE
     breakout_value, breakout_color = _breakout_label(analysis)
     rebound_value, rebound_color = _rebound_label(analysis)
@@ -2845,18 +2867,27 @@ def _draw_notes(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     scenario = str(analysis.get("scenario") or "مراقبة مستوى التفعيل")
     targets = [_number(analysis.get(key)) for key in ("target_1", "target_2", "target_3")]
 
-    state_suffix = "مراقبة" if draw_mode == "watch" else ("مؤكد" if draw_mode == "confirmed" else "مشروط")
+    state_suffix = (
+        "السوق مغلق/البيانات غير محدثة"
+        if draw_mode == "inactive"
+        else ("مراقبة" if draw_mode == "watch" else ("مؤكد" if draw_mode == "confirmed" else "مشروط"))
+    )
     direction_value = f"{direction} - احتمال {probability}٪ - {state_suffix}"
     pattern_value = f"{pattern} - ثقة {pattern_confidence}٪" if pattern != "لا يوجد" else "لا يوجد نموذج مكتمل"
-    stop_value = _fmt_price(stop) if stop is not None and draw_mode != "watch" else "—"
-    target_value = " | ".join(f"TP{i}: {_fmt_price(value)}" for i, value in enumerate(targets, start=1) if value is not None) if draw_mode != "watch" else "بانتظار وضوح السيناريو"
+    active_setup = draw_mode in {"conditional", "confirmed"}
+    stop_value = _fmt_price(stop) if stop is not None and active_setup else "—"
+    target_value = (
+        " | ".join(f"TP{i}: {_fmt_price(value)}" for i, value in enumerate(targets, start=1) if value is not None)
+        if active_setup
+        else ("السوق مغلق/البيانات غير محدثة" if draw_mode == "inactive" else "بانتظار وضوح السيناريو")
+    )
 
     rows = [
         ("الاتجاه:", direction_value, GREEN if direction == "صاعد" else (RED if direction == "هابط" else GOLD), False),
         ("النمط:", pattern_value, BLUE, False),
-        ("شرط الدخول:", confirmation, GREEN if draw_mode != "watch" else GOLD, False),
+        ("شرط الدخول:", confirmation, GREEN if active_setup else GOLD, False),
         ("وقف:", stop_value, RED, True),
-        ("الأهداف:", target_value, GREEN, draw_mode != "watch"),
+        ("الأهداف:", target_value, GREEN, active_setup),
         ("أقرب سيناريو:", scenario, ORANGE, False),
     ]
     draw.rounded_rectangle((left + 12, top + 82, right - 12, bottom - 28), radius=14, outline=(52, 77, 112, 255), width=1)

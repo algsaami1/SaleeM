@@ -1,6 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 
-from app.services.analyzer import _choose_direction, _normalize_probabilities, _validate_analysis
+from app.services.analyzer import (
+    _choose_direction,
+    _market_activity_status,
+    _normalize_probabilities,
+    _validate_analysis,
+)
 
 
 def _flat_candles(price: float = 4120.0, count: int = 30):
@@ -240,3 +246,91 @@ def test_strong_nearby_resistance_prevents_unchecked_buy_confirmation():
     result = _validate_analysis(data, summary)
     assert result["level_pressure"]["resistance_pressure"] > 0
     assert result["draw_mode"] != "confirmed"
+
+
+def _threshold_data(probability: int) -> tuple[dict, dict]:
+    candles = _flat_candles(price=4120.0)
+    data = {
+        "chart_readable": True,
+        "candles": candles,
+        "direction": "صاعد",
+        "buy_probability": probability,
+        "sell_probability": 100 - probability,
+        "setup_state": "مؤكد",
+        "entry_kind": "اختراق",
+        "confirmation": "إغلاق فوق المقاومة",
+        "current_price": 4120.0,
+        "support_levels": [{"price": 4119.0, "strength": 72, "touches": 3}],
+        "resistance_levels": [{"price": 4120.8, "strength": 72, "touches": 3}],
+        "entry": 4120.8,
+        "stop_loss": 4119.8,
+        "stop_reason": "أسفل الدعم",
+        "target_1": 4121.8,
+        "target_2": 4122.8,
+        "target_3": 4123.8,
+        "pattern_type": "كسر وإعادة اختبار",
+        "pattern_confidence": 75,
+        "pattern_lines": [],
+        "pattern_path": [],
+        "scenario": "اختراق واضح",
+        "note": "",
+        "memory_matches": [],
+    }
+    summary = {
+        "direction": "صاعد",
+        "alignment": 100,
+        "frames": {
+            "H4": _frame("صاعد", 0.8, 80),
+            "H1": _frame("صاعد", 0.7, 78),
+            "M15": _frame("صاعد", 0.5, 72),
+            "M5": _frame("صاعد", 0.4, 68),
+        },
+        "warnings": [],
+    }
+    return data, summary
+
+
+def test_probability_below_55_is_watch_and_entry_is_current_price():
+    data, summary = _threshold_data(54)
+    with (
+        patch("app.services.analyzer._choose_direction", return_value=("صاعد", 54, 46)),
+        patch("app.services.analyzer._apply_level_pressure", return_value=("صاعد", 54, 46, {})),
+    ):
+        result = _validate_analysis(data, summary)
+    assert result["draw_mode"] == "watch"
+    assert result["entry"] == result["current_price"]
+    assert result["entry_kind"] == "مراقبة"
+
+
+def test_probability_55_to_69_with_clear_scenario_is_conditional():
+    data, summary = _threshold_data(55)
+    with (
+        patch("app.services.analyzer._choose_direction", return_value=("صاعد", 55, 45)),
+        patch("app.services.analyzer._apply_level_pressure", return_value=("صاعد", 55, 45, {})),
+    ):
+        result = _validate_analysis(data, summary)
+    assert result["draw_mode"] == "conditional"
+
+
+def test_probability_70_with_complete_confirmation_is_confirmed():
+    data, summary = _threshold_data(70)
+    with (
+        patch("app.services.analyzer._choose_direction", return_value=("صاعد", 70, 30)),
+        patch("app.services.analyzer._apply_level_pressure", return_value=("صاعد", 70, 30, {})),
+    ):
+        result = _validate_analysis(data, summary)
+    assert result["draw_mode"] == "confirmed"
+    assert result["trade_side"] == "شراء"
+
+
+def test_old_m5_candle_becomes_closed_or_stale_instead_of_watch():
+    now = datetime(2026, 7, 26, 12, 0, tzinfo=timezone.utc)
+    summary = {
+        "timezone": "Asia/Muscat",
+        "m5_latest_candle_time": "2026-07-26 15:20:00",
+        "cache": {"frames": {"M5": {"status": "cached"}}},
+    }
+    status = _market_activity_status(summary, now_utc=now)
+    assert status["active"] is False
+    assert status["code"] == "closed_or_stale"
+    assert "السوق مغلق" in status["label"]

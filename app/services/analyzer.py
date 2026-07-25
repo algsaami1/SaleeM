@@ -8,8 +8,9 @@ import random
 import statistics
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 from PIL import Image, ImageEnhance
@@ -45,12 +46,95 @@ def load_permanent_analysis_prompt() -> str:
     return PERMANENT_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
-CONFIRMED_PROBABILITY = 65
+CONFIRMED_PROBABILITY = 70
 CONDITIONAL_PROBABILITY = 55
 MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
 MAX_STOP_DISTANCE = 4.0
 STOP_ATR_MULTIPLIER = 1.10
+
+
+def _parse_market_candle_time(value: Any, timezone_name: str) -> datetime | None:
+    """Parse a provider candle time and normalize it to UTC.
+
+    Twelve Data returns naive timestamps in the requested market-data timezone,
+    while tests and some providers may return ISO timestamps with an offset.
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    normalized = text[:-1] + "+00:00" if text.endswith("Z") else text
+    parsed: datetime | None = None
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
+            try:
+                parsed = datetime.strptime(text, pattern)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+
+    if parsed.tzinfo is None:
+        try:
+            parsed = parsed.replace(tzinfo=ZoneInfo(timezone_name or "Asia/Muscat"))
+        except ZoneInfoNotFoundError:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _market_activity_status(
+    market_summary: dict[str, Any] | None,
+    *,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Return whether fresh M5 data is available for a live trade decision.
+
+    A stale M5 fallback or an old latest M5 candle produces one neutral state:
+    ``السوق مغلق/البيانات غير محدثة``.  This avoids presenting old Friday or
+    failed-provider data as a new technical ``watch`` signal.
+    """
+    if not isinstance(market_summary, dict):
+        return {"active": True, "code": "unknown", "label": "بيانات السوق غير متاحة", "age_minutes": None}
+
+    cache = market_summary.get("cache")
+    frame_cache = cache.get("frames") if isinstance(cache, dict) else None
+    m5_cache = frame_cache.get("M5") if isinstance(frame_cache, dict) else None
+    if isinstance(m5_cache, dict) and str(m5_cache.get("status") or "") == "stale_fallback":
+        return {
+            "active": False,
+            "code": "stale",
+            "label": "السوق مغلق/البيانات غير محدثة",
+            "age_minutes": None,
+        }
+
+    latest = market_summary.get("m5_latest_candle_time") or market_summary.get("latest_candle_time")
+    latest_utc = _parse_market_candle_time(latest, str(market_summary.get("timezone") or "Asia/Muscat"))
+    if latest_utc is None:
+        # Do not break test/offline flows that do not include timestamps. In the
+        # production path a timestamp is supplied by the market-data service.
+        return {"active": True, "code": "unknown", "label": "وقت السوق غير متاح", "age_minutes": None}
+
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    age_minutes = max(0.0, (now.astimezone(timezone.utc) - latest_utc).total_seconds() / 60.0)
+    try:
+        max_age = max(7.0, min(60.0, float(os.getenv("MARKET_DATA_MAX_M5_AGE_MINUTES", "15"))))
+    except ValueError:
+        max_age = 15.0
+
+    if age_minutes > max_age:
+        return {
+            "active": False,
+            "code": "closed_or_stale",
+            "label": "السوق مغلق/البيانات غير محدثة",
+            "age_minutes": round(age_minutes, 1),
+        }
+    return {"active": True, "code": "live", "label": "السوق مباشر", "age_minutes": round(age_minutes, 1)}
 
 
 def _is_candle_like_pixel(pixel: tuple[int, int, int, int]) -> bool:
@@ -1112,20 +1196,44 @@ def _validate_analysis(
         if working_direction == "صاعد"
         else int(level_pressure.get("support_pressure") or 0)
     )
-    if direction not in {"صاعد", "هابط"} or probability < 58 or entry_kind == "مراقبة":
-        draw_mode = "watch"
-    elif (
-        probability >= 72
-        and model_state == "مؤكد"
+    market_activity = _market_activity_status(market_summary)
+    clear_scenario = (
+        direction in {"صاعد", "هابط"}
+        and entry_kind != "مراقبة"
+        and geometry_valid
+    )
+    confirmation_complete = (
+        model_state == "مؤكد"
         and higher_aligned
         and alignment >= 75
         and geometry_valid
         and not warnings
         and opposing_pressure < 8
-    ):
+    )
+
+    if not market_activity["active"]:
+        draw_mode = "inactive"
+    elif probability < CONDITIONAL_PROBABILITY or not clear_scenario:
+        # أقل من 55%، أو لا يوجد سيناريو فني واضح: مراقبة فقط.
+        draw_mode = "watch"
+    elif probability >= CONFIRMED_PROBABILITY and confirmation_complete:
+        # 70% فأكثر لا تكفي وحدها؛ يجب اكتمال التأكيد أيضًا.
         draw_mode = "confirmed"
     else:
+        # من 55% إلى أقل من 70% مع سيناريو واضح، وكذلك 70%+ قبل
+        # اكتمال التأكيد: صفقة مشروطة وليست تنفيذًا مباشرًا.
         draw_mode = "conditional"
+
+    if draw_mode == "watch":
+        # المراقبة نقطة قرار محايدة: Entry يساوي السعر الحالي، ولا يوجد
+        # Cancel أو Stop ظاهر. يبدأ السهمان من هذا السعر نفسه.
+        entry = round(current, 2)
+        entry_kind = "مراقبة"
+        confirmation = "انتظار توافق الفريمات وظهور شمعة تأكيد"
+    elif draw_mode == "inactive":
+        entry = round(current, 2)
+        entry_kind = "مراقبة"
+        confirmation = market_activity["label"]
 
     pattern_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
     if pattern_confidence < 60:
@@ -1148,13 +1256,18 @@ def _validate_analysis(
     if not invalidation_condition:
         invalidation_condition = (
             f"إلغاء السيناريو عند تجاوز وقف الخسارة {stop:.2f}"
-            if draw_mode != "watch"
+            if draw_mode in {"conditional", "confirmed"}
             else "إلغاء الفكرة عند كسر البنية المقابلة قبل ظهور شرط التفعيل"
         )
     if not macro_note:
         macro_note = "لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية"
 
-    if draw_mode == "watch":
+    if draw_mode == "inactive":
+        scenario = market_activity["label"]
+        bullish_scenario = "بانتظار عودة شموع M5 الحديثة قبل تقييم سيناريو الصعود"
+        bearish_scenario = "بانتظار عودة شموع M5 الحديثة قبل تقييم سيناريو الهبوط"
+        invalidation_condition = "لا يوجد سيناريو تنفيذي أثناء توقف السوق أو قدم البيانات"
+    elif draw_mode == "watch":
         scenario = "IF تتوافق الفريمات وتظهر شمعة تأكيد THEN يُفعّل أقرب سيناريو"
     elif not scenario:
         scenario = "IF يتحقق شرط الدخول THEN يستمر السيناريو نحو الأهداف المحددة"
@@ -1175,9 +1288,16 @@ def _validate_analysis(
             "sell_probability": sell,
             "direction": direction,
             "analysis_direction": working_direction,
-            "trade_side": "مراقبة" if draw_mode == "watch" else ("شراء" if working_direction == "صاعد" else "بيع"),
+            "trade_side": (
+                market_activity["label"]
+                if draw_mode == "inactive"
+                else ("مراقبة" if draw_mode == "watch" else ("شراء" if working_direction == "صاعد" else "بيع"))
+            ),
             "trade_probability": probability,
             "draw_mode": draw_mode,
+            "market_activity": market_activity,
+            "market_status": market_activity["code"],
+            "market_status_label": market_activity["label"],
             "support_levels": supports,
             "resistance_levels": resistances,
             "entry": entry,
@@ -1291,7 +1411,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 - confirmation وscenario وbullish_scenario وbearish_scenario وinvalidation_condition وmacro_note وnote نصوص عربية قصيرة وواضحة.
 - اجعل scenario هو السيناريو المختار للرسم بصيغة شرطية مختصرة، ولا تضع السيناريو البديل داخل الرسم نفسه.
 
-النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. يرسم البرنامج شموع سيناريو شبه شفافة للشراء والبيع تبدأ من Entry وتتدرج إلى TP1 ثم TP2 ثم TP3. في الحالة المشروطة يرسم سهمًا انعكاسيًا يوضح إعادة الاختبار، وفي المراقبة يرسم سهمين متعاكسين يبدآن من Entry. ترتبط جميع العناصر بتحويل السعر نفسه. لا تُعرض مربعات أو كتابات السيناريو داخل مساحة الشارت؛ تبقى السيناريوهات ضمن بيانات التحليل النصية فقط. بطاقات Entry وStop وCancel وTP1 وTP2 وTP3 على المحور اليميني تتحرك رأسيًا حسب أسعارها الحقيقية، ويكون مركز كل بطاقة على الخط الأفقي للسعر نفسه، ولا تُزاح رأسيًا لحل التداخل. يبحث الرسم في جميع الشموع المتاحة عن أقرب Order Block وFVG صالحين، ويظهرهما في الحالات الأربع بشكل واضح وممتد أفقيًا دون إنشاء منطقة وهمية. ثم يرسم شريط الجلسات والمستويات بوضوح.
+النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. يرسم البرنامج شموع سيناريو شبه شفافة للشراء والبيع تبدأ من Entry وتتدرج إلى TP1 ثم TP2 ثم TP3. في الحالة المشروطة يرسم سهمًا انعكاسيًا يوضح إعادة الاختبار، وفي المراقبة يرسم سهمين متعاكسين يبدآن من Entry. ترتبط جميع العناصر بتحويل السعر نفسه. لا تُعرض مربعات أو كتابات السيناريو داخل مساحة الشارت؛ تبقى السيناريوهات ضمن بيانات التحليل النصية فقط. في المراقبة تكون Entry عند السعر الحالي ولا تظهر Cancel، ويبدأ السهمان المتعاكسان من Entry نفسها. في الحالة المشروطة تظهر Entry وCancel والأهداف، وفي الشراء أو البيع المؤكد تظهر Entry وStop والأهداف. تتحرك البطاقات رأسيًا حسب أسعارها الحقيقية، ويكون مركز كل بطاقة على الخط الأفقي للسعر نفسه، ولا تُزاح رأسيًا لحل التداخل. أقل من 55٪ مراقبة، ومن 55٪ إلى أقل من 70٪ مع سيناريو واضح بشرط، و70٪ فأكثر مع اكتمال التأكيد شراء أو بيع. إذا كانت بيانات M5 قديمة تظهر حالة السوق مغلق/البيانات غير محدثة بلا بطاقات تنفيذ أو أسهم. يبحث الرسم في جميع الشموع المتاحة عن أقرب Order Block وFVG صالحين، ويظهرهما في الحالات الأربع بشكل واضح وممتد أفقيًا دون إنشاء منطقة وهمية. ثم يرسم شريط الجلسات والمستويات بوضوح.
 
 الذاكرة المرجعية للقراءة فقط:
 {memory_context(KNOWLEDGE_DIR)}

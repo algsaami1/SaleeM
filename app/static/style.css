@@ -115,6 +115,7 @@ body.is-analyzing .app-shell{display:grid;min-height:100vh;align-items:center;pa
 .trade-type-pill{display:inline-flex!important;align-items:center;justify-content:center;min-width:62px;padding:5px 8px;border-radius:999px;color:#fff;font-size:10px!important}
 .trade-type-pill.watch{background:var(--blue)}
 .trade-type-pill.conditional{background:var(--orange)}
+.trade-type-pill.inactive{background:#8a6a14}
 .trade-type-pill.buy{background:var(--green)}
 .trade-type-pill.sell{background:var(--red)}
 

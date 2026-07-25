@@ -97,8 +97,11 @@
     {% endif %}
 
     {% if result %}
-    {% set state_label = 'مراقبة' if result.draw_mode == 'watch' else ('نشطة' if result.draw_mode == 'confirmed' else 'مشروط') %}
-    {% if result.draw_mode == 'watch' %}
+    {% set state_label = 'السوق مغلق/البيانات غير محدثة' if result.draw_mode == 'inactive' else ('مراقبة' if result.draw_mode == 'watch' else ('نشطة' if result.draw_mode == 'confirmed' else 'مشروط')) %}
+    {% if result.draw_mode == 'inactive' %}
+      {% set trade_type_label = 'انتظار السوق' %}
+      {% set trade_type_class = 'inactive' %}
+    {% elif result.draw_mode == 'watch' %}
       {% set trade_type_label = 'مراقبة' %}
       {% set trade_type_class = 'watch' %}
     {% elif result.draw_mode == 'conditional' %}
@@ -138,7 +141,7 @@
       <div class="result-status-strip">
         <div><span>نوع الصفقة</span><b class="trade-type-pill {{ trade_type_class }}">{{ trade_type_label }}</b></div>
         <div><span>الحالة</span><b>{{ state_label }}</b></div>
-        <div><span>الاحتمال</span><b>{{ result.trade_probability }}٪</b></div>
+        <div><span>الاحتمال</span><b>{% if result.draw_mode == 'inactive' %}—{% else %}{{ result.trade_probability }}٪{% endif %}</b></div>
       </div>
     </section>
 
@@ -158,8 +161,8 @@
         <div class="analysis-note-row"><span>الاتجاه</span><b>{{ result.direction }} — احتمال {{ result.trade_probability }}٪ — {{ state_label }}</b></div>
         <div class="analysis-note-row"><span>النمط</span><b>{% if result.pattern_type and result.pattern_type != 'لا يوجد' %}{{ result.pattern_type }} — ثقة {{ result.pattern_confidence }}٪{% else %}لا يوجد نموذج مكتمل{% endif %}</b></div>
         <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ result.confirmation or 'انتظار تأكيد واضح' }}</b></div>
-        <div class="analysis-note-row"><span>وقف الخسارة</span><b>{% if result.draw_mode != 'watch' and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
-        <div class="analysis-note-row"><span>الأهداف</span><b>{% if result.draw_mode != 'watch' %}{% if result.target_1 is not none %}TP1: {{ '%.2f'|format(result.target_1) }}{% endif %}{% if result.target_2 is not none %} | TP2: {{ '%.2f'|format(result.target_2) }}{% endif %}{% if result.target_3 is not none %} | TP3: {{ '%.2f'|format(result.target_3) }}{% endif %}{% else %}بانتظار وضوح السيناريو{% endif %}</b></div>
+        <div class="analysis-note-row"><span>وقف الخسارة</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
+        <div class="analysis-note-row"><span>الأهداف</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] %}{% if result.target_1 is not none %}TP1: {{ '%.2f'|format(result.target_1) }}{% endif %}{% if result.target_2 is not none %} | TP2: {{ '%.2f'|format(result.target_2) }}{% endif %}{% if result.target_3 is not none %} | TP3: {{ '%.2f'|format(result.target_3) }}{% endif %}{% elif result.draw_mode == 'inactive' %}السوق مغلق/البيانات غير محدثة{% else %}بانتظار وضوح السيناريو{% endif %}</b></div>
         <div class="analysis-note-row"><span>السيناريو المختار</span><b>{{ result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد' }}</b></div>
         <div class="analysis-note-row scenario-up"><span>سيناريو الصعود</span><b>{{ result.bullish_scenario or 'IF يثبت السعر فوق المقاومة الأقرب THEN يتجه نحو الهدف الصاعد التالي' }}</b></div>
         <div class="analysis-note-row scenario-down"><span>سيناريو الهبوط</span><b>{{ result.bearish_scenario or 'IF يغلق السعر تحت الدعم الأقرب THEN يتجه نحو الهدف الهابط التالي' }}</b></div>
