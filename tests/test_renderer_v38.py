@@ -241,38 +241,49 @@ def test_model_current_line_ratio_is_used_as_pixel_detection_fallback():
     assert abs(detected - expected) <= 1
 
 
-def test_image_axis_uses_all_exact_label_positions_when_available():
+def test_image_axis_uses_exact_label_positions_when_available():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
-    source = [
-        (current + 8.0, 0.06),
-        (current + 6.0, 0.18),
-        (current + 4.0, 0.31),
-        (current + 2.0, 0.44),
-        (current + 0.0, 0.57),
-        (current - 2.0, 0.70),
-    ]
     analysis["image_axis_labels"] = [
-        {"price": price, "y_ratio": ratio} for price, ratio in source
+        {"price": current + 8.0, "y_ratio": 0.06},
+        {"price": current + 6.0, "y_ratio": 0.18},
+        {"price": current + 4.0, "y_ratio": 0.31},
+        {"price": current + 2.0, "y_ratio": 0.44},
+        {"price": current + 0.0, "y_ratio": 0.57},
+        {"price": current - 2.0, "y_ratio": 0.70},
     ]
-    # A conflicting green-line position must not shift the fitted axis.
     reference_y = CHART[1] + int((CHART[3] - CHART[1]) * 0.52)
     dynamic = _dynamic_image_axis_range(analysis, reference_y)
     assert dynamic is not None
     low, high = dynamic
 
-    labels = _right_axis_labels(analysis, low, high)
-    assert [price for _role, price, _y in labels] == [price for price, _ratio in source]
-    chart_height = CHART[3] - CHART[1]
-    for (_role, price, fitted_y), (_source_price, ratio) in zip(labels, source):
-        assert price == _source_price
-        source_y = CHART[1] + round(chart_height * ratio)
-        assert abs(fitted_y - source_y) <= 15
+    # The internal scale still uses the preferred inner anchors.
+    top_y = _price_y(current + 6.0, low, high)
+    second_y = _price_y(current + 4.0, low, high)
+    expected_step_px = round((CHART[3] - CHART[1]) * 0.13)
+    assert abs((second_y - top_y) - expected_step_px) <= 3
 
-    expected_current_y = CHART[1] + round(chart_height * 0.57)
-    assert abs(_price_y(current, low, high) - expected_current_y) <= 15
-    assert abs(_price_y(current, low, high) - reference_y) > 20
-    assert analysis["_calibrated_axis_model"]["anchor_source"] == "all_axis_labels"
+    labels = _right_axis_labels(analysis, low, high)
+    assert [price for _role, price, _y in labels] == [
+        current + 8.0,
+        current + 6.0,
+        current + 4.0,
+        current + 2.0,
+        current,
+        current - 2.0,
+    ]
+    # The detected current line is the offset anchor, so every axis label must
+    # be projected by the exact same transform used by the chart drawings.
+    expected_y = [_price_y(price, low, high) for price in (
+        current + 8.0,
+        current + 6.0,
+        current + 4.0,
+        current + 2.0,
+        current,
+        current - 2.0,
+    )]
+    assert [y for _role, _price, y in labels] == expected_y
+    assert abs(_price_y(current, low, high) - reference_y) <= 1
 
 
 def test_image_axis_rejects_inconsistent_inner_anchor_sequence():
@@ -434,25 +445,6 @@ def test_exact_axis_range_maps_clean_source_labels_near_their_original_y():
         assert abs(fitted_y - source_y) <= 2
 
 
-def test_exact_axis_uses_all_labels_for_offset_even_when_current_line_disagrees():
-    analysis = _analysis("صاعد")
-    current = analysis["current_price"]
-    analysis["image_axis_labels"] = [
-        {"price": current + 8.0, "y_ratio": 0.10},
-        {"price": current + 6.0, "y_ratio": 0.22},
-        {"price": current + 4.0, "y_ratio": 0.34},
-        {"price": current + 2.0, "y_ratio": 0.46},
-        {"price": current + 0.0, "y_ratio": 0.58},
-        {"price": current - 2.0, "y_ratio": 0.70},
-    ]
-    # Deliberately wrong green-line reference: it must not shift the axis.
-    wrong_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.20)
-    low, high = _dynamic_image_axis_range(analysis, wrong_y)
-    expected_y = CHART[1] + round((CHART[3] - CHART[1]) * 0.58)
-    assert abs(_price_y(current, low, high) - expected_y) <= 2
-    assert analysis["_calibrated_axis_model"]["anchor_source"] == "all_axis_labels"
-
-
 def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
     image = Image.new("RGBA", (1111, 2243), (245, 245, 245, 255))
     # Simulate blue BUY/SELL boxes separated by a white lot field.
@@ -476,12 +468,12 @@ def test_header_pattern_uses_two_lines_for_long_break_retest_name():
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
 
 
-def test_watch_mode_exposes_entry_without_single_cancel():
+def test_watch_mode_exposes_entry_and_cancel_only():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["Entry"]
+    assert [item[0] for item in items] == ["Entry", "Cancel"]
 
 
 def test_conditional_mode_keeps_entry_sl_and_three_targets():
