@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from PIL import Image, ImageDraw
 
 from app.engine.renderer import (
+    AXIS_PRICE_CARD_HEIGHT,
+    AXIS_PRICE_CARD_WIDTH,
     CHART,
     CHART_CARD,
     NOTES,
@@ -479,16 +481,16 @@ def test_conditional_mode_keeps_entry_sl_and_three_targets():
     assert [item[0] for item in items] == ["Entry", "Stop", "TP1", "TP2", "TP3"]
 
 
-def test_overlapping_trade_cards_move_horizontally_only():
+def test_overlapping_trade_cards_stay_in_one_fixed_horizontal_lane():
     items = [
         ("Entry", 4058.0, 1000, (38, 117, 247, 255)),
         ("TP", 4058.2, 1020, (25, 211, 112, 255)),
         ("SL", 4057.8, 1040, (245, 63, 70, 255)),
     ]
-    lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
+    lanes = _horizontal_card_lanes(items, card_height=AXIS_PRICE_CARD_HEIGHT, vertical_gap=8)
     assert lanes[0] == 0
-    assert lanes[1] == 1
-    assert lanes[2] == 2
+    assert lanes[1] == 0
+    assert lanes[2] == 0
     assert [item[2] for item in items] == [1000, 1020, 1040]
 
 
@@ -505,6 +507,31 @@ def test_trade_axis_card_center_matches_exact_price_y():
         x_lane=1,
     )
     assert (rect[1] + rect[3]) // 2 == exact_y
+    assert rect[2] - rect[0] == AXIS_PRICE_CARD_WIDTH
+    assert rect[3] - rect[1] == AXIS_PRICE_CARD_HEIGHT
+
+
+def test_trade_axis_card_ignores_horizontal_lane_offsets():
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas)
+    first = _draw_trade_axis_card(
+        draw,
+        label="Entry",
+        price=4058.0,
+        exact_y=1200,
+        color=(38, 117, 247, 255),
+        x_lane=0,
+    )
+    second = _draw_trade_axis_card(
+        draw,
+        label="TP1",
+        price=4059.0,
+        exact_y=1220,
+        color=(25, 211, 112, 255),
+        x_lane=5,
+    )
+    assert first[0] == second[0]
+    assert first[2] == second[2]
 
 
 def test_current_price_binding_uses_shared_transform_even_without_detected_line():

@@ -53,9 +53,11 @@ def sample_analysis():
 
 
 def test_strength_width_matches_clean_chart_spec():
-    assert _strength_width(90) == 3
-    assert _strength_width(75) == 2
-    assert _strength_width(60) == 1
+    assert _strength_width(95) == 6
+    assert _strength_width(85) == 5
+    assert _strength_width(75) == 4
+    assert _strength_width(60) == 3
+    assert _strength_width(40) == 2
 
 
 def test_validation_accepts_flexible_candles_and_three_targets():

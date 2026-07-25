@@ -49,6 +49,26 @@ TEAL = (60, 216, 196, 255)
 TP_GREEN = (25, 211, 112, 255)
 TP_GREEN_FILL = (25, 211, 112, 52)
 
+# ألوان المستويات الجديدة: المقاومة أحمر غامق والدعم أزرق غامق.
+# لون البطاقة والخط واحد حتى تكون القراءة البصرية مباشرة وواضحة.
+RESISTANCE_DARK = (139, 28, 38, 255)
+RESISTANCE_FILL = (102, 22, 31, 245)
+SUPPORT_DARK = (18, 65, 145, 255)
+SUPPORT_FILL = (13, 48, 110, 245)
+
+# بطاقات محور الأسعار اليميني لها نفس أبعاد وشكل بطاقة السعر الحالي.
+AXIS_PRICE_CARD_WIDTH = 168
+AXIS_PRICE_CARD_HEIGHT = 62
+AXIS_PRICE_CARD_RADIUS = 6
+
+# اختلاف بطاقات التنفيذ يكون باللون فقط؛ الحجم والشكل والموضع الأفقي ثابتة.
+ENTRY_CARD = (34, 104, 220, 255)
+STOP_CARD = (177, 34, 45, 255)
+CANCEL_CARD = (205, 99, 19, 255)
+TP1_CARD = (37, 166, 106, 255)
+TP2_CARD = (20, 142, 84, 255)
+TP3_CARD = (8, 112, 64, 255)
+
 # تخطيط مطابق لصورة الآيفون المرفوعة: نحافظ على مقاس الصورة الكاملة
 # 1320×2868، ونُظهر داخلها الجزء المحدد 1111×2243 بالبكسل نفسه.
 # الجزء الظاهر يأخذ أقصى يمين المصدر (بما فيه محور الأسعار الأصلي)،
@@ -168,6 +188,8 @@ F_TOP_VALUE_SMALL = _font(24, True)
 F_TOP_VALUE_LATIN = _font(29, True, True)
 F_TRADE_CARD_LABEL = _font(18, True, True)
 F_TRADE_CARD_PRICE = _font(29, True, True)
+F_TRADE_AXIS_LABEL = _font(18, True, True)
+F_TRADE_AXIS_PRICE = _font(25, True, True)
 F_LEVEL_CARD = _font(20, True, True)
 F_AXIS_EDGE = _font(17, False, True)
 F_SESSION_NAME = _font(23, True, True)
@@ -377,11 +399,17 @@ def _dash_line(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int
 
 
 def _strength_width(strength: int) -> int:
-    if strength >= 85:
+    """Return a visibly progressive line width for a 0-100 strength score."""
+    score = max(0, min(100, int(strength)))
+    if score >= 90:
+        return 6
+    if score >= 80:
+        return 5
+    if score >= 65:
+        return 4
+    if score >= 50:
         return 3
-    if strength >= 70:
-        return 2
-    return 1
+    return 2
 
 
 def _strength_name(strength: int) -> str:
@@ -2106,12 +2134,12 @@ def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: 
 
 
 def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
-    """Draw R1/R2 and S1/S2 as compact same-color filled rectangles."""
+    """Draw dark red resistance and dark blue support with strength-based width."""
     left, _top, right, _bottom = CHART
     all_levels: list[tuple[str, int, dict[str, Any], float, int, tuple[int, int, int, int], tuple[int, int, int, int]]] = []
     specs = (
-        ("resistance_levels", PURPLE, (92, 24, 124, 245)),
-        ("support_levels", CYAN, (5, 83, 119, 245)),
+        ("resistance_levels", RESISTANCE_DARK, RESISTANCE_FILL),
+        ("support_levels", SUPPORT_DARK, SUPPORT_FILL),
     )
     for key, color, fill in specs:
         levels = list(analysis.get(key) or [])[:2]
@@ -2149,7 +2177,7 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
             radius=5,
         )
         line_start = min(right - 20, rect[2] + 8)
-        draw.line((line_start, exact_y, right - 3, exact_y), fill=color, width=max(2, _strength_width(strength)))
+        draw.line((line_start, exact_y, right - 3, exact_y), fill=color, width=_strength_width(strength))
         if abs(y_label - exact_y) > 3:
             draw.line((rect[2], y_label, line_start, exact_y), fill=color, width=2)
 
@@ -2284,10 +2312,17 @@ def _draw_current_price(
     # Draw a fallback card only for fully reconstructed backgrounds.
     if current is None or analysis.get("_using_chart_background"):
         return
-    source_axis_left = CHART[2] + 5
     source_axis_right = SOURCE_VISIBLE_WIDTH - 8
-    box = (source_axis_left, y - 31, source_axis_right, y + 31)
-    draw.rounded_rectangle(box, radius=6, fill=(71, 171, 154, 255), outline=(84, 224, 192, 255), width=2)
+    source_axis_left = source_axis_right - AXIS_PRICE_CARD_WIDTH
+    half_h = AXIS_PRICE_CARD_HEIGHT // 2
+    box = (source_axis_left, y - half_h, source_axis_right, y + half_h)
+    draw.rounded_rectangle(
+        box,
+        radius=AXIS_PRICE_CARD_RADIUS,
+        fill=(71, 171, 154, 255),
+        outline=(84, 224, 192, 255),
+        width=2,
+    )
     draw.text(((source_axis_left + source_axis_right) // 2, y), _fmt_price(current), font=F_TRADE_CARD_PRICE, fill=(4, 27, 33, 255), anchor="mm")
 
 
@@ -2297,26 +2332,14 @@ def _horizontal_card_lanes(
     card_height: int = 66,
     vertical_gap: int = 8,
 ) -> dict[int, int]:
-    """Assign horizontal lanes while preserving every card's exact Y.
+    """Keep all cards in one fixed horizontal lane and permit vertical overlap.
 
-    The original chart axis is the sole vertical reference. When two cards are
-    close enough to overlap, the later card moves left into another horizontal
-    lane. Its center never moves up or down.
+    The user explicitly prefers exact price binding over collision avoidance.
+    Therefore no card may shift left or right when nearby prices overlap.
+    ``card_height`` and ``vertical_gap`` remain accepted for compatibility.
     """
-    lanes_last_y: list[int] = []
-    assignments: dict[int, int] = {}
-    minimum_gap = card_height + vertical_gap
-    for index in sorted(range(len(items)), key=lambda idx: items[idx][2]):
-        exact_y = int(items[index][2])
-        lane = 0
-        while lane < len(lanes_last_y) and exact_y - lanes_last_y[lane] < minimum_gap:
-            lane += 1
-        if lane == len(lanes_last_y):
-            lanes_last_y.append(exact_y)
-        else:
-            lanes_last_y[lane] = exact_y
-        assignments[index] = lane
-    return assignments
+    del card_height, vertical_gap
+    return {index: 0 for index in range(len(items))}
 
 
 def _draw_trade_axis_card(
@@ -2328,16 +2351,17 @@ def _draw_trade_axis_card(
     color: tuple[int, int, int, int],
     x_lane: int = 0,
 ) -> tuple[int, int, int, int]:
-    """Draw one execution card centered exactly on its real price Y.
+    """Draw a fixed-position colored rectangle centered on its exact price Y.
 
-    Vertical displacement is forbidden. Overlap is resolved by moving the card
-    left through ``x_lane`` only.
+    All execution cards use the same dimensions as the current-price card.
+    Vertical overlap is allowed, and ``x_lane`` is intentionally ignored so a
+    card can only move up or down with its real price.
     """
-    axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
-    card_w = min(162, axis_right - axis_left + 4)
-    card_h = 66
-    lane_gap = 10
-    x2 = axis_right - 14 - x_lane * (card_w + lane_gap)
+    del x_lane
+    _axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
+    card_w = AXIS_PRICE_CARD_WIDTH
+    card_h = AXIS_PRICE_CARD_HEIGHT
+    x2 = axis_right - 14
     x1 = x2 - card_w
     y1 = int(exact_y - card_h // 2)
     y2 = y1 + card_h
@@ -2349,9 +2373,16 @@ def _draw_trade_axis_card(
     draw.line((connector_start, exact_y, connector_end, exact_y), fill=color, width=2)
     draw.line((connector_end, exact_y, x1, exact_y), fill=color, width=2)
 
-    draw.rounded_rectangle((x1, y1, x2, y2), radius=7, fill=(255, 255, 255, 255), outline=color, width=3)
-    draw.text(((x1 + x2) // 2, y1 + 20), label, font=F_TRADE_CARD_LABEL, fill=color, anchor="mm")
-    draw.text(((x1 + x2) // 2, y1 + 47), _fmt_card_price(price), font=F_TRADE_CARD_PRICE, fill=(8, 24, 42, 255), anchor="mm")
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2),
+        radius=AXIS_PRICE_CARD_RADIUS,
+        fill=color,
+        outline=(255, 255, 255, 190),
+        width=2,
+    )
+    center_y = (y1 + y2) // 2
+    draw.text((x1 + 11, center_y), label, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="lm")
+    draw.text((x2 - 11, center_y), _fmt_card_price(price), font=F_TRADE_AXIS_PRICE, fill=WHITE, anchor="rm")
     return x1, y1, x2, y2
 
 
@@ -2369,18 +2400,19 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 
     entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Entry", entry, entry_y, BLUE)]
+        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Entry", entry, entry_y, ENTRY_CARD)]
         if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), RED))
+            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), CANCEL_CARD))
         return draw_mode, items
 
-    items = [("Entry", entry, entry_y, BLUE)]
+    items = [("Entry", entry, entry_y, ENTRY_CARD)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
-        items.append(("Stop", stop, _price_y(stop, price_min, price_max), RED))
+        items.append(("Stop", stop, _price_y(stop, price_min, price_max), STOP_CARD))
+    target_colors = (TP1_CARD, TP2_CARD, TP3_CARD)
     for index, key in enumerate(("target_1", "target_2", "target_3"), start=1):
         target = _number(analysis.get(key))
         if target is not None and _is_visible_price(target, price_min, price_max):
-            items.append((f"TP{index}", target, _price_y(target, price_min, price_max), TP_GREEN))
+            items.append((f"TP{index}", target, _price_y(target, price_min, price_max), target_colors[index - 1]))
     return draw_mode, items
 
 
@@ -2395,21 +2427,21 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     dashed = draw_mode in {"watch", "conditional"}
     for _label, _price, exact_y, color in items:
         # The line and card center share the exact same price Y. Cards move
-        # vertically with price; overlap is solved horizontally only.
+        # vertically with price and remain in one fixed horizontal position.
+        # Nearby levels may overlap vertically by design.
         if dashed:
             _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
         else:
             draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
 
-    lanes = _horizontal_card_lanes(items, card_height=66, vertical_gap=8)
-    for index, (label, price, exact_y, color) in enumerate(items):
+    for label, price, exact_y, color in items:
         _draw_trade_axis_card(
             draw,
             label=label,
             price=price,
             exact_y=exact_y,
             color=color,
-            x_lane=lanes.get(index, 0),
+            x_lane=0,
         )
 
     _draw_projection_candles(image, analysis, price_min, price_max)
@@ -2665,7 +2697,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
         current_reference_y,
     )
     analysis["price_axis_binding"] = "original_chart_single_transform"
-    analysis["price_axis_overlap_policy"] = "horizontal_only"
+    analysis["price_axis_overlap_policy"] = "fixed_x_vertical_overlap_allowed"
 
     analysis["_using_chart_background"] = using_chart_background
     _draw_grid(draw, analysis, price_min, price_max, background_mode=using_chart_background)
