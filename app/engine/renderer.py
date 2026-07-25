@@ -2016,7 +2016,9 @@ def _detect_fvg(candles: list[dict[str, Any]]) -> list[tuple[int, float, float]]
             zones.append((i, float(a["high"]), float(c["low"])))
         elif float(a["low"]) > float(c["high"]):
             zones.append((i, float(c["high"]), float(a["low"])))
-    return zones[-1:]
+    # Keep all valid gaps.  The renderer chooses the nearest useful one rather
+    # than hiding FVG merely because it is not among the last few candles.
+    return zones
 
 
 def _detect_order_blocks(candles: list[dict[str, Any]]) -> list[tuple[int, float, float, int]]:
@@ -2078,9 +2080,65 @@ def _select_directional_order_block(
     return candidates[0][1]
 
 
+def _nearest_detected_order_block(
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    focal_price: float,
+    atr: float,
+) -> tuple[int, float, float, int] | None:
+    """Return the best real OB while avoiding the old over-strict hiding.
+
+    The directional strong/recent OB remains the first choice.  When it is not
+    available, use the closest actually detected block from the supplied M5
+    candles.  No synthetic OB is fabricated.
+    """
+    preferred = _select_directional_order_block(analysis, candles, focal_price, atr)
+    if preferred is not None:
+        return preferred
+
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    candidates: list[tuple[float, tuple[int, float, float, int]]] = []
+    for zone in _detect_order_blocks(candles):
+        index, low, high, strength = zone
+        center = (low + high) / 2
+        side_bonus = 0.0
+        if direction == "صاعد" and center <= focal_price:
+            side_bonus = 18.0
+        elif direction == "هابط" and center >= focal_price:
+            side_bonus = 18.0
+        recency_bonus = index * 0.35
+        distance_penalty = abs(center - focal_price) / max(0.05, atr) * 7.0
+        score = float(strength) + side_bonus + recency_bonus - distance_penalty
+        candidates.append((score, zone))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
+def _nearest_detected_fvg(
+    candles: list[dict[str, Any]],
+    focal_price: float,
+    atr: float,
+) -> tuple[int, float, float] | None:
+    """Return the closest real FVG from all available candles."""
+    candidates: list[tuple[float, tuple[int, float, float]]] = []
+    for zone in _detect_fvg(candles):
+        index, low, high = zone
+        center = (low + high) / 2
+        recency_bonus = index * 0.28
+        distance_penalty = abs(center - focal_price) / max(0.05, atr) * 8.0
+        size_bonus = min(16.0, abs(high - low) / max(0.05, atr) * 10.0)
+        candidates.append((recency_bonus + size_bonus - distance_penalty, zone))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
 def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
     left, top, right, bottom = CHART
-    if not candles or str(analysis.get("draw_mode") or "watch") == "watch":
+    if not candles:
         return
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -2090,45 +2148,41 @@ def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: 
     entry = _number(analysis.get("entry"))
     focal_price = entry if entry is not None else reference
     atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles])
-    recent_floor = max(0, len(candles) - 14)
-
-    # Order Block remains secondary: compact, recent, strong, and near entry.
-    selected_order_block = _select_directional_order_block(analysis, candles, focal_price, atr)
+    # OB and FVG remain visible in watch, conditional, buy and sell results.
+    # They extend horizontally so the user can read the complete zone easily.
+    selected_order_block = _nearest_detected_order_block(analysis, candles, focal_price, atr)
     if selected_order_block is not None:
         index, low, high, strength = selected_order_block
         if not (high < price_min or low > price_max):
-            x1 = max(left + 150, int(left + slot * max(0, index - 0.25)))
-            x2 = min(zone_end, x1 + 185)
+            x1 = max(left + 80, int(left + slot * max(0, index - 0.35)))
+            x2 = zone_end
+            if x2 - x1 < 360:
+                x1 = max(left + 80, x2 - 360)
             y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
             center_y = (y1 + y2) // 2
-            height = max(26, min(88, y2 - y1))
+            height = max(30, min(96, y2 - y1))
             y1, y2 = center_y - height // 2, center_y + height // 2
-            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(75, 99, 190, 24), outline=(100, 139, 255, 96), width=1)
-            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "OB", font=F_ZONE, fill=(185, 207, 255, 210), anchor="mm")
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(75, 99, 190, 34), outline=(100, 139, 255, 150), width=2)
+            tag = (x2 - 66, y1 + 4, x2 - 8, min(y2 - 4, y1 + 32))
+            ld.rounded_rectangle(tag, radius=4, fill=(45, 74, 154, 225))
+            ld.text(((tag[0] + tag[2]) // 2, (tag[1] + tag[3]) // 2), "OB", font=F_ZONE, fill=(235, 242, 255, 255), anchor="mm")
 
-    # FVG is lighter and smaller; it appears only when recent and close to entry.
-    max_fvg_distance = max(0.8, atr * 2.4)
-    fvg_candidates: list[tuple[float, tuple[int, float, float]]] = []
-    for zone in _detect_fvg(candles):
-        index, low, high = zone
-        center = (low + high) / 2
-        if index < recent_floor or abs(center - focal_price) > max_fvg_distance:
-            continue
-        score = -abs(center - focal_price) + index * 0.02
-        fvg_candidates.append((score, zone))
-    fvg_candidates.sort(key=lambda item: item[0], reverse=True)
-
-    if fvg_candidates:
-        _, (index, low, high) = fvg_candidates[0]
+    selected_fvg = _nearest_detected_fvg(candles, focal_price, atr)
+    if selected_fvg is not None:
+        index, low, high = selected_fvg
         if not (high < price_min or low > price_max):
-            x1 = max(left + 150, int(left + slot * max(0, index - 0.2)))
-            x2 = min(zone_end, x1 + 165)
+            x1 = max(left + 80, int(left + slot * max(0, index - 0.25)))
+            x2 = zone_end
+            if x2 - x1 < 330:
+                x1 = max(left + 80, x2 - 330)
             y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
             center_y = (y1 + y2) // 2
-            height = max(24, min(66, y2 - y1))
+            height = max(28, min(76, y2 - y1))
             y1, y2 = center_y - height // 2, center_y + height // 2
-            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(244, 169, 62, 24), outline=(244, 169, 62, 105), width=1)
-            ld.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=F_ZONE, fill=(255, 214, 145, 215), anchor="mm")
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=5, fill=(244, 169, 62, 34), outline=(244, 169, 62, 150), width=2)
+            tag = (x2 - 78, y1 + 4, x2 - 8, min(y2 - 4, y1 + 32))
+            ld.rounded_rectangle(tag, radius=4, fill=(164, 94, 16, 225))
+            ld.text(((tag[0] + tag[2]) // 2, (tag[1] + tag[3]) // 2), "FVG", font=F_ZONE, fill=(255, 239, 204, 255), anchor="mm")
 
     image.alpha_composite(layer)
 
@@ -2211,6 +2265,170 @@ def _projection_closes(entry: float, targets: list[float]) -> list[float]:
         closes.extend([midpoint, target])
         previous = target
     return closes
+
+
+def _draw_trade_risk_reward_zones(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+    candle_right: int,
+) -> None:
+    """Draw transparent target and stop areas for actionable scenarios.
+
+    The zones are shown for conditional, confirmed-buy and confirmed-sell
+    results.  Watch mode remains visually neutral because it has two competing
+    paths and no committed risk/reward structure yet.
+    """
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    if draw_mode not in {"conditional", "confirmed"} or direction not in {"صاعد", "هابط"}:
+        return
+
+    entry = _number(analysis.get("entry"))
+    stop = _number(analysis.get("stop_loss"))
+    targets = [_number(analysis.get(key)) for key in ("target_1", "target_2", "target_3")]
+    targets = [value for value in targets if value is not None]
+    if entry is None or stop is None or not targets:
+        return
+
+    target = targets[-1]
+    if direction == "صاعد":
+        valid = stop < entry < target
+    else:
+        valid = target < entry < stop
+    if not valid:
+        return
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    x1 = min(CHART[2] - 210, max(candle_right + 10, PROJECTION_X1 - 35))
+    x2 = CHART[2] - 8
+    entry_y = _price_y(entry, price_min, price_max)
+    stop_y = _price_y(stop, price_min, price_max)
+    target_y = _price_y(target, price_min, price_max)
+
+    profit_top, profit_bottom = sorted((entry_y, target_y))
+    loss_top, loss_bottom = sorted((entry_y, stop_y))
+    # No border: transparent zones should explain risk/reward without adding
+    # another competing frame over the chart.
+    draw.rectangle((x1, profit_top, x2, profit_bottom), fill=(25, 211, 112, 46))
+    draw.rectangle((x1, loss_top, x2, loss_bottom), fill=(245, 63, 70, 42))
+    image.alpha_composite(layer)
+
+
+def _arrow_head(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[float, float],
+    end: tuple[float, float],
+    color: tuple[int, int, int, int],
+    *,
+    size: float = 14.0,
+    width: int = 4,
+) -> None:
+    """Draw a compact arrow head aligned with the final path segment."""
+    sx, sy = start
+    ex, ey = end
+    angle = math.atan2(ey - sy, ex - sx)
+    wing = math.radians(31)
+    p1 = (ex - size * math.cos(angle - wing), ey - size * math.sin(angle - wing))
+    p2 = (ex - size * math.cos(angle + wing), ey - size * math.sin(angle + wing))
+    draw.line((ex, ey, p1[0], p1[1]), fill=color, width=width)
+    draw.line((ex, ey, p2[0], p2[1]), fill=color, width=width)
+
+
+def _bezier_points(
+    p0: tuple[float, float],
+    p1: tuple[float, float],
+    p2: tuple[float, float],
+    p3: tuple[float, float],
+    *,
+    steps: int = 28,
+) -> list[tuple[int, int]]:
+    points: list[tuple[int, int]] = []
+    for index in range(steps + 1):
+        t = index / steps
+        u = 1.0 - t
+        x = u**3 * p0[0] + 3 * u**2 * t * p1[0] + 3 * u * t**2 * p2[0] + t**3 * p3[0]
+        y = u**3 * p0[1] + 3 * u**2 * t * p1[1] + 3 * u * t**2 * p2[1] + t**3 * p3[1]
+        points.append((round(x), round(y)))
+    return points
+
+
+def _draw_curved_arrow(
+    draw: ImageDraw.ImageDraw,
+    points: list[tuple[int, int]],
+    color: tuple[int, int, int, int],
+    *,
+    width: int = 5,
+) -> None:
+    if len(points) < 2:
+        return
+    draw.line(points, fill=color, width=width, joint="curve")
+    _arrow_head(draw, points[-2], points[-1], color, size=15.0, width=width)
+
+
+def _draw_scenario_arrows(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> None:
+    """Draw retest arrows for conditional and two alternatives for watch."""
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    entry = _number(analysis.get("entry"))
+    if draw_mode not in {"watch", "conditional"} or entry is None:
+        return
+    if not _is_visible_price(entry, price_min, price_max):
+        return
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    entry_y = _price_y(entry, price_min, price_max)
+    x0 = PROJECTION_X1 - 8
+    x3 = min(CHART[2] - 44, PROJECTION_X2 - 5)
+    price_span = max(0.01, price_max - price_min)
+    move = max(price_span * 0.055, abs((_number(analysis.get("target_1")) or entry) - entry) * 0.55)
+    move_px = max(74, min(190, abs(_price_y(entry + move, price_min, price_max) - entry_y)))
+
+    def retest_path(sign: int, color: tuple[int, int, int, int]) -> None:
+        # sign=-1 means visually upward; sign=+1 means visually downward.
+        first_end = (x0 + 74, entry_y + sign * move_px * 0.72)
+        first = _bezier_points(
+            (x0, entry_y),
+            (x0 + 24, entry_y + sign * move_px * 0.15),
+            (x0 + 45, entry_y + sign * move_px * 0.78),
+            first_end,
+            steps=20,
+        )
+        retest_end = (x0 + 132, entry_y + sign * move_px * 0.25)
+        second = _bezier_points(
+            first_end,
+            (x0 + 92, entry_y + sign * move_px * 0.78),
+            (x0 + 108, entry_y + sign * move_px * 0.22),
+            retest_end,
+            steps=18,
+        )
+        final_end = (x3, entry_y + sign * move_px * 1.12)
+        third = _bezier_points(
+            retest_end,
+            (x0 + 154, entry_y + sign * move_px * 0.18),
+            (x3 - 34, entry_y + sign * move_px * 1.00),
+            final_end,
+            steps=24,
+        )
+        path = first + second[1:] + third[1:]
+        _draw_curved_arrow(draw, path, color, width=5)
+
+    if draw_mode == "conditional" and direction in {"صاعد", "هابط"}:
+        retest_path(-1 if direction == "صاعد" else 1, (249, 115, 22, 225))
+    elif draw_mode == "watch":
+        # Two equal alternatives begin from the exact Entry level.
+        retest_path(-1, (38, 117, 247, 215))
+        retest_path(1, (249, 115, 22, 215))
+
+    image.alpha_composite(layer)
 
 
 def _draw_projection_candles(
@@ -2445,6 +2663,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
         )
 
     _draw_projection_candles(image, analysis, price_min, price_max)
+    _draw_scenario_arrows(image, analysis, price_min, price_max)
 
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
@@ -2709,6 +2928,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     count = max(1, len(candles))
     candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)
     slot = (candle_right - CHART[0]) / count
+    _draw_trade_risk_reward_zones(image, analysis, price_min, price_max, candle_right)
     _draw_market_zones(image, draw, analysis, candles, slot, candle_right, price_min, price_max)
     draw = ImageDraw.Draw(image)
     if not using_chart_background:

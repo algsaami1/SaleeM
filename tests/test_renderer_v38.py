@@ -26,6 +26,9 @@ from app.engine.renderer import (
     _close_label,
     _horizontal_card_lanes,
     _draw_trade_axis_card,
+    _draw_market_zones,
+    _draw_scenario_arrows,
+    _draw_trade_risk_reward_zones,
     _trade_display_items,
     _exact_image_axis_model,
     _price_range,
@@ -585,3 +588,58 @@ def test_watch_close_card_waits_instead_of_inventing_level():
     analysis["draw_mode"] = "watch"
     value, _color = _close_label(analysis)
     assert value == "بانتظار"
+
+
+def test_watch_mode_draws_market_zones_when_real_fvg_and_ob_exist():
+    candles = [
+        {"open": 101.0, "high": 101.2, "low": 99.8, "close": 100.0},
+        {"open": 100.0, "high": 103.4, "low": 99.9, "close": 103.0},
+        {"open": 103.0, "high": 104.2, "low": 102.0, "close": 104.0},
+        {"open": 104.0, "high": 104.3, "low": 103.2, "close": 103.5},
+        {"open": 103.5, "high": 105.2, "low": 103.4, "close": 105.0},
+    ]
+    analysis = {
+        "draw_mode": "watch",
+        "direction": "صاعد",
+        "analysis_direction": "صاعد",
+        "entry": 103.0,
+    }
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    _draw_market_zones(
+        canvas,
+        draw,
+        analysis,
+        candles,
+        slot=40,
+        candle_right=650,
+        price_min=98.0,
+        price_max=106.0,
+    )
+    assert canvas.getbbox() is not None
+
+
+def test_risk_reward_zones_appear_for_conditional_but_not_watch():
+    conditional = _analysis("صاعد")
+    conditional["draw_mode"] = "conditional"
+    low, high = _price_range(conditional)
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 0))
+    _draw_trade_risk_reward_zones(canvas, conditional, low, high, candle_right=632)
+    assert canvas.getbbox() is not None
+
+    watch = _analysis("صاعد")
+    watch["draw_mode"] = "watch"
+    low, high = _price_range(watch)
+    neutral = Image.new("RGBA", (1320, 2868), (0, 0, 0, 0))
+    _draw_trade_risk_reward_zones(neutral, watch, low, high, candle_right=632)
+    assert neutral.getbbox() is None
+
+
+def test_conditional_and_watch_scenario_arrows_are_drawn_from_entry():
+    for mode in ("conditional", "watch"):
+        analysis = _analysis("صاعد")
+        analysis["draw_mode"] = mode
+        low, high = _price_range(analysis)
+        canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 0))
+        _draw_scenario_arrows(canvas, analysis, low, high)
+        assert canvas.getbbox() is not None
