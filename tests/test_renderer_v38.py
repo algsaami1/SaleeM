@@ -6,6 +6,10 @@ from app.engine.renderer import (
     CHART,
     CHART_CARD,
     NOTES,
+    TOP_SUMMARY_PANEL,
+    BOTTOM_SUMMARY_PANEL,
+    BOTTOM_CARDS_Y1,
+    BOTTOM_CARDS_Y2,
     _analysis_current_reference_y,
     _anchored_price_range,
     _axis_checked_current_reference_y,
@@ -17,6 +21,7 @@ from app.engine.renderer import (
     _detect_top_trade_controls_band,
     _hide_top_trade_controls,
     _header_pattern_lines,
+    _close_label,
     _horizontal_card_lanes,
     _draw_trade_axis_card,
     _trade_display_items,
@@ -526,3 +531,30 @@ def test_trade_card_labels_do_not_use_trigger_or_active():
         labels = {item[0] for item in items}
         assert "Trigger" not in labels
         assert "Active" not in labels
+
+
+def test_summary_panels_are_fixed_outside_chart_area():
+    assert TOP_SUMMARY_PANEL[3] < CHART_CARD[1]
+    assert BOTTOM_SUMMARY_PANEL[1] > CHART_CARD[3]
+    assert BOTTOM_CARDS_Y1 > CHART_CARD[3]
+    assert BOTTOM_CARDS_Y2 < BOTTOM_SUMMARY_PANEL[3]
+    assert CHART_CARD == (0, 320, 1320, 2563)
+
+
+def test_close_card_uses_entry_level_and_direction():
+    bullish = _analysis("صاعد")
+    bullish["draw_mode"] = "conditional"
+    value, _color = _close_label(bullish)
+    assert value == f"فوق {round(bullish['entry'])}"
+
+    bearish = _analysis("هابط")
+    bearish["draw_mode"] = "conditional"
+    value, _color = _close_label(bearish)
+    assert value == f"تحت {round(bearish['entry'])}"
+
+
+def test_watch_close_card_waits_instead_of_inventing_level():
+    analysis = _analysis("صاعد")
+    analysis["draw_mode"] = "watch"
+    value, _color = _close_label(analysis)
+    assert value == "بانتظار"

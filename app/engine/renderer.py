@@ -58,6 +58,10 @@ CHART_CARD = (0, 320, 1320, 2563)
 CHART = (0, 320, 930, 2563)
 PRICE_AXIS_X = 1125
 NOTES = (0, 2868, 0, 2868)
+TOP_SUMMARY_PANEL = (10, 12, WIDTH - 10, CHART[1] - 14)
+BOTTOM_SUMMARY_PANEL = (10, CHART_CARD[3] + 12, WIDTH - 10, HEIGHT - 12)
+BOTTOM_CARDS_Y1 = CHART_CARD[3] + 26
+BOTTOM_CARDS_Y2 = HEIGHT - 174
 # شموع السيناريو لها عمود ثابت، لكن مواضعها الرأسية تتبع الأسعار الحقيقية.
 PROJECTION_X1 = 675
 PROJECTION_X2 = 902
@@ -168,7 +172,6 @@ F_LEVEL_CARD = _font(20, True, True)
 F_AXIS_EDGE = _font(17, False, True)
 F_SESSION_NAME = _font(23, True, True)
 F_SESSION_TIME = _font(17, False, True)
-F_PROJECTION_LABEL = _font(15, True)
 
 
 def _number(value: Any) -> float | None:
@@ -1559,61 +1562,236 @@ def _draw_rtl_lines_centered(
         _draw_rtl(draw, (center_x, start_y + index * spacing), line, font, fill, anchor="mm")
 
 
-def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    """Draw the approved four-card summary header.
-
-    The layout is identical for every result. Only values and state colors
-    change. Direction is represented by the trade type, so no separate
-    direction card is needed.
-    """
-    panel = (10, 12, WIDTH - 10, CHART[1] - 35)
-    draw.rounded_rectangle(panel, radius=22, fill=(7, 29, 54, 255), outline=(37, 67, 99, 255), width=2)
-
-    direction = str(analysis.get("direction") or "غير واضح")
+def _analysis_state(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
     state = str(analysis.get("draw_mode") or "watch")
-    state_value = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
-    state_color = GREEN if state == "confirmed" else (GOLD if state == "conditional" else BLUE)
+    value = {"confirmed": "مؤكد", "conditional": "مشروط", "watch": "مراقبة"}.get(state, "مراقبة")
+    color = GREEN if state == "confirmed" else (GOLD if state == "conditional" else BLUE)
+    return value, color
 
-    pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
-    probability = int(analysis.get("trade_probability") or max(analysis.get("buy_probability") or 50, analysis.get("sell_probability") or 50))
-    probability = max(0, min(100, probability))
 
-    if state == "watch":
-        trade_type_value, trade_type_color = "مراقبة", BLUE
-    elif state == "conditional":
-        trade_type_value, trade_type_color = "بشرط", ORANGE
-    elif direction == "صاعد":
-        trade_type_value, trade_type_color = "شراء", GREEN
-    elif direction == "هابط":
-        trade_type_value, trade_type_color = "بيع", RED
+def _nearest_zone_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return "مراقبة", BLUE
+
+    nearest_support = None
+    nearest_resistance = None
+    for item in analysis.get("support_levels") or []:
+        value = _number(item.get("price")) if isinstance(item, dict) else None
+        if value is not None and value <= current:
+            distance = current - value
+            if nearest_support is None or distance < nearest_support:
+                nearest_support = distance
+    for item in analysis.get("resistance_levels") or []:
+        value = _number(item.get("price")) if isinstance(item, dict) else None
+        if value is not None and value >= current:
+            distance = value - current
+            if nearest_resistance is None or distance < nearest_resistance:
+                nearest_resistance = distance
+
+    if nearest_support is None and nearest_resistance is None:
+        return "منتصف", CYAN
+    if nearest_resistance is None or (nearest_support is not None and nearest_support <= nearest_resistance):
+        return "دعم", CYAN
+    return "مقاومة", ORANGE
+
+
+def _behavior_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    kind = str(analysis.get("entry_kind") or "مراقبة")
+    mapping = {
+        "إعادة اختبار": ("ارتداد", CYAN),
+        "اختراق": ("اختراق", BLUE),
+        "مباشر": ("اندفاع", GREEN),
+        "مراقبة": ("تذبذب", BLUE),
+    }
+    return mapping.get(kind, ("مراقبة", BLUE))
+
+
+def _momentum_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    candles = analysis.get("candles") or []
+    probability = int(analysis.get("trade_probability") or 50)
+    if len(candles) >= 5:
+        recent = candles[-5:]
+        bodies = []
+        ranges = []
+        signed = 0.0
+        for candle in recent:
+            open_ = _number(candle.get("open"))
+            close = _number(candle.get("close"))
+            high = _number(candle.get("high"))
+            low = _number(candle.get("low"))
+            if None in (open_, close, high, low):
+                continue
+            body = abs(close - open_)
+            span = max(0.01, high - low)
+            bodies.append(body)
+            ranges.append(span)
+            signed += close - open_
+        if bodies and ranges:
+            body_ratio = sum(bodies) / sum(ranges)
+            directional_ratio = abs(signed) / max(0.01, sum(ranges))
+            if probability >= 72 and body_ratio >= 0.48 and directional_ratio >= 0.22:
+                return "قوي", GREEN
+            if probability < 58 or body_ratio < 0.28:
+                return "ضعيف", RED
+    if probability >= 72:
+        return "قوي", GREEN
+    if probability < 58:
+        return "ضعيف", RED
+    return "متوسط", GOLD
+
+
+def _candle_shape_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    candles = analysis.get("candles") or []
+    if not candles:
+        return "غير واضح", BLUE
+    last = candles[-1]
+    open_ = _number(last.get("open"))
+    close = _number(last.get("close"))
+    high = _number(last.get("high"))
+    low = _number(last.get("low"))
+    if None in (open_, close, high, low):
+        return "غير واضح", BLUE
+    span = max(0.01, high - low)
+    body = abs(close - open_)
+    upper = high - max(open_, close)
+    lower = min(open_, close) - low
+    bullish = close >= open_
+
+    if len(candles) >= 2:
+        prev = candles[-2]
+        prev_open = _number(prev.get("open"))
+        prev_close = _number(prev.get("close"))
+        if prev_open is not None and prev_close is not None:
+            previous_bullish = prev_close >= prev_open
+            previous_low_body = min(prev_open, prev_close)
+            previous_high_body = max(prev_open, prev_close)
+            current_low_body = min(open_, close)
+            current_high_body = max(open_, close)
+            if bullish != previous_bullish and current_low_body <= previous_low_body and current_high_body >= previous_high_body:
+                return "ابتلاعية", GREEN if bullish else RED
+
+    if body / span <= 0.16:
+        return "دوجي", GOLD
+    if lower >= body * 1.8 and upper <= max(body, span * 0.18):
+        return "رفض صاعد", GREEN
+    if upper >= body * 1.8 and lower <= max(body, span * 0.18):
+        return "رفض هابط", RED
+    return ("صاعدة", GREEN) if bullish else ("هابطة", RED)
+
+
+def _close_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    state = str(analysis.get("draw_mode") or "watch")
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+    level = _number(analysis.get("entry"))
+    if state == "watch" or level is None or direction not in {"صاعد", "هابط"}:
+        return "بانتظار", ORANGE
+    side = "فوق" if direction == "صاعد" else "تحت"
+    color = GREEN if state == "confirmed" else ORANGE
+    return f"{side} {_fmt_card_price(level)}", color
+
+
+def _breakout_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    state = str(analysis.get("draw_mode") or "watch")
+    kind = str(analysis.get("entry_kind") or "مراقبة")
+    if state == "confirmed" and kind == "اختراق":
+        return "مؤكد", GREEN
+    if kind in {"اختراق", "إعادة اختبار"}:
+        return "محتمل", CYAN
+    return "بانتظار", ORANGE
+
+
+def _rebound_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
+    state = str(analysis.get("draw_mode") or "watch")
+    kind = str(analysis.get("entry_kind") or "مراقبة")
+    if state == "confirmed" and kind == "إعادة اختبار":
+        return "مؤكد", GREEN
+    if kind in {"إعادة اختبار", "مراقبة"}:
+        return "محتمل", CYAN
+    return "ضعيف", GOLD
+
+
+def _draw_summary_card(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    label: str,
+    values: list[str],
+    color,
+    *,
+    latin_value: bool = False,
+) -> None:
+    x1, y1, x2, y2 = box
+    # Individual cards deliberately use a calm charcoal border. The only gold
+    # line is the outer frame around the complete upper/lower sections.
+    draw.rounded_rectangle(
+        box,
+        radius=16,
+        fill=(5, 10, 14, 255),
+        outline=(62, 65, 62, 255),
+        width=2,
+    )
+    _draw_rtl(draw, ((x1 + x2) // 2, y1 + 27), label, F_TOP_LABEL, (238, 240, 244, 255), anchor="mm")
+    center_y = y1 + (76 if len(values) == 1 else 70)
+    if latin_value:
+        draw.text(((x1 + x2) // 2, center_y), values[0], font=F_TOP_VALUE_LATIN, fill=color, anchor="mm")
     else:
-        trade_type_value, trade_type_color = "مراقبة", BLUE
+        font = F_TOP_VALUE_SMALL if len(values) > 1 else F_TOP_VALUE
+        _draw_rtl_lines_centered(draw, (x1 + x2) // 2, center_y, values, font, color, spacing=27)
 
-    # Left-to-right order; the rightmost card is "نوع الصفقة" in RTL reading.
-    cards = [
-        ("الحالة", [state_value], state_color, True),
-        ("النموذج", pattern_lines, CYAN, True),
-        ("الاحتمال", [f"{probability}%"], GOLD, False),
-        ("نوع الصفقة", [trade_type_value], trade_type_color, True),
+
+def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    """Fixed two-row summary; chart coordinates never move between results."""
+    draw.rounded_rectangle(
+        TOP_SUMMARY_PANEL,
+        radius=22,
+        fill=(4, 8, 12, 255),
+        outline=(220, 160, 45, 255),
+        width=3,
+    )
+
+    state_value, state_color = _analysis_state(analysis)
+    direction = str(analysis.get("direction") or "غير واضح")
+    direction_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else BLUE)
+    probability = max(0, min(100, int(analysis.get("trade_probability") or 50)))
+    pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
+    close_value, close_color = _close_label(analysis)
+    zone_value, zone_color = _nearest_zone_label(analysis)
+    behavior_value, behavior_color = _behavior_label(analysis)
+    momentum_value, momentum_color = _momentum_label(analysis)
+    candle_value, candle_color = _candle_shape_label(analysis)
+    alignment = _frame_match_count(analysis)
+
+    # Lists are left-to-right on the canvas; RTL reading begins at the right.
+    rows = [
+        [
+            ("الاتجاه", [direction], direction_color, False),
+            ("الحالة", [state_value], state_color, False),
+            ("الإغلاق", [close_value], close_color, False),
+            ("الاحتمال", [f"{probability}%"], GOLD, True),
+            ("النموذج", pattern_lines, CYAN, False),
+        ],
+        [
+            ("المنطقة", [zone_value], zone_color, False),
+            ("السلوك", [behavior_value], behavior_color, False),
+            ("الزخم", [momentum_value], momentum_color, False),
+            ("التوافق", [f"{alignment}/4"], PURPLE, True),
+            ("شكل شمعة", [candle_value], candle_color, False),
+        ],
     ]
 
-    margin = 28
-    gap = 14
-    available = WIDTH - margin * 2 - gap * 3
-    card_w = available // 4
-    y1, y2 = 38, CHART[1] - 78
-    for index, (label, values, color, is_rtl) in enumerate(cards):
-        x1 = margin + index * (card_w + gap)
-        x2 = x1 + card_w
-        draw.rounded_rectangle((x1, y1, x2, y2), radius=20, fill=(5, 23, 47, 255), outline=(55, 86, 121, 255), width=2)
-        _draw_rtl(draw, ((x1 + x2) // 2, y1 + 39), label, F_TOP_LABEL, (225, 234, 247, 255), anchor="mm")
-        value_y = y1 + 105
-        if is_rtl:
-            font = F_TOP_VALUE_SMALL if len(values) > 1 else F_TOP_VALUE
-            _draw_rtl_lines_centered(draw, (x1 + x2) // 2, value_y, values, font, color, spacing=29)
-        else:
-            draw.text(((x1 + x2) // 2, value_y), values[0], font=F_TOP_VALUE_LATIN, fill=color, anchor="mm")
-        draw.ellipse((x1 + 24, y2 - 29, x1 + 40, y2 - 13), fill=color)
+    margin_x = TOP_SUMMARY_PANEL[0] + 13
+    gap_x = 13
+    card_w = (TOP_SUMMARY_PANEL[2] - TOP_SUMMARY_PANEL[0] - 26 - gap_x * 4) // 5
+    row_gap = 12
+    y_top = TOP_SUMMARY_PANEL[1] + 14
+    card_h = (TOP_SUMMARY_PANEL[3] - TOP_SUMMARY_PANEL[1] - 28 - row_gap) // 2
+    for row_index, cards in enumerate(rows):
+        y1 = y_top + row_index * (card_h + row_gap)
+        y2 = y1 + card_h
+        for index, (label, values, color, latin_value) in enumerate(cards):
+            x1 = margin_x + index * (card_w + gap_x)
+            x2 = x1 + card_w
+            _draw_summary_card(draw, (x1, y1, x2, y2), label, values, color, latin_value=latin_value)
 
 
 def _draw_signal(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
@@ -2057,7 +2235,6 @@ def _draw_projection_candles(
 
     separator_x = PROJECTION_X1 - 18
     _dash_line(draw, (separator_x, CHART[1] + 46), (separator_x, CHART[3] - 30), (89, 122, 155, 120), width=1, dash=8, gap=8)
-    _draw_rtl(draw, ((PROJECTION_X1 + PROJECTION_X2) // 2, CHART[1] + 28), "شموع السيناريو", F_PROJECTION_LABEL, (76, 110, 145, 220), anchor="mm")
 
     previous = float(entry)
     price_span = max(0.01, price_max - price_min)
@@ -2325,10 +2502,57 @@ def _note_row(draw: ImageDraw.ImageDraw, y: int, label: str, value: str, dot_col
         fitted = _fit_mixed_rtl(draw, value, F_NOTE_MIXED, max_width)
         _draw_mixed_rtl(draw, (mid_x - 18, y + 2), fitted, F_NOTE_MIXED, (232, 238, 249, 255), anchor="ra")
 
+def _draw_bottom_summary(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    """Fixed one-row action summary below the chart without changing chart size."""
+    draw.rounded_rectangle(
+        BOTTOM_SUMMARY_PANEL,
+        radius=22,
+        fill=(4, 8, 12, 255),
+        outline=(220, 160, 45, 255),
+        width=3,
+    )
+
+    state = str(analysis.get("draw_mode") or "watch")
+    direction = str(analysis.get("direction") or "غير واضح")
+    entry_value = "جاهز" if state == "confirmed" else ("مشروط" if state == "conditional" else "مراقبة")
+    entry_color = GREEN if state == "confirmed" else (ORANGE if state == "conditional" else BLUE)
+    confirmation_value = "مكتمل" if state == "confirmed" else "بانتظار"
+    confirmation_color = GREEN if state == "confirmed" else ORANGE
+    if state == "confirmed":
+        decision_value = "شراء" if direction == "صاعد" else ("بيع" if direction == "هابط" else "انتظار")
+        decision_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else ORANGE)
+    else:
+        decision_value, decision_color = "انتظار", ORANGE
+    breakout_value, breakout_color = _breakout_label(analysis)
+    rebound_value, rebound_color = _rebound_label(analysis)
+
+    cards = [
+        ("الدخول", [entry_value], entry_color, False),
+        ("التأكيد", [confirmation_value], confirmation_color, False),
+        ("القرار", [decision_value], decision_color, False),
+        ("الاختراق", [breakout_value], breakout_color, False),
+        ("الارتداد", [rebound_value], rebound_color, False),
+    ]
+    margin_x = BOTTOM_SUMMARY_PANEL[0] + 13
+    gap_x = 13
+    card_w = (BOTTOM_SUMMARY_PANEL[2] - BOTTOM_SUMMARY_PANEL[0] - 26 - gap_x * 4) // 5
+    for index, (label, values, color, latin_value) in enumerate(cards):
+        x1 = margin_x + index * (card_w + gap_x)
+        x2 = x1 + card_w
+        _draw_summary_card(
+            draw,
+            (x1, BOTTOM_CARDS_Y1, x2, BOTTOM_CARDS_Y2),
+            label,
+            values,
+            color,
+            latin_value=latin_value,
+        )
+
+
 def _draw_session_footer(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     """Compact market-session timeline; chart geometry remains unchanged."""
-    y2 = HEIGHT - 28
-    y1 = y2 - 122
+    y2 = HEIGHT - 24
+    y1 = HEIGHT - 154
     panel = (12, y1, WIDTH - 12, y2)
     draw.rounded_rectangle(panel, radius=16, fill=(5, 23, 46, 255), outline=(50, 81, 115, 255), width=2)
 
@@ -2466,6 +2690,7 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
+    _draw_bottom_summary(draw, analysis)
     _draw_session_footer(draw, analysis)
 
     output = io.BytesIO()
