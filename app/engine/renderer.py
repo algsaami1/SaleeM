@@ -58,10 +58,6 @@ CHART_CARD = (0, 320, 1320, 2563)
 CHART = (0, 320, 930, 2563)
 PRICE_AXIS_X = 1125
 NOTES = (0, 2868, 0, 2868)
-# قالب التعليقات ثابت في كل تحليل. الذي يتغير هو النص فقط.
-COMMENT_SCENARIO_BOX = (338, 370, 625, 510)
-COMMENT_ENTRY_BOX = (338, 1115, 625, 1255)
-COMMENT_CANCEL_BOX = (338, 2265, 625, 2405)
 # شموع السيناريو لها عمود ثابت، لكن مواضعها الرأسية تتبع الأسعار الحقيقية.
 PROJECTION_X1 = 675
 PROJECTION_X2 = 902
@@ -172,8 +168,6 @@ F_LEVEL_CARD = _font(20, True, True)
 F_AXIS_EDGE = _font(17, False, True)
 F_SESSION_NAME = _font(23, True, True)
 F_SESSION_TIME = _font(17, False, True)
-F_COMMENT_TITLE = _font(18, True)
-F_COMMENT_BODY = _font(17)
 F_PROJECTION_LABEL = _font(15, True)
 
 
@@ -2089,69 +2083,6 @@ def _draw_projection_candles(
     image.alpha_composite(layer)
 
 
-def _wrap_fixed_rtl(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, max_lines: int = 2) -> list[str]:
-    """Wrap Arabic text into a fixed-size comment box without resizing it."""
-    words = " ".join(str(text or "").split()).split()
-    if not words:
-        return ["—"]
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        candidate = word if not current else f"{current} {word}"
-        if _text_width(draw, candidate, font, rtl=True) <= max_width:
-            current = candidate
-            continue
-        if current:
-            lines.append(current)
-        current = word
-        if len(lines) == max_lines - 1:
-            break
-    if current and len(lines) < max_lines:
-        lines.append(current)
-    consumed = " ".join(lines)
-    original = " ".join(words)
-    if consumed != original and lines:
-        lines[-1] = _fit_text(draw, lines[-1] + "…", font, max_width, rtl=True)
-    return lines[:max_lines]
-
-
-def _comment_values(analysis: dict[str, Any]) -> tuple[str, str, str]:
-    scenario = str(analysis.get("scenario") or "ننتظر وضوح السيناريو الأقرب.")
-    entry_condition = str(analysis.get("confirmation") or "ننتظر تأكيدًا واضحًا عند مستوى الدخول.")
-    invalidation = str(analysis.get("invalidation_condition") or "تجاوز مستوى الإلغاء يبطل السيناريو.")
-    return scenario, entry_condition, invalidation
-
-
-def _draw_fixed_comment_box(
-    draw: ImageDraw.ImageDraw,
-    rect: tuple[int, int, int, int],
-    *,
-    title: str,
-    body: str,
-    accent: tuple[int, int, int, int],
-) -> None:
-    x1, y1, x2, y2 = rect
-    draw.rounded_rectangle(rect, radius=12, fill=(7, 25, 48, 214), outline=accent, width=2)
-    _draw_rtl(draw, (x2 - 16, y1 + 27), title, F_COMMENT_TITLE, accent, anchor="ra")
-    draw.line((x1 + 14, y1 + 46, x2 - 14, y1 + 46), fill=(*accent[:3], 115), width=1)
-    lines = _wrap_fixed_rtl(draw, body, F_COMMENT_BODY, (x2 - x1) - 28, max_lines=2)
-    start_y = y1 + 70
-    for index, line in enumerate(lines):
-        _draw_rtl(draw, (x2 - 16, start_y + index * 28), line, F_COMMENT_BODY, (231, 239, 249, 255), anchor="ra")
-
-
-def _draw_fixed_comments(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    """Draw the same three comment boxes in the same positions every time."""
-    scenario, entry_condition, invalidation = _comment_values(analysis)
-    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-    mode = str(analysis.get("draw_mode") or "watch")
-    scenario_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else BLUE)
-    entry_color = ORANGE if mode == "conditional" else BLUE
-    _draw_fixed_comment_box(draw, COMMENT_SCENARIO_BOX, title="السيناريو الأقرب", body=scenario, accent=scenario_color)
-    _draw_fixed_comment_box(draw, COMMENT_ENTRY_BOX, title="شرط الدخول", body=entry_condition, accent=entry_color)
-    _draw_fixed_comment_box(draw, COMMENT_CANCEL_BOX, title="إلغاء السيناريو", body=invalidation, accent=RED)
-
-
 def _draw_current_price(
     draw: ImageDraw.ImageDraw,
     analysis: dict[str, Any],
@@ -2535,7 +2466,6 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _draw_levels(draw, analysis, price_min, price_max)
     _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
     draw = ImageDraw.Draw(image)
-    _draw_fixed_comments(draw, analysis)
     _draw_session_footer(draw, analysis)
 
     output = io.BytesIO()

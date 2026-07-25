@@ -29,4 +29,5 @@ def test_permanent_prompt_contains_unified_visual_template():
     assert "تستخدم كلمة `Entry` فقط" in prompt
     assert "شموع سيناريو" in prompt
     assert "تتحرك صعودًا وهبوطًا حسب السعر الحقيقي" in prompt
-    assert "ثلاثة مربعات تعليق ثابتة" in prompt
+    assert "لا تُكتب السيناريوهات" in prompt
+    assert "ثلاثة مربعات تعليق ثابتة" not in prompt
