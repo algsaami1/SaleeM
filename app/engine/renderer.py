@@ -58,8 +58,8 @@ SUPPORT_FILL = (13, 48, 110, 245)
 
 # بطاقات محور الأسعار اليميني لها نفس أبعاد وشكل بطاقة السعر الحالي.
 AXIS_PRICE_CARD_WIDTH = 168
-AXIS_PRICE_CARD_HEIGHT = 62
-AXIS_PRICE_CARD_RADIUS = 6
+AXIS_PRICE_CARD_HEIGHT = 56
+AXIS_PRICE_CARD_RADIUS = 5
 
 # اختلاف بطاقات التنفيذ يكون باللون فقط؛ الحجم والشكل والموضع الأفقي ثابتة.
 ENTRY_CARD = (34, 104, 220, 255)
@@ -91,6 +91,9 @@ SOURCE_AXIS_VISIBLE_WIDTH = SOURCE_VISIBLE_WIDTH - CHART[2]
 SALEEM_AXIS_EXTRA_WIDTH = WIDTH - SOURCE_VISIBLE_WIDTH
 DUPLICATED_AXIS_LEFT_PADDING = 8
 DUPLICATED_AXIS_RIGHT_PADDING = 8
+AXIS_VISUAL_LABEL_COUNT = 5
+AXIS_VISUAL_BACKGROUND = (4, 21, 43, 255)
+AXIS_VISUAL_TEXT = (224, 234, 248, 255)
 TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
@@ -1987,6 +1990,77 @@ def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: fl
 
 
 
+def _select_visual_axis_labels(
+    labels: list[tuple[str, float, int]],
+    count: int = AXIS_VISUAL_LABEL_COUNT,
+) -> list[tuple[str, float, int]]:
+    """Choose evenly distributed labels for visual display only.
+
+    All detected axis labels remain available to calibration and price-to-Y
+    calculations. This helper only reduces the number painted in the final
+    right margin.
+    """
+    usable = sorted(
+        (item for item in labels if CHART[1] <= int(item[2]) <= CHART[3]),
+        key=lambda item: int(item[2]),
+    )
+    if len(usable) <= count:
+        return usable
+
+    targets = [CHART[1] + (CHART[3] - CHART[1]) * index / (count - 1) for index in range(count)]
+    selected: list[tuple[str, float, int]] = []
+    used: set[int] = set()
+    for target in targets:
+        candidates = sorted(
+            enumerate(usable),
+            key=lambda pair: (abs(int(pair[1][2]) - target), pair[0]),
+        )
+        for idx, item in candidates:
+            if idx not in used:
+                used.add(idx)
+                selected.append(item)
+                break
+    return sorted(selected, key=lambda item: int(item[2]))
+
+
+def _paint_sparse_right_axis(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> None:
+    """Visually hide excess right-axis prices while preserving all math.
+
+    The duplicated axis strip is first painted with its own background color.
+    Five labels are then redrawn at their exact calibrated Y positions: top,
+    upper quarter, middle, lower quarter and bottom.
+    """
+    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
+    draw.rectangle(
+        (axis_left + 2, axis_top + 2, axis_right - 2, axis_bottom - 2),
+        fill=AXIS_VISUAL_BACKGROUND,
+    )
+
+    labels = _select_visual_axis_labels(_right_axis_labels(analysis, price_min, price_max))
+    text_x = axis_right - DUPLICATED_AXIS_RIGHT_PADDING - 4
+    half_text = 11
+    for _role, price, exact_y in labels:
+        visual_y = max(axis_top + half_text, min(axis_bottom - half_text, int(exact_y)))
+        draw.text(
+            (text_x, visual_y),
+            _fmt_axis_price(price),
+            font=F_AXIS_EDGE,
+            fill=AXIS_VISUAL_TEXT,
+            anchor="rm",
+        )
+
+    draw.rectangle(
+        (axis_left, axis_top, axis_right, axis_bottom),
+        outline=(68, 94, 127, 220),
+        width=2,
+    )
+
+
 def _draw_right_price_axis(
     draw: ImageDraw.ImageDraw,
     analysis: dict[str, Any],
@@ -1996,8 +2070,8 @@ def _draw_right_price_axis(
     current_y: int | None = None,
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
-    """The duplicated source axis is the right axis, so draw no synthetic labels."""
-    return
+    """Paint a sparse visual axis without changing calibration inputs."""
+    _paint_sparse_right_axis(draw, analysis, price_min, price_max)
 
 
 def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, *, background_mode: bool = False) -> None:
@@ -2582,7 +2656,7 @@ def _draw_current_price(
         radius=AXIS_PRICE_CARD_RADIUS,
         fill=(71, 171, 154, 255),
         outline=(84, 224, 192, 255),
-        width=2,
+        width=1,
     )
     draw.text(((source_axis_left + source_axis_right) // 2, y), _fmt_price(current), font=F_TRADE_CARD_PRICE, fill=(4, 27, 33, 255), anchor="mm")
 
@@ -2638,8 +2712,8 @@ def _draw_trade_axis_card(
         (x1, y1, x2, y2),
         radius=AXIS_PRICE_CARD_RADIUS,
         fill=color,
-        outline=(255, 255, 255, 190),
-        width=2,
+        outline=(255, 255, 255, 175),
+        width=1,
     )
     center_y = (y1 + y2) // 2
     draw.text((x1 + 11, center_y), label, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="lm")
