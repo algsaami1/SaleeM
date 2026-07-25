@@ -218,11 +218,19 @@ def _fmt_price(value: Any) -> str:
 
 
 def _fmt_card_price(value: Any) -> str:
-    """Compact whole-number price used by Entry/SL/TP and S/R cards."""
+    """Compact whole-number price used by Entry/SL/TP cards."""
     number = _number(value)
     if number is None:
         return "—"
     return str(int(round(number)))
+
+
+def _fmt_level_price(value: Any) -> str:
+    """Show the actual S/R value so the label and horizontal line cannot disagree."""
+    number = _number(value)
+    if number is None:
+        return "—"
+    return f"{number:.2f}"
 
 
 def _fmt_axis_price(value: Any) -> str:
@@ -483,17 +491,17 @@ def _median_number(values: list[float]) -> float | None:
 def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
     """Fit a robust literal axis model from all readable source labels.
 
-    The model uses a Theil-Sen style median slope so one bad OCR label cannot
-    bend the whole scale.  It then removes outliers and refits a single linear
-    price-to-Y transform.  Exact mode is enabled only when at least five
-    consistent labels cover a useful portion of the chart.
+    The model uses every readable right-axis number rather than only the
+    highest and lowest labels. A Theil-Sen style median slope prevents one bad
+    OCR value from bending the scale, then a least-squares refit produces one
+    authoritative price-to-Y transform shared by every overlay.
     """
     cached = analysis.get("_exact_axis_model")
     if isinstance(cached, dict):
         return cached
 
     points = _image_axis_points(analysis)
-    if len(points) < 5:
+    if len(points) < 3:
         return None
 
     pair_slopes: list[float] = []
@@ -526,7 +534,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
         for price, ratio in points
         if abs(price - (intercept - slope * ratio)) <= tolerance
     ]
-    if len(inliers) < 5:
+    if len(inliers) < 3:
         return None
 
     # Refit after outlier removal.  price = intercept - slope * y_ratio.
@@ -547,7 +555,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
         for price, ratio in inliers
         if abs(price - (fitted_intercept - fitted_slope * ratio)) <= final_tolerance
     ]
-    if len(final_points) < 5:
+    if len(final_points) < 3:
         return None
 
     # Preserve only strictly descending prices as Y increases.
@@ -556,7 +564,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
         if monotonic and price >= monotonic[-1][0] - 0.01:
             continue
         monotonic.append((price, ratio))
-    if len(monotonic) < 5:
+    if len(monotonic) < 3:
         return None
 
     # Axis labels should follow a regular tick sequence. Missing labels are
@@ -590,7 +598,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
     residuals = [abs(price - (fitted_intercept - fitted_slope * ratio)) for price, ratio in monotonic]
     median_residual = _median_number(residuals) or 0.0
     inlier_ratio = len(monotonic) / max(1, len(points))
-    count_score = min(1.0, len(monotonic) / 8.0)
+    count_score = min(1.0, len(monotonic) / 6.0)
     coverage_score = min(1.0, coverage / 0.55)
     residual_score = max(0.0, 1.0 - median_residual / max(final_tolerance, 1e-6))
     confidence = (
@@ -600,7 +608,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
         + 0.08 * residual_score
         + 0.04 * regularity
     )
-    if confidence < 0.70 or coverage < 0.30:
+    if confidence < 0.56 or coverage < 0.12:
         return None
 
     model: dict[str, Any] = {
@@ -615,6 +623,7 @@ def _exact_image_axis_model(analysis: dict[str, Any]) -> dict[str, Any] | None:
         "inlier_count": len(monotonic),
         "median_residual": float(median_residual),
         "regularity": round(float(regularity), 4),
+        "uses_all_readable_labels": True,
     }
     analysis["_exact_axis_model"] = model
     analysis["axis_calibration_mode"] = "exact"
@@ -744,13 +753,12 @@ def _dynamic_image_axis_range(
 
     exact_model = _exact_image_axis_model(analysis)
     if exact_model is not None:
+        # All readable source-axis numbers determine both scale and offset.
+        # The green current-price line is validated against this transform but
+        # is never allowed to shift the complete axis away from its labels.
         price_per_ratio = float(exact_model["slope"])
-        if current is not None and reference_ratio is not None:
-            price_max = float(current) + price_per_ratio * reference_ratio
-            anchor_source = "current_line"
-        else:
-            price_max = float(exact_model["price_max"])
-            anchor_source = "axis_fit"
+        price_max = float(exact_model["price_max"])
+        anchor_source = "all_axis_labels"
         price_min = price_max - price_per_ratio
         if price_max > price_min and price_max - price_min >= 0.1:
             analysis["_calibrated_axis_model"] = {
@@ -2203,19 +2211,14 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
                 continue
             all_levels.append((key, rank, level, price, _price_y(price, price_min, price_max), color, fill))
 
-    if _strict_axis_sync(analysis):
-        positions = {f"{key}-{rank}": y for key, rank, _, _, y, _, _ in all_levels}
-    else:
-        positions = _spaced_positions(
-            [(f"{key}-{rank}", y) for key, rank, _, _, y, _, _ in all_levels],
-            min_gap=46,
-        )
-
+    # Exact price binding has priority over collision avoidance. Support and
+    # resistance labels may overlap, but their vertical center is never moved
+    # away from the real level.
     for key, rank, level, price, exact_y, color, fill in all_levels:
         strength = max(0, min(100, int(level.get("strength") or 50)))
         prefix = "R" if key == "resistance_levels" else "S"
-        label = f"{prefix}{rank}  {_fmt_card_price(price)}  {strength}%"
-        y_label = positions.get(f"{key}-{rank}", exact_y)
+        label = f"{prefix}{rank}  {_fmt_level_price(price)}  {strength}%"
+        y_label = exact_y
         rect = _rounded_label(
             draw,
             left + 18,
@@ -2232,8 +2235,6 @@ def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min:
         )
         line_start = min(right - 20, rect[2] + 8)
         draw.line((line_start, exact_y, right - 3, exact_y), fill=color, width=_strength_width(strength))
-        if abs(y_label - exact_y) > 3:
-            draw.line((rect[2], y_label, line_start, exact_y), fill=color, width=2)
 
 
 def _spaced_positions(items: list[tuple[str, int]], min_gap: int = 43) -> dict[str, int]:
@@ -2618,10 +2619,9 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 
     entry_y = _price_y(entry, price_min, price_max)
     if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = [("Entry", entry, entry_y, ENTRY_CARD)]
-        if stop is not None and _is_visible_price(stop, price_min, price_max):
-            items.append(("Cancel", stop, _price_y(stop, price_min, price_max), CANCEL_CARD))
-        return draw_mode, items
+        # Monitoring is deliberately direction-neutral. A single Cancel level
+        # would incorrectly invalidate only one of the two opposite paths.
+        return draw_mode, [("Entry", entry, entry_y, ENTRY_CARD)]
 
     items = [("Entry", entry, entry_y, ENTRY_CARD)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
@@ -2898,9 +2898,9 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if current_reference_y is None:
         current_reference_y = _analysis_current_reference_y(analysis)
 
-    # محور الصورة هو المرجع الأول. أعلى رقم كامل والرقم الذي يليه مباشرة
-    # يحددان الخطوة السعرية والمسافة الرأسية، بينما أدنى رقم كامل يحدد نهاية
-    # السلسلة. جميع الشموع والخطوط تستخدم التحويل الحسابي نفسه.
+    # جميع أرقام محور الصورة المقروءة هي المرجع الأول، وتدخل معًا في
+    # معايرة مقياس واحد. لا يعتمد الرسم على أعلى وأدنى رقم فقط، ولا يسمح
+    # لخط السعر الحالي بتحريك المقياس بعيدًا عن الأرقام الأصلية.
     dynamic_axis_range = _dynamic_image_axis_range(analysis, current_reference_y)
     if dynamic_axis_range is not None:
         price_min, price_max = dynamic_axis_range

@@ -522,6 +522,46 @@ def _normalize_levels(raw: Any, candles: list[dict[str, Any]], kind: str, curren
     return merged[:2]
 
 
+def _unified_level_scenarios(
+    supports: list[dict[str, Any]],
+    resistances: list[dict[str, Any]],
+    *,
+    draw_mode: str,
+    direction: str,
+) -> tuple[str, str, str, str]:
+    """Build every explanatory scenario from the exact levels drawn on chart."""
+    s1 = float(supports[0]["price"])
+    s2 = float(supports[1]["price"])
+    r1 = float(resistances[0]["price"])
+    r2 = float(resistances[1]["price"])
+
+    bullish = (
+        f"IF تم كسر المقاومة R1 {r1:.2f} مع إغلاق فوقها وإعادة اختبار ناجحة "
+        f"THEN الصعود إلى المقاومة R2 {r2:.2f}"
+    )
+    bearish = (
+        f"IF تم كسر الدعم S1 {s1:.2f} مع إغلاق تحته وإعادة اختبار فاشلة "
+        f"THEN الهبوط إلى الدعم S2 {s2:.2f}"
+    )
+
+    if draw_mode == "watch":
+        selected = (
+            f"IF إغلاق فوق R1 {r1:.2f} THEN يُرجح الصعود، "
+            f"وIF إغلاق تحت S1 {s1:.2f} THEN يُرجح الهبوط"
+        )
+        invalidation = (
+            f"العودة داخل النطاق بين S1 {s1:.2f} وR1 {r1:.2f} "
+            "تلغي التفعيل وتعيد الحالة إلى المراقبة"
+        )
+    elif direction == "صاعد":
+        selected = bullish
+        invalidation = f"إغلاق واضح تحت الدعم S1 {s1:.2f} يلغي سيناريو الصعود"
+    else:
+        selected = bearish
+        invalidation = f"إغلاق واضح فوق المقاومة R1 {r1:.2f} يلغي سيناريو الهبوط"
+    return selected, bullish, bearish, invalidation
+
+
 def _normalize_probabilities(data: dict[str, Any]) -> tuple[int, int]:
     """تطبيع احتمالي الشراء والبيع بدون افتراض جهة افتراضية.
 
@@ -1133,31 +1173,17 @@ def _validate_analysis(
         data["pattern_path"] = []
         data["pattern_type"] = "لا يوجد"
 
-    scenario = " ".join(str(data.get("scenario") or "").split())[:92]
-    bullish_scenario = " ".join(str(data.get("bullish_scenario") or "").split())[:150]
-    bearish_scenario = " ".join(str(data.get("bearish_scenario") or "").split())[:150]
-    invalidation_condition = " ".join(
-        str(data.get("invalidation_condition") or "").split()
-    )[:110]
+    # النص والرسم يستعملان نفس S1/S2/R1/R2 بعد التطبيع، ولا نسمح
+    # للنموذج النصي بإدخال مستوى مختلف غير موجود على الشارت.
+    scenario, bullish_scenario, bearish_scenario, invalidation_condition = _unified_level_scenarios(
+        supports,
+        resistances,
+        draw_mode=draw_mode,
+        direction=working_direction,
+    )
     macro_note = " ".join(str(data.get("macro_note") or "").split())[:150]
-
-    if not bullish_scenario:
-        bullish_scenario = "IF يثبت السعر فوق المقاومة الأقرب THEN يتجه نحو الهدف الصاعد التالي"
-    if not bearish_scenario:
-        bearish_scenario = "IF يغلق السعر تحت الدعم الأقرب THEN يتجه نحو الهدف الهابط التالي"
-    if not invalidation_condition:
-        invalidation_condition = (
-            f"إلغاء السيناريو عند تجاوز وقف الخسارة {stop:.2f}"
-            if draw_mode != "watch"
-            else "إلغاء الفكرة عند كسر البنية المقابلة قبل ظهور شرط التفعيل"
-        )
     if not macro_note:
         macro_note = "لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية"
-
-    if draw_mode == "watch":
-        scenario = "IF تتوافق الفريمات وتظهر شمعة تأكيد THEN يُفعّل أقرب سيناريو"
-    elif not scenario:
-        scenario = "IF يتحقق شرط الدخول THEN يستمر السيناريو نحو الأهداف المحددة"
 
     data.update(
         {
@@ -1180,6 +1206,11 @@ def _validate_analysis(
             "draw_mode": draw_mode,
             "support_levels": supports,
             "resistance_levels": resistances,
+            "support_1": float(supports[0]["price"]),
+            "support_2": float(supports[1]["price"]),
+            "resistance_1": float(resistances[0]["price"]),
+            "resistance_2": float(resistances[1]["price"]),
+            "level_source_policy": "single_normalized_levels_for_chart_and_text",
             "entry": entry,
             "entry_kind": entry_kind,
             "confirmation": confirmation,
