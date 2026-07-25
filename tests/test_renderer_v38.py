@@ -37,7 +37,6 @@ from app.engine.renderer import (
     _price_y,
     _projection_closes,
     _right_axis_labels,
-    _select_visual_axis_labels,
     render_result,
 )
 
@@ -288,36 +287,6 @@ def test_image_axis_uses_exact_label_positions_when_available():
     assert [y for _role, _price, y in labels] == expected_y
     assert abs(_price_y(current, low, high) - reference_y) <= 1
 
-
-
-def test_sparse_visual_axis_keeps_exactly_five_evenly_distributed_labels():
-    labels = [
-        ("axis", 4100.0 - index, CHART[1] + index * 100)
-        for index in range(12)
-    ]
-    selected = _select_visual_axis_labels(labels)
-    assert len(selected) == 5
-    assert selected[0] == labels[0]
-    assert selected[-1] == labels[-1]
-    assert [item[2] for item in selected] == sorted(item[2] for item in selected)
-
-
-def test_sparse_visual_axis_does_not_change_full_calibration_labels():
-    analysis = _analysis("صاعد")
-    current = analysis["current_price"]
-    analysis["image_axis_labels"] = [
-        {"price": current + 10.0 - index * 2.0, "y_ratio": 0.05 + index * 0.09}
-        for index in range(10)
-    ]
-    dynamic = _dynamic_image_axis_range(analysis)
-    assert dynamic is not None
-    low, high = dynamic
-    full = _right_axis_labels(analysis, low, high)
-    visible = _select_visual_axis_labels(full)
-    assert len(full) >= 6
-    assert len(visible) == 5
-    # Visual filtering must not mutate or replace the labels used by price math.
-    assert _right_axis_labels(analysis, low, high) == full
 
 def test_image_axis_rejects_inconsistent_inner_anchor_sequence():
     analysis = _analysis("صاعد")

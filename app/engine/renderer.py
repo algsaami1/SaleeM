@@ -91,9 +91,6 @@ SOURCE_AXIS_VISIBLE_WIDTH = SOURCE_VISIBLE_WIDTH - CHART[2]
 SALEEM_AXIS_EXTRA_WIDTH = WIDTH - SOURCE_VISIBLE_WIDTH
 DUPLICATED_AXIS_LEFT_PADDING = 8
 DUPLICATED_AXIS_RIGHT_PADDING = 8
-AXIS_VISUAL_LABEL_COUNT = 5
-AXIS_VISUAL_BACKGROUND = (4, 21, 43, 255)
-AXIS_VISUAL_TEXT = (224, 234, 248, 255)
 TOP_PRICE_MIN_GAP_RATIO = 0.14
 TOP_PRICE_TRIGGER_ATR = 6.0
 TOP_PRICE_TOP_PADDING_RATIO = 0.02
@@ -1990,77 +1987,6 @@ def _right_axis_labels(analysis: dict[str, Any], price_min: float, price_max: fl
 
 
 
-def _select_visual_axis_labels(
-    labels: list[tuple[str, float, int]],
-    count: int = AXIS_VISUAL_LABEL_COUNT,
-) -> list[tuple[str, float, int]]:
-    """Choose evenly distributed labels for visual display only.
-
-    All detected axis labels remain available to calibration and price-to-Y
-    calculations. This helper only reduces the number painted in the final
-    right margin.
-    """
-    usable = sorted(
-        (item for item in labels if CHART[1] <= int(item[2]) <= CHART[3]),
-        key=lambda item: int(item[2]),
-    )
-    if len(usable) <= count:
-        return usable
-
-    targets = [CHART[1] + (CHART[3] - CHART[1]) * index / (count - 1) for index in range(count)]
-    selected: list[tuple[str, float, int]] = []
-    used: set[int] = set()
-    for target in targets:
-        candidates = sorted(
-            enumerate(usable),
-            key=lambda pair: (abs(int(pair[1][2]) - target), pair[0]),
-        )
-        for idx, item in candidates:
-            if idx not in used:
-                used.add(idx)
-                selected.append(item)
-                break
-    return sorted(selected, key=lambda item: int(item[2]))
-
-
-def _paint_sparse_right_axis(
-    draw: ImageDraw.ImageDraw,
-    analysis: dict[str, Any],
-    price_min: float,
-    price_max: float,
-) -> None:
-    """Visually hide excess right-axis prices while preserving all math.
-
-    The duplicated axis strip is first painted with its own background color.
-    Five labels are then redrawn at their exact calibrated Y positions: top,
-    upper quarter, middle, lower quarter and bottom.
-    """
-    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
-    draw.rectangle(
-        (axis_left + 2, axis_top + 2, axis_right - 2, axis_bottom - 2),
-        fill=AXIS_VISUAL_BACKGROUND,
-    )
-
-    labels = _select_visual_axis_labels(_right_axis_labels(analysis, price_min, price_max))
-    text_x = axis_right - DUPLICATED_AXIS_RIGHT_PADDING - 4
-    half_text = 11
-    for _role, price, exact_y in labels:
-        visual_y = max(axis_top + half_text, min(axis_bottom - half_text, int(exact_y)))
-        draw.text(
-            (text_x, visual_y),
-            _fmt_axis_price(price),
-            font=F_AXIS_EDGE,
-            fill=AXIS_VISUAL_TEXT,
-            anchor="rm",
-        )
-
-    draw.rectangle(
-        (axis_left, axis_top, axis_right, axis_bottom),
-        outline=(68, 94, 127, 220),
-        width=2,
-    )
-
-
 def _draw_right_price_axis(
     draw: ImageDraw.ImageDraw,
     analysis: dict[str, Any],
@@ -2070,8 +1996,8 @@ def _draw_right_price_axis(
     current_y: int | None = None,
     top_price_box: tuple[int, int, int, int] | None = None,
 ) -> None:
-    """Paint a sparse visual axis without changing calibration inputs."""
-    _paint_sparse_right_axis(draw, analysis, price_min, price_max)
+    """The duplicated source axis is the right axis, so draw no synthetic labels."""
+    return
 
 
 def _draw_grid(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, *, background_mode: bool = False) -> None:
