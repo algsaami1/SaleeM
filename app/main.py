@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -7,6 +8,7 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup, escape
 from pydantic import BaseModel, Field
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
@@ -33,6 +35,27 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 feedback_store = FeedbackStore()
+
+
+def _logic_text(value: object) -> Markup:
+    """تعريب كلمات الشرط وتلوينها دون السماح بإدخال HTML من النموذج."""
+    safe = str(escape("" if value is None else str(value)))
+    safe = re.sub(
+        r"(?<![\w\u0600-\u06ff])(?:IF|إذا)(?![\w\u0600-\u06ff])",
+        '<span class="logic-keyword">إذا</span>',
+        safe,
+        flags=re.IGNORECASE,
+    )
+    safe = re.sub(
+        r"(?<![\w\u0600-\u06ff])(?:THEN|فإن)(?![\w\u0600-\u06ff])",
+        '<span class="logic-keyword">فإن</span>',
+        safe,
+        flags=re.IGNORECASE,
+    )
+    return Markup(safe)
+
+
+templates.env.filters["logic_text"] = _logic_text
 
 
 class TradeFeedbackPayload(BaseModel):
@@ -73,8 +96,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "per-timeframe-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-fixed-price-cards-market-status-v3.12",
-        "ui": "saleem-unified-result-template-v3.12.0",
+        "renderer": "saleem-fixed-price-cards-market-status-v3.13",
+        "ui": "saleem-unified-result-template-v3.13.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),

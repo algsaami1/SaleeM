@@ -185,6 +185,8 @@ F_DISCLAIMER = _font(15)
 F_TOP_LABEL = _font(21, True)
 F_TOP_VALUE = _font(29, True)
 F_TOP_VALUE_SMALL = _font(24, True)
+F_TOP_VALUE_COMPACT = _font(21, True)
+F_TOP_VALUE_TINY = _font(18, True)
 F_TOP_VALUE_LATIN = _font(29, True, True)
 F_TRADE_CARD_LABEL = _font(18, True, True)
 F_TRADE_CARD_PRICE = _font(29, True, True)
@@ -1559,8 +1561,8 @@ def _header_pattern_lines(pattern: str) -> list[str]:
     }
     if normalized in aliases:
         return aliases[normalized]
-    if not normalized or normalized == "لا يوجد":
-        return ["—"]
+    if not normalized or normalized in {"لا يوجد", "—", "-"}:
+        return ["غير مكتمل"]
     if len(normalized) <= 12:
         return [normalized]
     words = normalized.split()
@@ -1568,8 +1570,27 @@ def _header_pattern_lines(pattern: str) -> list[str]:
         midpoint = max(1, len(words) // 2)
         first = " ".join(words[:midpoint])
         second = " ".join(words[midpoint:])
-        return [first[:14], second[:14]]
-    return [normalized[:13] + "…"]
+        return [first, second]
+    return [normalized]
+
+
+def _summary_value_font(
+    draw: ImageDraw.ImageDraw,
+    lines: list[str],
+    max_width: int,
+    *,
+    compact: bool = False,
+):
+    """Choose the largest summary-card font that keeps every line inside."""
+    candidates = (
+        [F_TOP_VALUE_SMALL, F_TOP_VALUE_COMPACT, F_TOP_VALUE_TINY]
+        if compact or len(lines) > 1
+        else [F_TOP_VALUE, F_TOP_VALUE_SMALL, F_TOP_VALUE_COMPACT, F_TOP_VALUE_TINY]
+    )
+    for font in candidates:
+        if all(_text_width(draw, line, font, rtl=True) <= max_width for line in lines):
+            return font
+    return F_TOP_VALUE_TINY
 
 
 def _draw_rtl_lines_centered(
@@ -1772,8 +1793,18 @@ def _draw_summary_card(
     if latin_value:
         draw.text(((x1 + x2) // 2, center_y), values[0], font=F_TOP_VALUE_LATIN, fill=color, anchor="mm")
     else:
-        font = F_TOP_VALUE_SMALL if len(values) > 1 else F_TOP_VALUE
-        _draw_rtl_lines_centered(draw, (x1 + x2) // 2, center_y, values, font, color, spacing=27)
+        safe_values = [str(value).strip() for value in values if str(value).strip()]
+        if not safe_values:
+            safe_values = ["غير مكتمل"] if label == "النموذج" else ["—"]
+        font = _summary_value_font(
+            draw,
+            safe_values,
+            max(20, x2 - x1 - 22),
+            compact=label == "النموذج",
+        )
+        font_size = int(getattr(font, "size", 18))
+        spacing = max(22, min(29, font_size + 4))
+        _draw_rtl_lines_centered(draw, (x1 + x2) // 2, center_y, safe_values[:2], font, color, spacing=spacing)
 
 
 def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:

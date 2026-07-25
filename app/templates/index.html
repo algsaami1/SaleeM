@@ -65,11 +65,14 @@
       <div class="processing-copy">
         <h2>جاري التحليل...</h2>
         <div class="steps" id="processing-steps">
-          <span class="current">تحديث بيانات السوق</span>
-          <span>تحليل اتجاه الفريمات الأكبر</span>
-          <span>تحديد الدعم والمقاومة</span>
+          <span class="current">جلب آخر تحديث لبيانات سوق الذهب</span>
+          <span>تحديد اتجاه الفريمات الأخرى</span>
+          <span>تحليل الهيكل السعري</span>
+          <span>تحديد مناطق المقاومة والدعم</span>
+          <span>مسح مناطق العرض والطلب</span>
+          <span>حساب مؤشرات الزخم</span>
           <span>بناء أقرب سيناريو</span>
-          <span>إعادة رسم الشارت النهائي</span>
+          <span>إعادة رسم وتوليد الشارت النهائي</span>
         </div>
       </div>
     </section>
@@ -120,7 +123,10 @@
 
     <div class="result-topline">
       <div><span class="done-dot">✓</span><div><small>اكتمل التحليل</small><h1>نتيجة SaleeM</h1></div></div>
-      <a class="new-analysis-link" href="/">تحليل صورة جديدة</a>
+      <a class="new-analysis-link" href="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z"/><path d="m7 16 3.1-3.4 2.2 2.2 2.2-2.6L18 16M16.5 6.5v4m-2-2h4"/></svg>
+        <span>تحليل صورة جديدة</span>
+      </a>
     </div>
 
     <section class="card result-card" id="result-card">
@@ -147,8 +153,11 @@
 
     {% if result.axis_warning %}
     <section class="card axis-soft-warning">
-      <strong>تمت المتابعة تلقائيًا</strong>
-      <p>{{ result.axis_warning }}</p>
+      <strong>اكتملت قراءة الصورة والتحليل</strong>
+      <p>تمت معايرة الشارت وربط الرسومات بمحور الأسعار، مع استخدام القراءة الاحتياطية عند الحاجة.</p>
+      {% if not result.axis_validation_passed %}
+      <p class="axis-fallback-detail"><b>الوضع الاحتياطي للقراءة:</b> {{ result.axis_warning }}</p>
+      {% endif %}
     </section>
     {% endif %}
 
@@ -160,13 +169,13 @@
       <div class="analysis-notes-grid">
         <div class="analysis-note-row"><span>الاتجاه</span><b>{{ result.direction }} — احتمال {{ result.trade_probability }}٪ — {{ state_label }}</b></div>
         <div class="analysis-note-row"><span>النمط</span><b>{% if result.pattern_type and result.pattern_type != 'لا يوجد' %}{{ result.pattern_type }} — ثقة {{ result.pattern_confidence }}٪{% else %}لا يوجد نموذج مكتمل{% endif %}</b></div>
-        <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ result.confirmation or 'انتظار تأكيد واضح' }}</b></div>
+        <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ (result.confirmation or 'انتظار تأكيد واضح')|logic_text }}</b></div>
         <div class="analysis-note-row"><span>وقف الخسارة</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
         <div class="analysis-note-row"><span>الأهداف</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] %}{% if result.target_1 is not none %}TP1: {{ '%.2f'|format(result.target_1) }}{% endif %}{% if result.target_2 is not none %} | TP2: {{ '%.2f'|format(result.target_2) }}{% endif %}{% if result.target_3 is not none %} | TP3: {{ '%.2f'|format(result.target_3) }}{% endif %}{% elif result.draw_mode == 'inactive' %}السوق مغلق/البيانات غير محدثة{% else %}بانتظار وضوح السيناريو{% endif %}</b></div>
-        <div class="analysis-note-row"><span>السيناريو المختار</span><b>{{ result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد' }}</b></div>
-        <div class="analysis-note-row scenario-up"><span>سيناريو الصعود</span><b>{{ result.bullish_scenario or 'IF يثبت السعر فوق المقاومة الأقرب THEN يتجه نحو الهدف الصاعد التالي' }}</b></div>
-        <div class="analysis-note-row scenario-down"><span>سيناريو الهبوط</span><b>{{ result.bearish_scenario or 'IF يغلق السعر تحت الدعم الأقرب THEN يتجه نحو الهدف الهابط التالي' }}</b></div>
-        <div class="analysis-note-row"><span>إلغاء السيناريو</span><b>{{ result.invalidation_condition or 'عند كسر مستوى الإبطال المقابل' }}</b></div>
+        <div class="analysis-note-row"><span>السيناريو المختار</span><b>{{ (result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد')|logic_text }}</b></div>
+        <div class="analysis-note-row scenario-up"><span>سيناريو الصعود</span><b>{{ (result.bullish_scenario or 'إذا ثبت السعر فوق المقاومة الأقرب فإن الحركة تتجه نحو الهدف الصاعد التالي')|logic_text }}</b></div>
+        <div class="analysis-note-row scenario-down"><span>سيناريو الهبوط</span><b>{{ (result.bearish_scenario or 'إذا أغلق السعر تحت الدعم الأقرب فإن الحركة تتجه نحو الهدف الهابط التالي')|logic_text }}</b></div>
+        <div class="analysis-note-row"><span>إلغاء السيناريو</span><b>{{ (result.invalidation_condition or 'عند كسر مستوى الإبطال المقابل')|logic_text }}</b></div>
         <div class="analysis-note-row"><span>الأخبار والدولار</span><b>{{ result.macro_note or 'لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية' }}</b></div>
       </div>
       <p class="analysis-notes-footnote">تحليل فني تعليمي منظم، وليس توصية استثمارية أو ضمانًا للربح.</p>

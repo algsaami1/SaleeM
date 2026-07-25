@@ -103,7 +103,8 @@
 
   const updateProcessingSteps = (progress) => {
     if (!steps.length) return;
-    const currentStep = Math.min(steps.length - 1, Math.floor(progress / 20));
+    const stepSize = 100 / steps.length;
+    const currentStep = Math.min(steps.length - 1, Math.floor(progress / stepSize));
     steps.forEach((step, index) => {
       step.classList.remove('done', 'current');
       if (index < currentStep) step.classList.add('done');

@@ -6,7 +6,7 @@ def test_permanent_prompt_is_loaded_for_every_analysis():
     assert "قاعدة SaleeM الدائمة لكل تحليل" in prompt
     assert "سيناريو صعود" in prompt
     assert "سيناريو هبوط" in prompt
-    assert "IF / THEN" in prompt
+    assert "إذا" in prompt and "فإن" in prompt
     assert "شرط إلغاء" in prompt
     assert "لا تخترع خبرًا" in prompt
 
