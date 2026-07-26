@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import base64
+import copy
+import hashlib
 import json
 import logging
 import os
 import random
 import statistics
+import threading
 import time
 from pathlib import Path
 from datetime import datetime, timezone
@@ -362,6 +365,79 @@ ANALYSIS_SCHEMA = {
     ],
 }
 
+GEOMETRY_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "chart_readable": {"type": "boolean"},
+        "current_price": NUM_NULL,
+        "current_price_y_ratio": NUM_NULL,
+        "image_price_high": NUM_NULL,
+        "image_price_low": NUM_NULL,
+        "image_axis_labels": {"type": "array", "items": AXIS_LABEL, "maxItems": 24},
+    },
+    "required": [
+        "chart_readable",
+        "current_price",
+        "current_price_y_ratio",
+        "image_price_high",
+        "image_price_low",
+        "image_axis_labels",
+    ],
+}
+
+MARKET_DECISION_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "direction": {"type": "string", "enum": ["صاعد", "هابط", "عرضي", "غير واضح"]},
+        "buy_probability": {"type": "integer", "minimum": 5, "maximum": 95},
+        "sell_probability": {"type": "integer", "minimum": 5, "maximum": 95},
+        "setup_state": {"type": "string", "enum": ["مؤكد", "مشروط", "مراقبة", "غير صالح"]},
+        "entry_kind": {"type": "string", "enum": ["مباشر", "اختراق", "إعادة اختبار", "مراقبة"]},
+        "confirmation": {"type": "string"},
+        "support_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
+        "resistance_levels": {"type": "array", "items": LEVEL, "maxItems": 2},
+        "entry": NUM_NULL,
+        "stop_loss": NUM_NULL,
+        "stop_reason": {"type": "string"},
+        "target_1": NUM_NULL,
+        "target_2": NUM_NULL,
+        "target_3": NUM_NULL,
+        "pattern_type": {
+            "type": "string",
+            "enum": [
+                "مثلث متماثل", "مثلث هابط", "مثلث صاعد", "وتد هابط", "وتد صاعد",
+                "قناة هابطة", "قناة صاعدة", "قمتان", "قاعان", "كسر وإعادة اختبار", "لا يوجد",
+            ],
+        },
+        "pattern_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
+        "pattern_lines": {"type": "array", "items": LINE, "maxItems": 4},
+        "pattern_path": {"type": "array", "items": POINT, "maxItems": 12},
+        "scenario": {"type": "string"},
+        "bullish_scenario": {"type": "string"},
+        "bearish_scenario": {"type": "string"},
+        "invalidation_condition": {"type": "string"},
+        "macro_note": {"type": "string"},
+        "note": {"type": "string"},
+        "memory_matches": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+    },
+    "required": [
+        "direction", "buy_probability", "sell_probability", "setup_state",
+        "entry_kind", "confirmation", "support_levels", "resistance_levels",
+        "entry", "stop_loss", "stop_reason", "target_1", "target_2", "target_3",
+        "pattern_type", "pattern_confidence", "pattern_lines", "pattern_path",
+        "scenario", "bullish_scenario", "bearish_scenario",
+        "invalidation_condition", "macro_note", "note", "memory_matches",
+    ],
+}
+
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 2
+_TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
+_ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
+_ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
+
+
 
 def _data_url(path: Path) -> str:
     mime = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
@@ -377,6 +453,484 @@ def _text(payload: dict[str, Any]) -> str:
                 return content["text"]
     raise RuntimeError("لم ترجع خدمة التحليل نتيجة صالحة.")
 
+
+
+
+def _request_structured_openai(
+    *,
+    prompt: str,
+    schema: dict[str, Any],
+    schema_name: str,
+    image_path: Path | None = None,
+    max_output_tokens: int = 5000,
+) -> dict[str, Any]:
+    """Send one strict structured-output request with shared retry handling."""
+    key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
+
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    if image_path is not None:
+        content.append({"type": "input_image", "image_url": _data_url(image_path)})
+
+    body = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
+        "max_output_tokens": max(1200, min(8000, int(max_output_tokens))),
+        "input": [{"role": "user", "content": content}],
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": schema_name,
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+
+    max_attempts = max(1, min(4, int(os.getenv("OPENAI_RETRIES", "2"))))
+    response: httpx.Response | None = None
+    with httpx.Client(timeout=150) as client:
+        for attempt in range(1, max_attempts + 1):
+            response = client.post(
+                OPENAI_URL,
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            if response.status_code != 429 or attempt == max_attempts:
+                break
+            retry_after = response.headers.get("retry-after")
+            try:
+                delay = float(retry_after) if retry_after else (3.0 * attempt)
+            except ValueError:
+                delay = 3.0 * attempt
+            time.sleep(min(20.0, delay + random.uniform(0.25, 1.0)))
+
+    if response is None:
+        raise RuntimeError("خطأ خدمة التحليل: لم يتم إرسال الطلب.")
+    if response.status_code >= 400:
+        request_id = response.headers.get("x-request-id", "")
+        error_type = ""
+        error_code = ""
+        error_message = ""
+        try:
+            payload = response.json()
+            error = payload.get("error", {}) if isinstance(payload, dict) else {}
+            if isinstance(error, dict):
+                error_type = str(error.get("type") or "")
+                error_code = str(error.get("code") or "")
+                error_message = str(error.get("message") or "")
+        except ValueError:
+            error_message = response.text[:300]
+
+        logging.error(
+            "OpenAI request failed: status=%s type=%s code=%s request_id=%s message=%s",
+            response.status_code,
+            error_type,
+            error_code,
+            request_id,
+            error_message,
+        )
+        if response.status_code == 429:
+            combined = f"{error_type} {error_code} {error_message}".lower()
+            if "insufficient_quota" in combined or "quota" in combined:
+                raise RuntimeError("خطأ خدمة التحليل (429): رصيد أو حد الإنفاق للمشروع غير متاح.")
+            if "token" in combined:
+                raise RuntimeError(
+                    "خطأ خدمة التحليل (429): تم تجاوز حد الرموز في الدقيقة؛ "
+                    "تم تقليل حجم الطلب واستخدام النموذج الأخف، انتظر دقيقة ثم أعد المحاولة."
+                )
+            raise RuntimeError(
+                "خطأ خدمة التحليل (429): تم بلوغ حد الطلبات مؤقتًا؛ انتظر دقيقة ثم أعد المحاولة."
+            )
+        detail = error_code or error_type or "خطأ غير معروف"
+        raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}): {detail}.")
+
+    try:
+        return json.loads(_text(response.json()))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("لم ترجع خدمة التحليل JSON صالحًا.") from exc
+
+
+def _analysis_snapshot_cache_path() -> Path:
+    return Path(
+        os.getenv(
+            "ANALYSIS_SNAPSHOT_CACHE_PATH",
+            "/tmp/saleem_analysis_snapshot_cache.json",
+        ).strip()
+    )
+
+
+def _market_reference_time(
+    market_context: dict[str, Any],
+    *,
+    now_utc: datetime | None = None,
+) -> datetime:
+    """Return the instant used to decide whether provider candles are closed."""
+    if now_utc is not None:
+        return now_utc.astimezone(timezone.utc) if now_utc.tzinfo else now_utc.replace(tzinfo=timezone.utc)
+
+    fetched_at = _parse_market_candle_time(
+        market_context.get("fetched_at"),
+        str(market_context.get("timezone") or "Asia/Muscat"),
+    )
+    return fetched_at or datetime.now(timezone.utc)
+
+
+def _closed_frame_candles(
+    timeframe: str,
+    candles: Any,
+    *,
+    market_context: dict[str, Any],
+    now_utc: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Return only fully closed candles for one timeframe.
+
+    Twelve Data timestamps represent candle start times.  A candle is accepted
+    only after its full timeframe duration has elapsed.  If timestamps cannot be
+    parsed, the conservative fallback drops the tail candle because it is the
+    most likely still-forming candle.
+    """
+    raw_rows = [copy.deepcopy(c) for c in candles if isinstance(c, dict)] if isinstance(candles, list) else []
+    if not raw_rows:
+        return []
+
+    duration = _TIMEFRAME_SECONDS.get(str(timeframe).upper())
+    if duration is None:
+        return raw_rows[:-1] if len(raw_rows) > 1 else raw_rows
+
+    reference = _market_reference_time(market_context, now_utc=now_utc)
+    try:
+        grace = max(0.0, min(30.0, float(os.getenv("CLOSED_CANDLE_GRACE_SECONDS", "3"))))
+    except ValueError:
+        grace = 3.0
+    cutoff = reference.timestamp() - grace
+
+    parsed_any = False
+    closed: list[dict[str, Any]] = []
+    for candle in raw_rows:
+        start = _parse_market_candle_time(
+            candle.get("time") or candle.get("datetime"),
+            str(market_context.get("timezone") or "Asia/Muscat"),
+        )
+        if start is None:
+            continue
+        parsed_any = True
+        if start.timestamp() + duration <= cutoff:
+            closed.append(candle)
+
+    if parsed_any:
+        return closed
+    return raw_rows[:-1] if len(raw_rows) > 1 else raw_rows
+
+
+def _closed_market_context(
+    market_context: dict[str, Any],
+    *,
+    now_utc: datetime | None = None,
+) -> dict[str, Any]:
+    """Build the immutable analytical input from closed candles only."""
+    result = copy.deepcopy(market_context)
+    frames = market_context.get("frames") if isinstance(market_context, dict) else None
+    closed_frames: dict[str, list[dict[str, Any]]] = {}
+    for timeframe in ("H4", "H1", "M15", "M5"):
+        candles = frames.get(timeframe) if isinstance(frames, dict) else None
+        closed_frames[timeframe] = _closed_frame_candles(
+            timeframe,
+            candles,
+            market_context=market_context,
+            now_utc=now_utc,
+        )
+
+    m5 = closed_frames.get("M5") or []
+    if not m5:
+        raise RuntimeError("لا توجد شمعة M5 مغلقة صالحة لبناء نسخة التحليل.")
+
+    last_closed = m5[-1]
+    last_closed_time = str(last_closed.get("time") or last_closed.get("datetime") or "").strip()
+    if not last_closed_time:
+        raise RuntimeError("تعذر تحديد وقت آخر شمعة M5 مغلقة.")
+
+    result["frames"] = closed_frames
+    result["latest_candle_time"] = last_closed_time
+    result["m5_last_closed_candle_time"] = last_closed_time
+    result["analysis_candle_mode"] = "closed_only"
+    return result
+
+
+def _stable_market_snapshot_payload(market_context: dict[str, Any]) -> dict[str, Any]:
+    """Use the latest CLOSED M5 candle as the immutable analysis version key."""
+    closed_context = (
+        market_context
+        if str(market_context.get("analysis_candle_mode") or "") == "closed_only"
+        else _closed_market_context(market_context)
+    )
+    m5 = (closed_context.get("frames") or {}).get("M5") or []
+    last_closed = m5[-1] if m5 else {}
+    return {
+        "version": ANALYSIS_SNAPSHOT_CACHE_VERSION,
+        "symbol": str(closed_context.get("symbol") or "XAU/USD"),
+        "timeframe": "M5",
+        "last_closed_m5_time": str(
+            closed_context.get("m5_last_closed_candle_time")
+            or last_closed.get("time")
+            or last_closed.get("datetime")
+            or ""
+        ),
+    }
+
+
+def _market_snapshot_key(market_context: dict[str, Any]) -> str:
+    payload = _stable_market_snapshot_payload(market_context)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _load_analysis_snapshot_cache() -> dict[str, Any]:
+    path = _analysis_snapshot_cache_path()
+    if not path.exists():
+        return {"version": ANALYSIS_SNAPSHOT_CACHE_VERSION, "entries": {}}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"version": ANALYSIS_SNAPSHOT_CACHE_VERSION, "entries": {}}
+    if not isinstance(payload, dict) or payload.get("version") != ANALYSIS_SNAPSHOT_CACHE_VERSION:
+        return {"version": ANALYSIS_SNAPSHOT_CACHE_VERSION, "entries": {}}
+    if not isinstance(payload.get("entries"), dict):
+        payload["entries"] = {}
+    return payload
+
+
+def _read_cached_market_decision(snapshot_key: str) -> dict[str, Any] | None:
+    if os.getenv("ANALYSIS_SNAPSHOT_CACHE_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        return None
+    with _ANALYSIS_SNAPSHOT_CACHE_LOCK:
+        payload = _load_analysis_snapshot_cache()
+        item = payload.get("entries", {}).get(snapshot_key)
+        if not isinstance(item, dict) or not isinstance(item.get("decision"), dict):
+            return None
+        return copy.deepcopy(item["decision"])
+
+
+def _write_cached_market_decision(snapshot_key: str, decision: dict[str, Any]) -> None:
+    if os.getenv("ANALYSIS_SNAPSHOT_CACHE_ENABLED", "1").strip().lower() in {"0", "false", "no"}:
+        return
+    path = _analysis_snapshot_cache_path()
+    try:
+        max_entries = max(4, min(96, int(os.getenv("ANALYSIS_SNAPSHOT_CACHE_ENTRIES", "24"))))
+    except ValueError:
+        max_entries = 24
+    with _ANALYSIS_SNAPSHOT_CACHE_LOCK:
+        payload = _load_analysis_snapshot_cache()
+        entries = payload.setdefault("entries", {})
+        entries[snapshot_key] = {
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "decision": copy.deepcopy(decision),
+        }
+        ordered = sorted(
+            entries.items(),
+            key=lambda pair: str((pair[1] or {}).get("saved_at") or ""),
+            reverse=True,
+        )[:max_entries]
+        payload["entries"] = dict(ordered)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            temp = path.with_suffix(path.suffix + ".tmp")
+            temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            temp.replace(path)
+        except OSError:
+            logging.warning("تعذر حفظ قفل اتساق التحليل في %s", path)
+
+
+def _extract_chart_geometry(path: Path) -> dict[str, Any]:
+    """Read only broker price geometry; never ask the image to decide the trade."""
+    prompt = """أنت قارئ هندسي لمحور سعر شارت XAUUSD فقط. هذه ليست مهمة تحليل سوق.
+
+ممنوع تمامًا استنتاج الاتجاه أو الدعم أو المقاومة أو الدخول أو الأهداف من شكل الشموع.
+استخدم الصورة فقط لاستخراج الإحداثيات السعرية التالية من بوكس الشارت ومحور السعر اليميني الأصلي:
+- chart_readable: true فقط إذا أمكن قراءة ملصق السعر الحالي أو محور متناسق.
+- current_price: الرقم الظاهر في ملصق السعر الحالي المرتبط بآخر شمعة. لا تستخدم رقم أمر التداول العلوي.
+- current_price_y_ratio: موضع مركز خط السعر الحالي داخل بوكس الشارت؛ 0 أعلى و1 أسفل.
+- image_price_high وimage_price_low: أعلى وأدنى رقمين واضحين على المحور.
+- image_axis_labels: كل أرقام المحور الواضحة من الأعلى للأسفل مع y_ratio لمركز كل رقم.
+
+إذا كانت الصورة كاملة للهاتف أو تحتوي شريط أمر تداول، تجاهل كل العناصر خارج بوكس الشارت. لا تخمّن رقمًا مقصوصًا، ولا تعِد أي نتيجة تحليلية."""
+    geometry = _request_structured_openai(
+        prompt=prompt,
+        schema=GEOMETRY_SCHEMA,
+        schema_name="saleem_chart_geometry_only",
+        image_path=path,
+        max_output_tokens=2200,
+    )
+    geometry["image_axis_labels"] = _normalize_axis_labels(geometry.get("image_axis_labels"))
+    return geometry
+
+
+def _market_decision_prompt(
+    market_context: dict[str, Any],
+    market_summary: dict[str, Any],
+) -> str:
+    return f"""أنت محرك القرار السوقي الثابت في SaleeM لتحليل الذهب XAUUSD وتنفيذ M5.
+
+هذه المرحلة لا تستقبل صورة شارت مطلقًا. بيانات الشموع المرفقة مغلقة بالكامل، وآخر شمعة M5 مغلقة هي مفتاح نسخة التحليل. لذلك يجب أن يكون القرار مبنيًا حصريًا على بيانات السوق المرفقة:
+- H4 للاتجاه الرئيسي.
+- H1 للبنية.
+- M15 للتفعيل.
+- M5 للتوقيت.
+
+===== دستور SaleeM المعتمد =====
+{load_final_spec()}
+===== نهاية الدستور =====
+
+===== قاعدة التحليل الدائمة =====
+{load_permanent_analysis_prompt()}
+===== نهاية القاعدة =====
+
+قواعد الاتساق الملزمة، وهي الأعلى أولوية في هذه المرحلة:
+1) لا تستخدم شكل لقطة الشاشة أو الزوم أو وجود أمر تداول في أي قرار.
+2) لا تستخدم الشمعة الجارية في الاتجاه أو الحالة أو المستويات؛ استخدم الشموع المغلقة فقط.
+3) لا يبدأ قرار جديد إلا عندما يتغير توقيت آخر شمعة M5 مغلقة.
+4) جميع أسعار support/resistance/entry/stop/targets تكون على مقياس Twelve Data الحالي فقط.
+5) الصورة ستستخدم لاحقًا في مرحلة مستقلة لمعايرة محور الوسيط وإسقاط الأسعار، فلا تعدّل القرار لتناسب أي مساحة مرئية.
+6) لنفس مفتاح آخر شمعة M5 مغلقة يجب أن تعيد نفس الاتجاه والحالة والاحتمالات والمستويات.
+7) لا يوجد انحياز شراء أو بيع. عند التعارض استخدم مراقبة أو مشروط.
+8) أقل من 55% مراقبة، 55 إلى أقل من 70% مشروط عند وجود سيناريو واضح، و70% فأكثر لا يصبح مؤكدًا إلا مع توافق قوي واكتمال التأكيد.
+9) اختر أقرب دعمين وأقرب مقاومتين حقيقيين من بيانات السوق، واجمع المستويات المتقاربة.
+10) اجعل النصوص الشرطية بلا أسعار رقمية داخل الجمل؛ الأسعار موجودة في الحقول الرقمية المنفصلة.
+11) entry قريب وواقعي، والوقف خلف أقرب إبطال محلي، وثلاثة أهداف مرتبة في جهة الصفقة.
+12) pattern_lines وpattern_path نسبية لنافذة M5 المرفقة، ولا ترسم نموذجًا غير واضح.
+
+ملخص الفريمات الحسابي:
+{json.dumps(market_summary, ensure_ascii=False)}
+
+بيانات الشموع:
+{json.dumps(market_context, ensure_ascii=False)}
+
+الذاكرة المرجعية للقراءة فقط:
+{memory_context(KNOWLEDGE_DIR)}
+"""
+
+
+def _get_market_decision(
+    market_context: dict[str, Any],
+    market_summary: dict[str, Any],
+) -> tuple[dict[str, Any], str, bool]:
+    snapshot_key = _market_snapshot_key(market_context)
+    cached = _read_cached_market_decision(snapshot_key)
+    if cached is not None:
+        return cached, snapshot_key, True
+
+    # A second check under one process-wide decision lock prevents two uploads
+    # of the same chart from generating different first decisions concurrently.
+    with _ANALYSIS_SNAPSHOT_DECISION_LOCK:
+        cached = _read_cached_market_decision(snapshot_key)
+        if cached is not None:
+            return cached, snapshot_key, True
+        decision = _request_structured_openai(
+            prompt=_market_decision_prompt(market_context, market_summary),
+            schema=MARKET_DECISION_SCHEMA,
+            schema_name="saleem_market_snapshot_decision",
+            max_output_tokens=max(2500, min(7000, int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "5000")))),
+        )
+        _write_cached_market_decision(snapshot_key, decision)
+        return decision, snapshot_key, False
+
+
+def _shift_numeric_price(value: Any, offset: float) -> float | None:
+    number = _number(value)
+    if number is None:
+        return None
+    return round(float(number) + offset, 2)
+
+
+def _bind_market_analysis_to_image(
+    canonical: dict[str, Any],
+    geometry: dict[str, Any],
+    *,
+    snapshot_key: str,
+    snapshot_reused: bool,
+) -> dict[str, Any]:
+    """Project one immutable market decision onto the uploaded broker axis."""
+    result = copy.deepcopy(canonical)
+    provider_current = float(canonical.get("current_price") or canonical.get("market_last_close") or 0.0)
+    image_current = _number(geometry.get("current_price"))
+    chart_readable = bool(geometry.get("chart_readable") and image_current is not None)
+    displayed_current = float(image_current) if image_current is not None else provider_current
+    offset = displayed_current - provider_current
+
+    shifted_candles: list[dict[str, Any]] = []
+    for candle in result.get("candles") or []:
+        if not isinstance(candle, dict):
+            continue
+        shifted = dict(candle)
+        for key in ("open", "high", "low", "close"):
+            shifted[key] = _shift_numeric_price(candle.get(key), offset)
+        shifted_candles.append(shifted)
+    result["candles"] = shifted_candles
+
+    for level_key in ("support_levels", "resistance_levels"):
+        shifted_levels: list[dict[str, Any]] = []
+        for level in result.get(level_key) or []:
+            if not isinstance(level, dict):
+                continue
+            shifted = dict(level)
+            shifted["price"] = _shift_numeric_price(level.get("price"), offset)
+            shifted_levels.append(shifted)
+        result[level_key] = shifted_levels
+
+    for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
+        result[key] = _shift_numeric_price(result.get(key), offset)
+
+    pressure = result.get("level_pressure")
+    if isinstance(pressure, dict):
+        pressure = dict(pressure)
+        for key in ("nearest_resistance", "nearest_support"):
+            pressure[key] = _shift_numeric_price(pressure.get(key), offset)
+        result["level_pressure"] = pressure
+
+    labels = _normalize_axis_labels(geometry.get("image_axis_labels"))
+    current_y = _number(geometry.get("current_price_y_ratio")) if image_current is not None else None
+    if current_y is not None:
+        current_y = max(0.0, min(1.0, float(current_y)))
+
+    image_high = _number(geometry.get("image_price_high"))
+    image_low = _number(geometry.get("image_price_low"))
+    if len(labels) >= 2:
+        image_high = max(float(labels[0]["price"]), image_high or float("-inf"))
+        image_low = min(float(labels[-1]["price"]), image_low or float("inf"))
+    if image_high is None or image_high <= displayed_current:
+        image_high = max(float(candle["high"]) for candle in shifted_candles)
+    if image_low is None or image_low >= displayed_current:
+        image_low = min(float(candle["low"]) for candle in shifted_candles)
+
+    result.update(
+        {
+            "chart_readable": chart_readable,
+            "current_price": round(displayed_current, 2),
+            "current_price_y_ratio": round(current_y, 4) if current_y is not None else None,
+            "current_price_source": "chart_image" if image_current is not None else "market_fallback",
+            "image_price_high": round(float(image_high), 2),
+            "image_price_low": round(float(image_low), 2),
+            "image_axis_labels": labels,
+            "price_range_source": "chart_image" if len(labels) >= 2 else "market_candles_fallback",
+            "provider_market_last_close": round(provider_current, 2),
+            "market_price_offset": round(offset, 3),
+            "analysis_snapshot_key": snapshot_key,
+            "analysis_snapshot_reused": bool(snapshot_reused),
+            "analysis_consistency_lock": "last_closed_m5",
+            "analysis_input_role": "market_data_only",
+            "image_input_role": "axis_geometry_only",
+            "price_projection_mode": "closed_m5_decision_projected_once_to_broker_axis",
+        }
+    )
+
+    if result.get("draw_mode") in {"conditional", "confirmed"} and result.get("stop_loss") is not None:
+        result["invalidation_condition"] = (
+            f"إلغاء السيناريو عند تجاوز وقف الخسارة {float(result['stop_loss']):.1f}"
+        )
+    return result
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
@@ -1332,208 +1886,85 @@ def _validate_analysis(
 
 
 def _analyze(path: Path) -> dict[str, Any]:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        raise RuntimeError("متغير OPENAI_API_KEY غير موجود في Railway.")
+    """Analyze closed market candles once, then project the result onto this image.
 
+    The latest CLOSED M5 candle is the immutable version key.  The currently
+    forming candle may supply a live fallback price, but it cannot change the
+    direction, state, support/resistance, entry, stop, or targets.
+    """
     try:
         market_data = fetch_market_data()
         context_candles = max(24, min(80, int(os.getenv("MARKET_CONTEXT_CANDLES", "40"))))
-        market_context = compact_market_context(
+        raw_market_context = compact_market_context(
             market_data,
             candles_per_frame=context_candles,
         )
-        # نرسل نافذة سوق مرنة لـ M5؛ الرسم النهائي سيستخدم بيانات المزود نفسها.
+        market_context = _closed_market_context(raw_market_context)
         market_frames = market_context.get("frames", {})
         if isinstance(market_frames, dict) and isinstance(market_frames.get("M5"), list):
             prompt_m5_count = max(20, min(60, int(os.getenv("PROMPT_M5_CANDLES", "40"))))
             market_frames["M5"] = market_frames["M5"][-prompt_m5_count:]
-        market_summary = _build_market_summary(market_data)
+
+        closed_market_data = copy.deepcopy(market_data)
+        closed_market_data["frames"] = copy.deepcopy(market_context.get("frames") or {})
+        closed_market_data["latest_candle_time"] = market_context.get("m5_last_closed_candle_time")
+        market_summary = _build_market_summary(closed_market_data)
+        market_summary["m5_last_closed_candle_time"] = market_context.get("m5_last_closed_candle_time")
+        market_summary["analysis_candle_mode"] = "closed_only"
     except MarketDataError as exc:
         raise RuntimeError(f"تعذر جلب بيانات الفريمات: {exc}") from exc
 
-    prompt = f"""أنت محرك SaleeM Gold Analyst المتخصص في الذهب XAUUSD، وتنفذ الصفقة على فريم خمس دقائق بعد مراجعة الفريمات العليا.
-
-===== الدستور النهائي الملزم =====
-{load_final_spec()}
-===== نهاية الدستور =====
-
-===== قاعدة التحليل الدائمة لكل تحليل =====
-{load_permanent_analysis_prompt()}
-===== نهاية القاعدة الدائمة =====
-
-===== بيانات السوق الحية المجلوبة تلقائيًا =====
-الملخص الحسابي للفريمات:
-{json.dumps(market_summary, ensure_ascii=False)}
-
-شموع السوق من Twelve Data:
-{json.dumps(market_context, ensure_ascii=False)}
-===== نهاية بيانات السوق =====
-
-استخدم H4 لتحديد الاتجاه الرئيسي، وH1 لبنية السوق، وM15 لمنطقة التفعيل، وM5 لتوقيت الدخول.
-إذا كانت الصورة المرفوعة لقطة شاشة كاملة للتطبيق أو الهاتف، فركّز فقط على بوكس الشارت المرئي داخله، وتجاهل رؤوس الصفحة والأزرار والبطاقات والنصوص خارج منطقة الشارت. يجب أن تشمل قراءتك جسم الشارت ومحور الأسعار اليميني الأصلي معًا. إذا اختفى جزء من يسار الشارت أو كان مقصوصًا قليلًا فلا بأس، لكن لا تتجاهل محور الأسعار الأيمن.
-لا تستنتج اتجاه الفريمات العليا من صورة M5؛ بيانات Twelve Data هي مرجع الاتجاه والبنية فقط.
-قد يختلف سعر Twelve Data قليلًا عن وسيط المستخدم، لذلك استخدم صورة المستخدم مرجعًا نهائيًا لأسعار الدخول والوقف والأهداف، واستخدم البيانات الخارجية لتأكيد الاتجاه.
-إذا تعارض H4 وH1 مع صفقة M5، اخفض الاحتمال واجعل setup_state مشروطًا أو مراقبة، ولا تصف الصفقة بأنها مؤكدة.
-
-اقرأ صورة الشارت المرفوعة لاستخراج بيانات محور السعر:
-1) current_price: السعر الحالي الظاهر في ملصق السعر بجانب آخر شمعة.
-2) current_price_y_ratio: موضع الخط الأفقي المرتبط بالسعر الحالي داخل منطقة الشارت المرئية؛ 0.0 أعلى الشارت و1.0 أسفله. خذ مركز خط السعر نفسه، وليس مركز الصورة أو آخر شمعة. إذا لم يظهر خط السعر بوضوح فأعد null.
-3) image_price_high: أعلى سعر ظاهر في أعلى محور الأسعار داخل الصورة.
-4) image_price_low: أدنى سعر ظاهر في أسفل محور الأسعار داخل الصورة.
-5) image_axis_labels: اقرأ كل أرقام محور السعر اليميني الظاهرة بوضوح، وليس ثلاثة أرقام فقط. لكل رقم أعد:
-   - price: الرقم المكتوب فعليًا على محور السعر في الصورة.
-   - y_ratio: موضع مركز الرقم الرأسي داخل منطقة الشارت المرئية، حيث 0.0 أعلى الشارت و1.0 أسفله.
-   أعد الأرقام بالترتيب من الأعلى إلى الأسفل، وحافظ على موضع كل رقم كما يظهر في الصورة. لا تخمّن رقمًا غير ظاهر، ولا تستخدم رقمًا مقصوصًا عند الحافة. حاول إعادة 5 أرقام واضحة أو أكثر عند توفرها؛ سيستخدم البرنامج الأرقام المتناسقة في Exact Axis Mode ويرسمها في مواضعها الأصلية نفسها. إذا كانت الأرقام الواضحة أقل، فأعد على الأقل السعر الذي تحت الأعلى، والسعر الذي تحته مباشرة، والسعر قبل الأخير أسفل المحور لاستخدام Reconstructed Axis Mode الاحتياطي.
-تأكد أن image_price_low < current_price < image_price_high. إذا تعذر رقم الحد الأعلى أو الأدنى فقط فأعده null، لكن ابذل محاولة دقيقة لقراءته.
-لا تعِد بناء الشموع من الصورة؛ أعد candles=[] لأن البرنامج سيستخدم شموع M5 الحقيقية من Twelve Data عند الرسم.
-السعر الحالي في current_price يجب أن يكون من صورة المستخدم، وليس من آخر إغلاق في بيانات Twelve Data.
-يجب أن يطابق current_price_y_ratio الخط الأفقي الحقيقي الخارج من ملصق السعر الحالي، لأن البرنامج سيستخدمه كنقطة تثبيت لجميع خطوط الرسم ومحور السعر الأيمن.
-اجعل chart_readable=false إذا تعذرت قراءة السعر الحالي. إذا لم تستطع قراءة نقاط محور متناسقة، فأعد image_axis_labels=[] ولا تخمّن الأرقام. لا تفشل بسبب نقص بعض القراءات؛ أعد أفضل ما يمكنك قراءته من بوكس الشارت، فالتطبيق سيكمل بالاحتياطات الداخلية بدل إيقاف التحليل.
-
-التحليل المطلوب:
-- حلّل سيناريو الصعود وسيناريو الهبوط في كل مرة بصيغة عربية شرطية تبدأ بـ «إذا» وتنتقل إلى النتيجة بكلمة «فإن»، ثم اختر للرسم سيناريو واحدًا فقط وهو الأعلى احتمالًا والأقرب للتفعيل.
-- املأ bullish_scenario بسيناريو الصعود المختصر، وbearish_scenario بسيناريو الهبوط المختصر، وinvalidation_condition بشرط إلغاء السيناريو المختار.
-- املأ macro_note بملاحظة الأخبار أو الدولار فقط عند وجود بيانات موثوقة ضمن المدخلات؛ وإلا اكتب: لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية.
-- BUY وSELL مجموعهما 100، ولا تستخدم 0 أو 100.
-- عند ضعف التأكيد، لا تقل لا توجد صفقة؛ أعطِ أقرب نقطة تفعيل مشروطة مع اتجاه متوقع.
-- حدد أقرب دعمين وأقرب مقاومتين مهمين اعتمادًا على بيانات السوق المرفقة وموضع السعر الظاهر في الصورة.
-- strength من 0 إلى 100 حسب عدد اللمسات، قوة الرفض، حداثة المستوى، وتوافقه مع بنية السوق.
-- touches عدد اللمسات أو الاختبارات الواضحة.
-- اجمع المستويات المتقاربة، ولا تعد المستوى نفسه مرتين.
-- entry قريب وواقعي، بعد اختراق أو كسر أو إعادة اختبار أو تأكيد واضح.
-- stop_loss قريب من الدخول ومن بنية الشارت: خلف أقرب قمة/قاع محلي خلال آخر خمس شمعات أو أقرب مستوى إبطال. لا تستخدم قمة أو قاع بعيدة. غالبًا تكون المسافة بين 0.6 و4.0 دولار حسب تذبذب M5.
-- ضع ثلاثة أهداف مرتبة TP1 ثم TP2 ثم TP3، ولا تضع هدفًا تم تجاوزه.
-- M/قمتان يدعم الهبوط بعد كسر خط العنق أو إعادة اختبار فاشلة.
-- W/قاعان يدعم الصعود بعد اختراق خط العنق أو إعادة اختبار ناجحة.
-- pattern_lines وpattern_path إحداثيات نسبية داخل مساحة الشارت المعاد رسمها: 0,0 أعلى اليسار و1,1 أسفل اليمين.
-- لا ترسم نموذجًا إلا إذا كان واضحًا. لا تنشئ خطوطًا عشوائية.
-- confirmation وscenario وbullish_scenario وbearish_scenario وinvalidation_condition وmacro_note وnote نصوص عربية قصيرة وواضحة.
-- اجعل scenario هو السيناريو المختار للرسم بصيغة شرطية مختصرة، ولا تضع السيناريو البديل داخل الرسم نفسه.
-
-النتيجة النهائية سيعيد البرنامج رسمها داخل تصميم SaleeM. عند توفر خمسة أرقام متناسقة أو أكثر، يستخدم Exact Axis Mode: ينظف قراءات المحور، يستبعد القراءة الشاذة، ثم يرسم كل سعر مقروء في موضعه الرأسي الأصلي نفسه، ويستخرج تحويلًا خطيًا واحدًا تستخدمه الشموع والدعم والمقاومة والدخول والوقف والأهداف. إذا كانت النقاط أقل، يستخدم Reconstructed Axis Mode اعتمادًا على السعر الذي تحت الأعلى والسعر الذي تحته والسعر قبل الأخير. تبقى بطاقة السعر الحالي الخضراء مرتبطة بالخط الأفقي الحقيقي current_price_y_ratio. إذا لم تنجح المعايرة بدقة كاملة، فسيكمل البرنامج التحليل بمحور احتياطي وملاحظة تنبيهية بدل إيقاف العملية. تظهر منطقة الربح باللون الأخضر ومنطقة الوقف باللون الأحمر. خطوط الدعم زرقاء فاتحة متصلة، وخطوط المقاومة بنفسجية متصلة، وخطوط TP خضراء متصلة. يرسم البرنامج شموع سيناريو شبه شفافة للشراء والبيع تبدأ من Entry وتتدرج إلى TP1 ثم TP2 ثم TP3. في الحالة المشروطة يرسم سهمًا انعكاسيًا يوضح إعادة الاختبار، وفي المراقبة يرسم سهمين متعاكسين يبدآن من Entry. ترتبط جميع العناصر بتحويل السعر نفسه. لا تُعرض مربعات أو كتابات السيناريو داخل مساحة الشارت؛ تبقى السيناريوهات ضمن بيانات التحليل النصية فقط. في المراقبة تكون Entry عند السعر الحالي ولا تظهر Cancel، ويبدأ السهمان المتعاكسان من Entry نفسها. في الحالة المشروطة تظهر Entry وCancel والأهداف، وفي الشراء أو البيع المؤكد تظهر Entry وStop والأهداف. تتحرك البطاقات رأسيًا حسب أسعارها الحقيقية، ويكون مركز كل بطاقة على الخط الأفقي للسعر نفسه، ولا تُزاح رأسيًا لحل التداخل. أقل من 55٪ مراقبة، ومن 55٪ إلى أقل من 70٪ مع سيناريو واضح بشرط، و70٪ فأكثر مع اكتمال التأكيد شراء أو بيع. إذا كانت بيانات M5 قديمة تظهر حالة السوق مغلق/البيانات غير محدثة بلا بطاقات تنفيذ أو أسهم. يبحث الرسم في جميع الشموع المتاحة عن أقرب Order Block وFVG صالحين، ويظهرهما في الحالات الأربع بشكل واضح وممتد أفقيًا دون إنشاء منطقة وهمية. ثم يرسم شريط الجلسات والمستويات بوضوح.
-
-الذاكرة المرجعية للقراءة فقط:
-{memory_context(KNOWLEDGE_DIR)}
-"""
-
-    body = {
-        "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
-        "max_output_tokens": max(2000, min(8000, int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "5000")))),
-        "input": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": prompt},
-                    {"type": "input_image", "image_url": _data_url(path)},
-                ],
-            }
-        ],
-        "text": {
-            "format": {
-                "type": "json_schema",
-                "name": "saleem_two_hour_reconstructed_chart",
-                "strict": True,
-                "schema": ANALYSIS_SCHEMA,
-            }
-        },
-    }
-
-    max_attempts = max(1, min(4, int(os.getenv("OPENAI_RETRIES", "2"))))
-    response: httpx.Response | None = None
-
-    with httpx.Client(timeout=150) as client:
-        for attempt in range(1, max_attempts + 1):
-            response = client.post(
-                OPENAI_URL,
-                headers={
-                    "Authorization": f"Bearer {key}",
-                    "Content-Type": "application/json",
-                },
-                json=body,
-            )
-            if response.status_code != 429 or attempt == max_attempts:
-                break
-
-            # المحاولات الفاشلة تُحتسب ضمن الحد؛ لذلك ننتظر بدل التكرار السريع.
-            retry_after = response.headers.get("retry-after")
-            try:
-                delay = float(retry_after) if retry_after else (3.0 * attempt)
-            except ValueError:
-                delay = 3.0 * attempt
-            time.sleep(min(20.0, delay + random.uniform(0.25, 1.0)))
-
-    if response is None:
-        raise RuntimeError("خطأ خدمة التحليل: لم يتم إرسال الطلب.")
-
-    if response.status_code >= 400:
-        request_id = response.headers.get("x-request-id", "")
-        error_type = ""
-        error_code = ""
-        error_message = ""
-        try:
-            payload = response.json()
-            error = payload.get("error", {}) if isinstance(payload, dict) else {}
-            if isinstance(error, dict):
-                error_type = str(error.get("type") or "")
-                error_code = str(error.get("code") or "")
-                error_message = str(error.get("message") or "")
-        except ValueError:
-            error_message = response.text[:300]
-
-        logging.error(
-            "OpenAI request failed: status=%s type=%s code=%s request_id=%s message=%s",
-            response.status_code, error_type, error_code, request_id, error_message,
-        )
-
-        if response.status_code == 429:
-            combined = f"{error_type} {error_code} {error_message}".lower()
-            if "insufficient_quota" in combined or "quota" in combined:
-                raise RuntimeError(
-                    "خطأ خدمة التحليل (429): رصيد أو حد الإنفاق للمشروع غير متاح."
-                )
-            if "token" in combined:
-                raise RuntimeError(
-                    "خطأ خدمة التحليل (429): تم تجاوز حد الرموز في الدقيقة؛ "
-                    "تم تقليل حجم الطلب واستخدام النموذج الأخف، انتظر دقيقة ثم أعد المحاولة."
-                )
-            raise RuntimeError(
-                "خطأ خدمة التحليل (429): تم بلوغ حد الطلبات مؤقتًا؛ انتظر دقيقة ثم أعد المحاولة."
-            )
-
-        detail = error_code or error_type or "خطأ غير معروف"
-        raise RuntimeError(
-            f"خطأ خدمة التحليل ({response.status_code}): {detail}."
-        )
-    model_data = json.loads(_text(response.json()))
-
-    # السعر الحالي يؤخذ من صورة المستخدم، بينما الشموع والتوقيتات من مزود السوق.
-    image_current = _number(model_data.get("current_price"))
-    market_m5 = []
     raw_frames = market_data.get("frames") if isinstance(market_data, dict) else None
-    if isinstance(raw_frames, dict) and isinstance(raw_frames.get("M5"), list):
-        display_count = max(12, min(48, int(os.getenv("CHART_CANDLE_COUNT", "30"))))
-        market_m5 = raw_frames["M5"][-display_count:]
+    raw_m5 = raw_frames.get("M5") if isinstance(raw_frames, dict) else None
+    live_m5 = [c for c in raw_m5 if isinstance(c, dict)] if isinstance(raw_m5, list) else []
+    closed_m5 = (market_context.get("frames") or {}).get("M5") or []
+    display_count = max(12, min(48, int(os.getenv("CHART_CANDLE_COUNT", "30"))))
+    normalized_market = _normalize_candles(closed_m5[-display_count:])
+    if not normalized_market:
+        raise RuntimeError("لا توجد شموع M5 مغلقة كافية للتحليل.")
 
-    normalized_market = _normalize_candles(market_m5)
-    market_last = float(normalized_market[-1]["close"])
-    offset = (float(image_current) - market_last) if image_current is not None else 0.0
+    provider_closed_price = float(normalized_market[-1]["close"])
+    provider_live_price = provider_closed_price
+    if live_m5:
+        provider_live_price = float(_number(live_m5[-1].get("close")) or provider_closed_price)
 
-    # مواءمة سعر مزود السوق مع سعر وسيط المستخدم دون تغيير شكل الحركة.
-    if abs(offset) > 0.001:
-        for candle in normalized_market:
-            for key_name in ("open", "high", "low", "close"):
-                candle[key_name] = round(float(candle[key_name]) + offset, 2)
+    # Two isolated inputs: geometry from the screenshot, decision from CLOSED market data.
+    geometry = _extract_chart_geometry(path)
+    market_decision, snapshot_key, snapshot_reused = _get_market_decision(
+        market_context,
+        market_summary,
+    )
 
-    model_data["candles"] = normalized_market
-    model_data["_image_current_price"] = image_current
-    model_data["_image_chart_readable"] = bool(model_data.get("chart_readable"))
-    model_data["current_price"] = image_current if image_current is not None else normalized_market[-1]["close"]
-    # ندمج مستويات النموذج مع المستويات المشتقة من شموع السوق بعد مواءمتها.
-    # لا نحذفها لأن H1 وM15 قد يحتويان مقاومات أو دعومًا لا تظهر بوضوح في نافذة M5.
-    model_data["market_price_offset"] = round(offset, 3)
-
-    return _validate_analysis(model_data, market_summary=market_summary)
+    canonical_input = {
+        **market_decision,
+        "chart_readable": False,
+        "_image_chart_readable": False,
+        "_image_current_price": None,
+        "candles": normalized_market,
+        "current_price": provider_closed_price,
+        "current_price_y_ratio": None,
+        "image_price_high": None,
+        "image_price_low": None,
+        "image_axis_labels": [],
+    }
+    canonical = _validate_analysis(canonical_input, market_summary=market_summary)
+    canonical.update(
+        {
+            "analysis_snapshot_key": snapshot_key,
+            "analysis_snapshot_reused": bool(snapshot_reused),
+            "analysis_consistency_lock": "last_closed_m5",
+            "analysis_last_closed_m5_time": market_context.get("m5_last_closed_candle_time"),
+            "analysis_candle_mode": "closed_only",
+            "provider_closed_m5_price": round(provider_closed_price, 3),
+            "provider_live_price": round(provider_live_price, 3),
+        }
+    )
+    return _bind_market_analysis_to_image(
+        canonical,
+        geometry,
+        snapshot_key=snapshot_key,
+        snapshot_reused=snapshot_reused,
+    )
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:

@@ -14,13 +14,15 @@ def test_health():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "3.14.1"
+    assert payload["version"] == "3.16.0"
     assert "owner_email" not in payload
     assert "owner_email_configured" in payload
     assert payload["window"] == "flexible market candle window"
     assert payload["targets"] == 3
     assert payload["market_data"] == "Twelve Data: M5/M15/H1/H4"
     assert payload["cache_policy"] == "M5=4m,M15=14m,H1=55m,H4=4h"
+    assert payload["decision_pipeline"] == "market-only-decision+image-only-axis-geometry"
+    assert payload["analysis_cache_path"].endswith("saleem_analysis_snapshot_cache.json")
 
 
 def test_fixed_saleem_title():
