@@ -17,7 +17,7 @@ from app import __version__
 from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
-from app.services.mailer import owner_email, send_note_email
+from app.services.mailer import owner_email, send_note_email, smtp_configured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -107,6 +107,7 @@ async def health():
         "decision_pipeline": "market-only-decision+image-only-axis-geometry",
         "feedback_store_path": os.getenv("SALEEM_FEEDBACK_STORE_PATH", "/tmp/saleem_feedback_store.json"),
         "owner_email_configured": bool(owner_email()),
+        "smtp_configured": smtp_configured(),
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
         "support_resistance": "nearest-two-strength-weighted-lines",
@@ -152,7 +153,7 @@ async def submit_note(payload: NotePayload):
     message = (
         "تم حفظ الملاحظة وإرسال نسخة إلى بريد مالك التطبيق."
         if was_emailed
-        else "تم حفظ الملاحظة. فعّل SMTP في الإعدادات لإرسال نسخة تلقائيًا إلى البريد."
+        else "تم حفظ الملاحظة. أضف SALEEM_EMAIL وSALEEM_EMAIL_APP_PASSWORD في Railway لإرسال نسخة تلقائيًا إلى البريد."
     )
     return JSONResponse({"ok": True, "message": message, "emailed": was_emailed})
 

@@ -55,6 +55,22 @@ TWELVE_DATA_API_KEY=...
 
 لا تضع المفاتيح الحقيقية داخل GitHub.
 
+### إعداد بريد Gmail للملاحظات
+
+أصبح Gmail مضبوطًا تلقائيًا داخل SaleeM. في Railway تحتاج إلى متغيرين فقط:
+
+```env
+SALEEM_EMAIL=your-email@gmail.com
+SALEEM_EMAIL_APP_PASSWORD=كلمة_مرور_تطبيق_Google
+```
+
+- `SALEEM_EMAIL`: البريد المستخدم للإرسال والاستقبال.
+- `SALEEM_EMAIL_APP_PASSWORD`: كلمة مرور تطبيق Google ذات 16 حرفًا، وليست كلمة مرور Gmail العادية.
+- يمكن تحديد بريد استقبال مختلف اختياريًا عبر `APP_OWNER_EMAIL`.
+- لا تحفظ كلمة مرور التطبيق داخل GitHub أو داخل ملفات المشروع الحقيقية.
+
+بعد إضافة القيم في Railway نفّذ Redeploy، ثم افتح `/health`. يجب أن تكون `smtp_configured` مساوية لـ `true`.
+
 ## التخزين المؤقت
 
 القيم الافتراضية:

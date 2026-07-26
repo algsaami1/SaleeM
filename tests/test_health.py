@@ -17,6 +17,7 @@ def test_health():
     assert payload["version"] == "3.17.0"
     assert "owner_email" not in payload
     assert "owner_email_configured" in payload
+    assert "smtp_configured" in payload
     assert payload["window"] == "flexible market candle window"
     assert payload["targets"] == 3
     assert payload["market_data"] == "Twelve Data: M5/M15/H1/H4"
