@@ -1,4 +1,4 @@
-# SaleeM v3.17.0
+# SaleeM v3.18.0
 
 تطبيق FastAPI متخصص في تحليل الذهب `XAUUSD` على فريم `M5`. يولّد القرار من بيانات `M5` و`M15` و`H1` و`H4` فقط، ويستخدم صورة المستخدم في مرحلة مستقلة لقراءة السعر الحالي ومحور الأسعار، ثم يُسقط القرار الثابت فوق صورة الشارت الأصلية.
 
@@ -55,21 +55,28 @@ TWELVE_DATA_API_KEY=...
 
 لا تضع المفاتيح الحقيقية داخل GitHub.
 
-### إعداد بريد Gmail للملاحظات
+### إعداد البريد للملاحظات على Railway
 
-أصبح Gmail مضبوطًا تلقائيًا داخل SaleeM. في Railway تحتاج إلى متغيرين فقط:
+الإعداد الموصى به هو **Resend عبر HTTPS** لأنه يعمل على خطط Railway التي تمنع SMTP. أضف في Railway:
+
+```env
+SALEEM_EMAIL=your-email@gmail.com
+RESEND_API_KEY=re_xxxxxxxxx
+```
+
+- أنشئ حساب Resend بالبريد نفسه الموجود في `SALEEM_EMAIL`.
+- عند استخدام المرسل الافتراضي `onboarding@resend.dev` يمكن الإرسال إلى بريد حساب Resend نفسه دون امتلاك نطاق.
+- يمكن تحديد بريد استقبال مختلف عبر `APP_OWNER_EMAIL` بعد توثيق نطاق إرسال خاص.
+- يمكن تخصيص المرسل عبر `RESEND_FROM` بعد توثيق نطاقك.
+
+يبقى Gmail SMTP مدعومًا احتياطيًا للحسابات التي تسمح بها منصة الاستضافة:
 
 ```env
 SALEEM_EMAIL=your-email@gmail.com
 SALEEM_EMAIL_APP_PASSWORD=كلمة_مرور_تطبيق_Google
 ```
 
-- `SALEEM_EMAIL`: البريد المستخدم للإرسال والاستقبال.
-- `SALEEM_EMAIL_APP_PASSWORD`: كلمة مرور تطبيق Google ذات 16 حرفًا، وليست كلمة مرور Gmail العادية.
-- يمكن تحديد بريد استقبال مختلف اختياريًا عبر `APP_OWNER_EMAIL`.
-- لا تحفظ كلمة مرور التطبيق داخل GitHub أو داخل ملفات المشروع الحقيقية.
-
-بعد إضافة القيم في Railway نفّذ Redeploy، ثم افتح `/health`. يجب أن تكون `smtp_configured` مساوية لـ `true`.
+بعد إضافة القيم نفّذ Redeploy، ثم افتح `/health`. يجب أن تكون `smtp_configured` مساوية لـ `true`، ويظهر `email_provider` بقيمة `resend` أو `smtp`.
 
 ## التخزين المؤقت
 
