@@ -57,7 +57,7 @@ SUPPORT_DARK = (18, 65, 145, 255)
 SUPPORT_FILL = (13, 48, 110, 245)
 
 # بطاقات محور الأسعار اليميني لها نفس أبعاد وشكل بطاقة السعر الحالي.
-AXIS_PRICE_CARD_WIDTH = 168
+AXIS_PRICE_CARD_WIDTH = 190
 AXIS_PRICE_CARD_HEIGHT = 56
 AXIS_PRICE_CARD_RADIUS = 5
 
@@ -224,11 +224,11 @@ def _fmt_price(value: Any) -> str:
 
 
 def _fmt_card_price(value: Any) -> str:
-    """Compact whole-number price used by Entry/SL/TP and S/R cards."""
+    """Compact one-decimal price used by all right-axis analysis cards."""
     number = _number(value)
     if number is None:
         return "—"
-    return str(int(round(number)))
+    return f"{number:.1f}"
 
 
 def _fmt_axis_price(value: Any) -> str:
@@ -2310,51 +2310,56 @@ def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: 
     image.alpha_composite(layer)
 
 
-def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
-    """Draw dark red resistance and dark blue support with strength-based width."""
-    left, _top, right, _bottom = CHART
-    all_levels: list[tuple[str, int, dict[str, Any], float, int, tuple[int, int, int, int], tuple[int, int, int, int]]] = []
+def _level_display_items(
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> list[tuple[str, float, int, tuple[int, int, int, int]]]:
+    """Return support/resistance cards for the left side of the chart."""
+    items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
     specs = (
-        ("resistance_levels", RESISTANCE_DARK, RESISTANCE_FILL),
-        ("support_levels", SUPPORT_DARK, SUPPORT_FILL),
+        ("resistance_levels", "R", RESISTANCE_FILL),
+        ("support_levels", "S", SUPPORT_FILL),
     )
-    for key, color, fill in specs:
+    for key, prefix, card_color in specs:
         levels = list(analysis.get(key) or [])[:2]
         for rank, level in enumerate(levels, start=1):
             price = _number(level.get("price"))
             if price is None or not (price_min <= price <= price_max):
                 continue
-            all_levels.append((key, rank, level, price, _price_y(price, price_min, price_max), color, fill))
+            strength = max(0, min(100, int(level.get("strength") or 50)))
+            items.append(
+                (
+                    f"{prefix}{rank} {strength}%",
+                    float(price),
+                    _price_y(float(price), price_min, price_max),
+                    card_color,
+                )
+            )
+    return items
 
-    # Every support/resistance label is centered on the exact Y returned by
-    # the shared price transform.  We deliberately allow labels to overlap:
-    # visual collision handling must never change the represented price.
-    for key, rank, level, price, exact_y, color, fill in all_levels:
-        strength = max(0, min(100, int(level.get("strength") or 50)))
-        prefix = "R" if key == "resistance_levels" else "S"
-        label = f"{prefix}{rank}  {_fmt_card_price(price)}  {strength}%"
-        # Compute the real rendered height, then place the label so its center
-        # (not its top edge) equals the exact price line.
-        label_box = draw.textbbox((0, 0), label, font=F_LEVEL_CARD)
-        label_height = (label_box[3] - label_box[1]) + 10  # padding_y=5 on both sides
-        label_top = int(exact_y - label_height // 2)
-        rect = _rounded_label(
-            draw,
-            left + 18,
-            label_top,
-            label,
-            F_LEVEL_CARD,
-            fill=fill,
-            outline=color,
-            text_fill=WHITE,
-            rtl=False,
-            padding_x=10,
-            padding_y=5,
-            radius=5,
-        )
-        line_start = min(right - 20, rect[2] + 8)
-        draw.line((line_start, exact_y, right - 3, exact_y), fill=color, width=_strength_width(strength))
 
+def _draw_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    """Draw immutable true S/R lines; their cards are rendered on the left."""
+    left, _top, right, _bottom = CHART
+    specs = (
+        ("resistance_levels", RESISTANCE_DARK),
+        ("support_levels", SUPPORT_DARK),
+    )
+    for key, color in specs:
+        levels = list(analysis.get(key) or [])[:2]
+        for level in levels:
+            price = _number(level.get("price"))
+            if price is None or not (price_min <= price <= price_max):
+                continue
+            strength = max(0, min(100, int(level.get("strength") or 50)))
+            exact_y = _price_y(float(price), price_min, price_max)
+            # The true level never moves.  Only its axis card may be displaced.
+            draw.line(
+                (left + 18, exact_y, right - 3, exact_y),
+                fill=color,
+                width=_strength_width(strength),
+            )
 
 def _spaced_positions(items: list[tuple[str, int]], min_gap: int = 43) -> dict[str, int]:
     ordered = sorted(items, key=lambda item: item[1])
@@ -2664,20 +2669,70 @@ def _draw_current_price(
     draw.text(((source_axis_left + source_axis_right) // 2, y), _fmt_price(current), font=F_TRADE_CARD_PRICE, fill=(4, 27, 33, 255), anchor="mm")
 
 
+def _resolve_axis_card_centers(
+    items: list[tuple[str, float, int, tuple[int, int, int, int]]],
+    *,
+    card_height: int = AXIS_PRICE_CARD_HEIGHT,
+    vertical_gap: int = 6,
+) -> dict[int, int]:
+    """Separate overlapping cards vertically while preserving every true line Y.
+
+    The returned values are display centers for cards only.  ``item[2]`` remains
+    the immutable true price Y used by the chart line and connector origin.
+    """
+    if not items:
+        return {}
+
+    axis_left, axis_top, axis_right, axis_bottom = _saleem_axis_box()
+    del axis_left, axis_right
+    half = card_height // 2
+    top_limit = axis_top + half + 4
+    bottom_limit = axis_bottom - half - 4
+    separation = card_height + vertical_gap
+
+    ordered = sorted(enumerate(items), key=lambda pair: (int(pair[1][2]), pair[0]))
+    desired = [max(top_limit, min(bottom_limit, int(item[2]))) for _idx, item in ordered]
+    placed = desired[:]
+
+    # Forward pass: make every next card clear the previous one.
+    for i in range(1, len(placed)):
+        placed[i] = max(placed[i], placed[i - 1] + separation)
+
+    # Pull the cluster back inside the lower boundary.
+    if placed[-1] > bottom_limit:
+        shift = placed[-1] - bottom_limit
+        placed = [value - shift for value in placed]
+
+    # Backward pass: restore spacing after the boundary shift.
+    for i in range(len(placed) - 2, -1, -1):
+        placed[i] = min(placed[i], placed[i + 1] - separation)
+
+    # Pull the cluster inside the upper boundary, then enforce spacing once more.
+    if placed[0] < top_limit:
+        shift = top_limit - placed[0]
+        placed = [value + shift for value in placed]
+    for i in range(1, len(placed)):
+        placed[i] = max(placed[i], placed[i - 1] + separation)
+
+    # The axis is much taller than the maximum card count, but keep a final
+    # bounded fallback for malformed inputs.
+    if placed[-1] > bottom_limit:
+        shift = placed[-1] - bottom_limit
+        placed = [value - shift for value in placed]
+
+    return {original_index: int(card_y) for (original_index, _item), card_y in zip(ordered, placed)}
+
+
 def _horizontal_card_lanes(
     items: list[tuple[str, float, int, tuple[int, int, int, int]]],
     *,
-    card_height: int = 66,
-    vertical_gap: int = 8,
+    card_height: int = AXIS_PRICE_CARD_HEIGHT,
+    vertical_gap: int = 6,
 ) -> dict[int, int]:
-    """Keep all cards in one fixed horizontal lane and permit vertical overlap.
-
-    The user explicitly prefers exact price binding over collision avoidance.
-    Therefore no card may shift left or right when nearby prices overlap.
-    ``card_height`` and ``vertical_gap`` remain accepted for compatibility.
-    """
-    del card_height, vertical_gap
-    return {index: 0 for index in range(len(items))}
+    """Compatibility alias returning card display centers, not X lanes."""
+    return _resolve_axis_card_centers(
+        items, card_height=card_height, vertical_gap=vertical_gap
+    )
 
 
 def _draw_trade_axis_card(
@@ -2687,29 +2742,24 @@ def _draw_trade_axis_card(
     price: float,
     exact_y: int,
     color: tuple[int, int, int, int],
+    card_y: int | None = None,
     x_lane: int = 0,
 ) -> tuple[int, int, int, int]:
-    """Draw a fixed-position colored rectangle centered on its exact price Y.
-
-    All execution cards use the same dimensions as the current-price card.
-    Vertical overlap is allowed, and ``x_lane`` is intentionally ignored so a
-    card can only move up or down with its real price.
-    """
+    """Draw a right-axis execution card linked to its immutable true line."""
     del x_lane
     _axis_left, _axis_top, axis_right, _axis_bottom = _saleem_axis_box()
     card_w = AXIS_PRICE_CARD_WIDTH
     card_h = AXIS_PRICE_CARD_HEIGHT
     x2 = axis_right - 14
     x1 = x2 - card_w
-    y1 = int(exact_y - card_h // 2)
+    display_y = int(exact_y if card_y is None else card_y)
+    y1 = int(display_y - card_h // 2)
     y2 = y1 + card_h
 
-    # Connector remains on the exact price line. No vertical elbow is needed
-    # because card center and price level are identical by construction.
     connector_start = CHART[2] + 4
-    connector_end = x1 - 7
-    draw.line((connector_start, exact_y, connector_end, exact_y), fill=color, width=2)
-    draw.line((connector_end, exact_y, x1, exact_y), fill=color, width=2)
+    elbow_x = x1 - 16
+    draw.line((connector_start, exact_y, elbow_x, exact_y), fill=color, width=2)
+    draw.line((elbow_x, exact_y, x1, display_y), fill=color, width=2)
 
     draw.rounded_rectangle(
         (x1, y1, x2, y2),
@@ -2719,10 +2769,59 @@ def _draw_trade_axis_card(
         width=1,
     )
     center_y = (y1 + y2) // 2
-    draw.text((x1 + 11, center_y), label, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="lm")
-    draw.text((x2 - 11, center_y), _fmt_card_price(price), font=F_TRADE_AXIS_PRICE, fill=WHITE, anchor="rm")
+    draw.text((x1 + 10, center_y), label, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="lm")
+    draw.text((x2 - 10, center_y), _fmt_card_price(price), font=F_TRADE_AXIS_PRICE, fill=WHITE, anchor="rm")
     return x1, y1, x2, y2
 
+
+def _level_strength_text(label: str, price: float) -> tuple[str, str]:
+    """Return the short level name and adjacent decimal-price/strength text."""
+    parts = str(label).split(" ", 1)
+    level_name = parts[0]
+    strength = parts[1] if len(parts) == 2 else ""
+    value = _fmt_card_price(price)
+    if strength:
+        value = f"{value} {strength}"
+    return level_name, value
+
+
+def _draw_left_level_card(
+    draw: ImageDraw.ImageDraw,
+    *,
+    label: str,
+    price: float,
+    exact_y: int,
+    color: tuple[int, int, int, int],
+    card_y: int | None = None,
+) -> tuple[int, int, int, int]:
+    """Draw a unified S/R card on the chart's left and link it to true Y."""
+    card_w = AXIS_PRICE_CARD_WIDTH
+    card_h = AXIS_PRICE_CARD_HEIGHT
+    x1 = CHART[0] + 14
+    x2 = x1 + card_w
+    display_y = int(exact_y if card_y is None else card_y)
+    y1 = int(display_y - card_h // 2)
+    y2 = y1 + card_h
+
+    # The true support/resistance line remains fixed.  Only the card may move
+    # to avoid overlap, with an elbow connector returning to the real line.
+    elbow_x = x2 + 16
+    draw.line((x2, display_y, elbow_x, exact_y), fill=color, width=2)
+    draw.line((elbow_x, exact_y, min(CHART[2] - 3, elbow_x + 24), exact_y), fill=color, width=2)
+
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2),
+        radius=AXIS_PRICE_CARD_RADIUS,
+        fill=color,
+        outline=(255, 255, 255, 175),
+        width=1,
+    )
+    level_name, price_strength = _level_strength_text(label, price)
+    center_y = (y1 + y2) // 2
+    draw.text((x1 + 10, center_y), level_name, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="lm")
+    # The percentage is deliberately adjacent to the decimal price.
+    draw.text((x2 - 10, center_y), price_strength, font=F_TRADE_AXIS_LABEL, fill=WHITE, anchor="rm")
+    return x1, y1, x2, y2
 
 def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> tuple[str, list[tuple[str, float, int, tuple[int, int, int, int]]]]:
     """Return right-axis cards centered on their exact real-price Y."""
@@ -2759,34 +2858,47 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
 def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int) -> None:
     _left, _top, right, _bottom = CHART
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-    draw_mode, items = _trade_display_items(analysis, price_min, price_max)
-    if not items or direction not in {"صاعد", "هابط"}:
-        return
+    draw_mode, trade_items = _trade_display_items(analysis, price_min, price_max)
+    level_items = _level_display_items(analysis, price_min, price_max)
 
-    trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
-    dashed = draw_mode in {"watch", "conditional"}
-    for _label, _price, exact_y, color in items:
-        # The line and card center share the exact same price Y. Cards move
-        # vertically with price and remain in one fixed horizontal position.
-        # Nearby levels may overlap vertically by design.
-        if dashed:
-            _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
-        else:
-            draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
+    # Execution lines stay at their true prices.  Support/resistance true lines
+    # were already drawn by _draw_levels and are never displaced.
+    if trade_items and direction in {"صاعد", "هابط"}:
+        trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
+        dashed = draw_mode in {"watch", "conditional"}
+        for _label, _price, exact_y, color in trade_items:
+            if dashed:
+                _dash_line(draw, (trade_line_left, exact_y), (right, exact_y), color, width=2, dash=10, gap=7)
+            else:
+                draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
 
-    for label, price, exact_y, color in items:
+    # Left S/R cards and right execution cards use independent collision lanes.
+    # Their real chart lines never move; only the display card center changes.
+    level_centers = _resolve_axis_card_centers(level_items)
+    for index, (label, price, exact_y, color) in enumerate(level_items):
+        _draw_left_level_card(
+            draw,
+            label=label,
+            price=price,
+            exact_y=exact_y,
+            card_y=level_centers.get(index, exact_y),
+            color=color,
+        )
+
+    trade_centers = _resolve_axis_card_centers(trade_items)
+    for index, (label, price, exact_y, color) in enumerate(trade_items):
         _draw_trade_axis_card(
             draw,
             label=label,
             price=price,
             exact_y=exact_y,
+            card_y=trade_centers.get(index, exact_y),
             color=color,
-            x_lane=0,
         )
 
-    _draw_projection_candles(image, analysis, price_min, price_max)
-    _draw_scenario_arrows(image, analysis, price_min, price_max)
-
+    if trade_items and direction in {"صاعد", "هابط"}:
+        _draw_projection_candles(image, analysis, price_min, price_max)
+        _draw_scenario_arrows(image, analysis, price_min, price_max)
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
     raw = os.getenv(name, default).strip()
@@ -3052,8 +3164,8 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
         current_reference_y,
     )
     analysis["price_axis_binding"] = "original_chart_single_transform"
-    analysis["price_axis_overlap_policy"] = "fixed_x_vertical_overlap_allowed"
-    analysis["price_card_alignment"] = "card_center_equals_exact_price_y"
+    analysis["price_axis_overlap_policy"] = "true_line_fixed_axis_cards_separated_with_connectors"
+    analysis["price_card_alignment"] = "exact_when_clear_displaced_only_on_overlap"
 
     analysis["_using_chart_background"] = using_chart_background
     _draw_grid(draw, analysis, price_min, price_max, background_mode=using_chart_background)

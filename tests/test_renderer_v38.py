@@ -28,7 +28,12 @@ from app.engine.renderer import (
     _header_pattern_lines,
     _close_label,
     _horizontal_card_lanes,
+    _resolve_axis_card_centers,
     _draw_trade_axis_card,
+    _draw_left_level_card,
+    _level_strength_text,
+    _level_display_items,
+    _fmt_card_price,
     _draw_market_zones,
     _draw_scenario_arrows,
     _draw_trade_risk_reward_zones,
@@ -540,20 +545,32 @@ def test_inactive_market_has_no_execution_cards():
     assert items == []
 
 
-def test_overlapping_trade_cards_stay_in_one_fixed_horizontal_lane():
+def test_overlapping_cards_are_separated_vertically_without_changing_true_y():
     items = [
         ("Entry", 4058.0, 1000, (38, 117, 247, 255)),
-        ("TP", 4058.2, 1020, (25, 211, 112, 255)),
-        ("SL", 4057.8, 1040, (245, 63, 70, 255)),
+        ("TP1", 4058.2, 1020, (25, 211, 112, 255)),
+        ("Stop", 4057.8, 1040, (245, 63, 70, 255)),
     ]
-    lanes = _horizontal_card_lanes(items, card_height=AXIS_PRICE_CARD_HEIGHT, vertical_gap=8)
-    assert lanes[0] == 0
-    assert lanes[1] == 0
-    assert lanes[2] == 0
-    assert [item[2] for item in items] == [1000, 1020, 1040]
+    true_ys = [item[2] for item in items]
+    centers = _resolve_axis_card_centers(
+        items, card_height=AXIS_PRICE_CARD_HEIGHT, vertical_gap=6
+    )
+    ordered = [centers[index] for index in range(len(items))]
+    assert ordered[1] - ordered[0] >= AXIS_PRICE_CARD_HEIGHT + 6
+    assert ordered[2] - ordered[1] >= AXIS_PRICE_CARD_HEIGHT + 6
+    assert [item[2] for item in items] == true_ys
 
 
-def test_trade_axis_card_center_matches_exact_price_y():
+def test_horizontal_card_lanes_compatibility_alias_returns_display_centers():
+    items = [
+        ("R1 92%", 4058.0, 1000, (102, 22, 31, 245)),
+        ("Entry", 4058.1, 1010, (38, 117, 247, 255)),
+    ]
+    centers = _horizontal_card_lanes(items)
+    assert centers[1] - centers[0] >= AXIS_PRICE_CARD_HEIGHT + 6
+
+
+def test_trade_axis_card_center_matches_exact_price_y_when_not_displaced():
     canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
     draw = ImageDraw.Draw(canvas)
     exact_y = 1234
@@ -563,14 +580,13 @@ def test_trade_axis_card_center_matches_exact_price_y():
         price=4058.0,
         exact_y=exact_y,
         color=(38, 117, 247, 255),
-        x_lane=1,
     )
     assert (rect[1] + rect[3]) // 2 == exact_y
     assert rect[2] - rect[0] == AXIS_PRICE_CARD_WIDTH
     assert rect[3] - rect[1] == AXIS_PRICE_CARD_HEIGHT
 
 
-def test_trade_axis_card_ignores_horizontal_lane_offsets():
+def test_trade_axis_card_can_move_vertically_but_stays_in_same_axis_lane():
     canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
     draw = ImageDraw.Draw(canvas)
     first = _draw_trade_axis_card(
@@ -578,26 +594,26 @@ def test_trade_axis_card_ignores_horizontal_lane_offsets():
         label="Entry",
         price=4058.0,
         exact_y=1200,
+        card_y=1160,
         color=(38, 117, 247, 255),
-        x_lane=0,
     )
     second = _draw_trade_axis_card(
         draw,
         label="TP1",
         price=4059.0,
         exact_y=1220,
+        card_y=1240,
         color=(25, 211, 112, 255),
-        x_lane=5,
     )
     assert first[0] == second[0]
     assert first[2] == second[2]
+    assert (first[1] + first[3]) // 2 == 1160
+    assert (second[1] + second[3]) // 2 == 1240
 
 
-def test_support_resistance_label_centers_match_exact_price_y(monkeypatch):
+def test_support_resistance_items_use_unified_axis_card_shape_and_true_y():
     analysis = _analysis("صاعد")
     current = analysis["current_price"]
-    # Deliberately cluster the levels so overlap is unavoidable. Exact price
-    # binding must win over collision avoidance.
     analysis["resistance_levels"] = [
         {"price": current + 0.18, "strength": 92},
         {"price": current + 0.27, "strength": 84},
@@ -607,28 +623,43 @@ def test_support_resistance_label_centers_match_exact_price_y(monkeypatch):
         {"price": current - 0.25, "strength": 80},
     ]
     low, high = current - 2.0, current + 2.0
-    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
-    draw = ImageDraw.Draw(canvas)
-    captured = []
-    original = renderer._rounded_label
-
-    def capture(*args, **kwargs):
-        rect = original(*args, **kwargs)
-        captured.append(rect)
-        return rect
-
-    monkeypatch.setattr(renderer, "_rounded_label", capture)
-    renderer._draw_levels(draw, analysis, low, high)
-
+    items = _level_display_items(analysis, low, high)
+    assert [item[0] for item in items] == ["R1 92%", "R2 84%", "S1 91%", "S2 80%"]
     expected_prices = [
         analysis["resistance_levels"][0]["price"],
         analysis["resistance_levels"][1]["price"],
         analysis["support_levels"][0]["price"],
         analysis["support_levels"][1]["price"],
     ]
-    assert len(captured) == len(expected_prices)
-    for rect, price in zip(captured, expected_prices):
-        assert (rect[1] + rect[3]) // 2 == _price_y(price, low, high)
+    for item, price in zip(items, expected_prices):
+        assert item[2] == _price_y(price, low, high)
+
+
+def test_card_price_uses_one_decimal_place():
+    assert _fmt_card_price(4052) == "4052.0"
+    assert _fmt_card_price(4052.37) == "4052.4"
+
+
+def test_left_level_card_uses_same_size_as_axis_cards():
+    canvas = Image.new("RGBA", (1320, 2868), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas)
+    rect = _draw_left_level_card(
+        draw,
+        label="R1 92%",
+        price=4053.47,
+        exact_y=1200,
+        color=(102, 22, 31, 245),
+    )
+    assert rect[0] == CHART[0] + 14
+    assert rect[2] - rect[0] == AXIS_PRICE_CARD_WIDTH
+    assert rect[3] - rect[1] == AXIS_PRICE_CARD_HEIGHT
+    assert (rect[1] + rect[3]) // 2 == 1200
+
+
+def test_level_percentage_is_adjacent_to_one_decimal_price():
+    name, value = _level_strength_text("S1 91%", 4052.37)
+    assert name == "S1"
+    assert value == "4052.4 91%"
 
 
 def test_current_price_binding_uses_shared_transform_even_without_detected_line():
@@ -669,12 +700,12 @@ def test_close_card_uses_entry_level_and_direction():
     bullish = _analysis("صاعد")
     bullish["draw_mode"] = "conditional"
     value, _color = _close_label(bullish)
-    assert value == f"فوق {round(bullish['entry'])}"
+    assert value == f"فوق {_fmt_card_price(bullish['entry'])}"
 
     bearish = _analysis("هابط")
     bearish["draw_mode"] = "conditional"
     value, _color = _close_label(bearish)
-    assert value == f"تحت {round(bearish['entry'])}"
+    assert value == f"تحت {_fmt_card_price(bearish['entry'])}"
 
 
 def test_watch_close_card_waits_instead_of_inventing_level():

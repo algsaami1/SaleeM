@@ -463,3 +463,13 @@
 - لا ينشئ الرسم FVG أو OB وهمية إذا لم تكشف الشموع منطقة صحيحة.
 - شريط الجلسات أقصر، وتبرز الجلسة الحالية فقط بينما تكون الجلسات الأخرى أهدأ.
 - لا تُرسم الشموع من جديد عند وجود صورة شارت مرفوعة؛ جميع التعديلات طبقات فوق الصورة وحولها فقط.
+
+## Right-axis card collision policy — v3.14
+
+- All analytical cards (Entry, Stop, Cancel, TP1/TP2/TP3, R1/R2/S1/S2) use one shared rectangle style and dimensions.
+- Card prices are rendered with one decimal place.
+- The chart line of every level stays at its exact `price_to_y` coordinate and never moves for collision avoidance.
+- Cards may move vertically only inside the right price-axis column when they overlap.
+- Every displaced card is connected to its true chart line using a thin connector in the card color.
+- Support/resistance cards show the level name and strength on the left, with the decimal price on the right.
+- Collision handling must not mutate the underlying price, the line Y coordinate, or analysis text.
