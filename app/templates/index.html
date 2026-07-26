@@ -151,15 +151,13 @@
       </div>
     </section>
 
-    {% if result.axis_warning %}
     <section class="card axis-soft-warning">
       <strong>اكتملت قراءة الصورة والتحليل</strong>
-      <p>تمت معايرة الشارت وربط الرسومات بمحور الأسعار، مع استخدام القراءة الاحتياطية عند الحاجة.</p>
-      {% if not result.axis_validation_passed %}
+      <p>{{ result.market_reading_comment or 'تمت قراءة بنية السوق والسيولة وتحديد أقرب مستويات الدعم والمقاومة.' }}</p>
+      {% if result.axis_warning and not result.axis_validation_passed %}
       <p class="axis-fallback-detail"><b>الوضع الاحتياطي للقراءة:</b> {{ result.axis_warning }}</p>
       {% endif %}
     </section>
-    {% endif %}
 
     <details class="card analysis-details" id="analysis-notes-card">
       <summary>

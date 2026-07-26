@@ -2413,6 +2413,36 @@ def _nearest_detected_fvg(
     return candidates[0][1]
 
 
+def detect_market_zone_presence(analysis: dict[str, Any]) -> dict[str, bool]:
+    """Return the real OB/FVG zones detected by the same renderer logic.
+
+    This small public helper keeps the text summary consistent with the chart:
+    the result page mentions Order Block or FVG only when the renderer can
+    actually detect that zone from the supplied M5 candles.
+    """
+    candles = [
+        candle
+        for candle in (analysis.get("candles") or [])
+        if isinstance(candle, dict)
+        and all(_number(candle.get(key)) is not None for key in ("open", "high", "low", "close"))
+    ]
+    if not candles:
+        return {"order_block": False, "fvg": False}
+
+    reference = float(_number(candles[-1].get("close")) or 0.0)
+    entry = _number(analysis.get("entry"))
+    focal_price = float(entry) if entry is not None else reference
+    ranges = [
+        max(0.01, float(candle["high"]) - float(candle["low"]))
+        for candle in candles
+    ]
+    atr = median(ranges) if ranges else 0.01
+    return {
+        "order_block": _nearest_detected_order_block(analysis, candles, focal_price, atr) is not None,
+        "fvg": _nearest_detected_fvg(candles, focal_price, atr) is not None,
+    }
+
+
 def _draw_market_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], slot: float, candle_right: int, price_min: float, price_max: float) -> None:
     left, top, right, bottom = CHART
     if not candles:

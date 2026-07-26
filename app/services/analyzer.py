@@ -21,6 +21,7 @@ from PIL import Image, ImageEnhance
 from app.engine.memory_engine import memory_context
 from app.engine.renderer import (
     AxisCalibrationError,
+    detect_market_zone_presence,
     prepare_chart_viewport_image,
     render_result,
     validate_uploaded_axis,
@@ -60,6 +61,82 @@ MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
 MAX_STOP_DISTANCE = 4.0
 STOP_ATR_MULTIPLIER = 1.10
+
+
+def _nearest_level_price(levels: Any, current_price: float, *, side: str) -> float | None:
+    """Select the nearest valid support or resistance price for the summary."""
+    values: list[float] = []
+    for item in levels if isinstance(levels, list) else []:
+        if not isinstance(item, dict):
+            continue
+        value = _number(item.get("price"))
+        if value is not None:
+            values.append(float(value))
+    if not values:
+        return None
+
+    if side == "support":
+        preferred = [value for value in values if value <= current_price]
+        return max(preferred) if preferred else min(values, key=lambda value: abs(value - current_price))
+
+    preferred = [value for value in values if value >= current_price]
+    return min(preferred) if preferred else min(values, key=lambda value: abs(value - current_price))
+
+
+def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
+    """Build a neutral Arabic market-reading note capped at 220 characters.
+
+    The note describes structure, liquidity, support and resistance. It does
+    not repeat execution levels or provide a buy/sell recommendation. OB/FVG
+    are mentioned only when the chart renderer detects real zones.
+    """
+    direction = str(analysis.get("direction") or "غير واضح")
+    structure_text = {
+        "صاعد": "البنية صاعدة بقمم وقيعان أعلى",
+        "هابط": "البنية هابطة بقمم وقيعان أدنى",
+        "عرضي": "البنية عرضية داخل نطاق متماسك",
+        "غير واضح": "البنية متداخلة وغير محسومة",
+    }.get(direction, "البنية متداخلة وغير محسومة")
+
+    liquidity_text = {
+        "صاعد": "والسيولة الأقرب فوق القمة الأخيرة",
+        "هابط": "والسيولة الأقرب أسفل القاع الأخير",
+        "عرضي": "والسيولة موزعة عند طرفي النطاق",
+        "غير واضح": "والسيولة موزعة حول القمم والقيعان القريبة",
+    }.get(direction, "والسيولة موزعة حول القمم والقيعان القريبة")
+
+    current = float(_number(analysis.get("current_price")) or 0.0)
+    support = _nearest_level_price(analysis.get("support_levels"), current, side="support")
+    resistance = _nearest_level_price(analysis.get("resistance_levels"), current, side="resistance")
+
+    if support is not None and resistance is not None:
+        levels_text = f"الدعم الأقرب {support:.2f} والمقاومة الأقرب {resistance:.2f}"
+    elif support is not None:
+        levels_text = f"الدعم الأقرب {support:.2f}، والمقاومة لم تتأكد بعد"
+    elif resistance is not None:
+        levels_text = f"المقاومة الأقرب {resistance:.2f}، والدعم لم يتأكد بعد"
+    else:
+        levels_text = "الدعم والمقاومة القريبان بحاجة إلى تأكيد إضافي"
+
+    zones = detect_market_zone_presence(analysis)
+    zone_names: list[str] = []
+    if zones.get("order_block"):
+        zone_names.append("Order Block")
+    if zones.get("fvg"):
+        zone_names.append("FVG")
+
+    parts = [f"{structure_text}، {liquidity_text}.", f"{levels_text}."]
+    if zone_names:
+        parts.append(f"رُصد {' و'.join(zone_names)} ضمن نطاق الحركة.")
+
+    comment = " ".join(parts)
+    # Keep the sentence complete whenever possible instead of cutting a number.
+    if len(comment) > 220 and zone_names:
+        parts.pop()
+        comment = " ".join(parts)
+    if len(comment) > 220:
+        comment = comment[:217].rstrip(" ،.") + "..."
+    return comment
 
 
 def _parse_market_candle_time(value: Any, timezone_name: str) -> datetime | None:
@@ -1993,6 +2070,8 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         analysis["axis_warning"] = (
             (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
         ) + "استخدم التطبيق نافذة موحدة للشارت ومحور الأسعار، وأزال شريط أمر التداول العلوي بالقص عند ظهوره قبل معايرة الأسعار."
+
+    analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
 
     # The smart crop is used only to help read prices. The final image always uses
     # the original upload so the fixed production layout remains identical.
