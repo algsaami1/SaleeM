@@ -260,3 +260,59 @@ details[open] .details-arrow{transform:rotate(180deg)}
 .analysis-note-row.scenario-down{border-inline-start:3px solid #df5b5b}
 .analysis-note-row.scenario-up span{color:#208a52}
 .analysis-note-row.scenario-down span{color:#b63b3b}
+
+/* Distant manual Buy Limit / Sell Limit recommendation panel */
+.limit-recommendations{overflow:hidden}
+.limit-recommendations>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;cursor:pointer;list-style:none}
+.limit-recommendations>summary::-webkit-details-marker{display:none}
+.limit-recommendations>summary b{display:block;font-size:14px;margin-bottom:3px}
+.limit-recommendations>summary small{display:block;color:var(--muted);font-size:9px;line-height:1.6}
+.limit-recommendations-content{padding:0 16px 16px}
+.limit-market-line{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;padding:10px 12px;border:1px solid #e4ece7;border-radius:12px;background:#fbfefc}
+.limit-market-line span{font-size:9px;color:var(--muted)}
+.limit-market-line b{font-size:13px;font-variant-numeric:tabular-nums;direction:ltr}
+.limit-plans-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.limit-plan{position:relative;overflow:hidden;padding:13px;border:1px solid;border-radius:16px;background:#fff;box-shadow:0 8px 22px rgba(28,61,41,.06)}
+.limit-plan:before{content:"";position:absolute;inset:0 0 auto;height:4px;background:currentColor}
+.limit-plan.buy-limit{color:#256fca;border-color:#bcd8fb;background:linear-gradient(180deg,#f5faff 0,#fff 42%)}
+.limit-plan.sell-limit{color:#c74848;border-color:#f0c2c2;background:linear-gradient(180deg,#fff7f7 0,#fff 42%)}
+.limit-plan.strongest{box-shadow:0 9px 25px rgba(38,107,186,.14),0 0 0 2px rgba(63,141,242,.10)}
+.limit-plan.sell-limit.strongest{box-shadow:0 9px 25px rgba(194,64,64,.14),0 0 0 2px rgba(227,79,79,.10)}
+.limit-plan-header{display:flex;align-items:center;justify-content:space-between;gap:9px;margin-bottom:10px}
+.limit-plan-header>div:first-child{display:flex;align-items:center;gap:8px}
+.limit-order-dot{width:30px;height:30px;flex:0 0 30px;display:grid;place-items:center;border-radius:10px;background:currentColor;box-shadow:0 6px 14px color-mix(in srgb,currentColor 24%,transparent)}
+.limit-order-dot:after{content:"↓";color:#fff;font-size:17px;font-weight:800}
+.sell-limit .limit-order-dot:after{content:"↑"}
+.limit-plan-header small{display:block;color:var(--muted);font-size:7px;margin-bottom:2px}
+.limit-plan-header h3{margin:0;color:currentColor;font-size:15px;direction:ltr;text-align:right}
+.limit-rate{min-width:62px;padding:7px 8px;border-radius:11px;background:rgba(255,255,255,.86);border:1px solid currentColor;text-align:center}
+.limit-rate strong{display:block;color:currentColor;font-size:16px;line-height:1;font-variant-numeric:tabular-nums}
+.limit-rate small{display:block;margin-top:4px;color:#9a3f3f;font-size:7px;font-weight:700}
+.stronger-badge{display:inline-flex;margin:-2px 0 9px;padding:4px 8px;border-radius:999px;background:currentColor;color:#fff;font-size:7px;font-weight:700}
+.limit-levels{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.limit-levels>div{min-height:54px;display:flex;flex-direction:column;justify-content:center;gap:4px;padding:8px;border:1px solid #e7edf0;border-radius:10px;background:rgba(255,255,255,.78);text-align:center}
+.limit-levels span{color:var(--muted);font-size:7px}
+.limit-levels b{color:var(--ink);font-size:10px;font-variant-numeric:tabular-nums;direction:ltr}
+.limit-levels .primary-level{border-color:currentColor;background:color-mix(in srgb,currentColor 7%,#fff)}
+.limit-levels .primary-level b{color:currentColor;font-size:12px}
+.limit-levels .stop-level{border-color:#efc4c4;background:#fff8f8}
+.limit-levels .stop-level b{color:#c64545}
+.limit-distance{margin:9px 0 0;color:currentColor;font-size:8px;font-weight:700;text-align:center}
+.limit-reason{margin:7px 0 0;color:#64736a;font-size:8px;line-height:1.7;text-align:center}
+.limit-disclaimer{margin-top:11px;padding:11px 12px;border:1px solid #efd99e;border-radius:12px;background:#fffbef;color:#73581b;font-size:8px;line-height:1.8;text-align:center}
+.limit-disclaimer b{color:#9a6d00}
+.limit-unavailable{margin:0 16px 16px;padding:15px;border:1px solid #ead6a8;border-radius:13px;background:#fffbf2;text-align:center}
+.limit-unavailable strong{display:block;color:#8a6817;font-size:13px}
+.limit-unavailable p{margin:7px 0;color:#715f36;font-size:9px;line-height:1.7}
+.limit-unavailable small{color:#947d49;font-size:8px}
+
+@media(max-width:650px){
+  .limit-plans-grid{grid-template-columns:1fr}
+}
+@media(max-width:430px){
+  .limit-recommendations>summary{padding:14px}
+  .limit-recommendations>summary b{font-size:12px}
+  .limit-recommendations-content{padding:0 12px 13px}
+  .limit-plan{padding:11px}
+  .limit-levels>div{min-height:50px;padding:7px}
+}

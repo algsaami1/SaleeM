@@ -139,6 +139,215 @@ def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
     return comment
 
 
+
+def _limit_level_candidates(
+    analysis: dict[str, Any],
+    *,
+    side: str,
+    current: float,
+) -> list[dict[str, Any]]:
+    """Collect real and market-derived levels for the distant limit panel."""
+    candles = [item for item in (analysis.get("candles") or []) if isinstance(item, dict)]
+    source_key = "support_levels" if side == "buy" else "resistance_levels"
+    kind = "support" if side == "buy" else "resistance"
+    combined: list[dict[str, Any]] = []
+
+    for item in analysis.get(source_key) or []:
+        if isinstance(item, dict):
+            combined.append(dict(item))
+    if candles:
+        combined.extend(_cluster_levels(candles, kind, current))
+
+    # Add the visible market extreme as a conservative distant fallback. It is
+    # marked as market-derived, never as a guaranteed support/resistance zone.
+    if candles:
+        extreme_key = "low" if side == "buy" else "high"
+        extreme = min(float(item[extreme_key]) for item in candles) if side == "buy" else max(float(item[extreme_key]) for item in candles)
+        combined.append(
+            {
+                "price": round(extreme, 2),
+                "strength": 48,
+                "touches": 1,
+                "source": "market_extreme",
+            }
+        )
+
+    result: list[dict[str, Any]] = []
+    seen: list[float] = []
+    for item in combined:
+        price = _number(item.get("price"))
+        if price is None:
+            continue
+        price = float(price)
+        valid_side = price < current if side == "buy" else price > current
+        if not valid_side:
+            continue
+        if any(abs(price - known) < 0.18 for known in seen):
+            continue
+        seen.append(price)
+        result.append(
+            {
+                "price": round(price, 2),
+                "strength": max(35, min(95, int(item.get("strength") or 45))),
+                "touches": max(0, min(12, int(item.get("touches") or 0))),
+                "source": str(item.get("source") or "market"),
+            }
+        )
+    return result
+
+
+def _pick_distant_limit_level(
+    analysis: dict[str, Any],
+    *,
+    side: str,
+    current: float,
+    atr: float,
+) -> dict[str, Any]:
+    """Pick a level sufficiently far from market without pretending certainty."""
+    minimum_distance = max(1.80, atr * 1.65)
+    ideal_distance = max(2.80, atr * 2.40)
+    maximum_distance = max(12.0, atr * 7.0)
+    candidates = _limit_level_candidates(analysis, side=side, current=current)
+
+    distant = []
+    for item in candidates:
+        distance = abs(current - float(item["price"]))
+        if distance < minimum_distance or distance > maximum_distance:
+            continue
+        source_bonus = 7 if item["source"] not in {"projected", "market_extreme"} else 0
+        touch_bonus = min(8, int(item["touches"]) * 1.5)
+        # Reward distance until roughly four ATR, then gently reduce the score
+        # so an obsolete extreme does not automatically become the recommendation.
+        distance_atr = distance / max(0.01, atr)
+        distance_bonus = min(18.0, distance_atr * 5.0)
+        if distance_atr > 5.0:
+            distance_bonus -= min(12.0, (distance_atr - 5.0) * 3.0)
+        score = float(item["strength"]) * 0.70 + source_bonus + touch_bonus + distance_bonus
+        distant.append((score, distance, item))
+
+    if distant:
+        _, distance, selected = max(distant, key=lambda value: (value[0], value[1]))
+        return {**selected, "distance": round(distance, 2), "projected": False}
+
+    # If the recent window contains no sufficiently distant confirmed level,
+    # produce a clearly identified calculated waiting area instead of reusing a
+    # nearby scalp level. The lower score keeps its percentage conservative.
+    price = current - ideal_distance if side == "buy" else current + ideal_distance
+    return {
+        "price": round(price, 2),
+        "strength": 42,
+        "touches": 0,
+        "source": "calculated_waiting_area",
+        "distance": round(ideal_distance, 2),
+        "projected": True,
+    }
+
+
+def _limit_recommendation_probability(
+    analysis: dict[str, Any],
+    *,
+    side: str,
+    level: dict[str, Any],
+) -> int:
+    """Estimate setup strength; this is explicitly not a win guarantee."""
+    base = int(analysis.get("buy_probability") or 50) if side == "buy" else int(analysis.get("sell_probability") or 50)
+    strength = int(level.get("strength") or 45)
+    expected_direction = "صاعد" if side == "buy" else "هابط"
+    frames = analysis.get("frame_directions") if isinstance(analysis.get("frame_directions"), dict) else {}
+    frame_items = [frames.get(name) for name in ("H4", "H1", "M15", "M5")]
+    matching = sum(
+        1
+        for item in frame_items
+        if isinstance(item, dict) and str(item.get("direction") or "") == expected_direction
+    )
+    frame_score = 50 if not any(isinstance(item, dict) for item in frame_items) else matching * 25
+    source_penalty = 8 if level.get("projected") else 0
+    warning_penalty = 5 if analysis.get("market_data_warnings") else 0
+    estimate = round(base * 0.50 + strength * 0.28 + frame_score * 0.22 - source_penalty - warning_penalty)
+    return max(38, min(89, int(estimate)))
+
+
+def _build_limit_recommendations(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Build two distant manual MT5 limit-order plans for the result page.
+
+    These plans are deliberately separate from the chart's primary scenario.
+    They never execute a trade and their percentages are estimates only.
+    """
+    market_activity = analysis.get("market_activity")
+    active = bool(market_activity.get("active")) if isinstance(market_activity, dict) else analysis.get("draw_mode") != "inactive"
+    if not active or analysis.get("draw_mode") == "inactive":
+        return {
+            "available": False,
+            "reason": "التوصية غير متاحة حتى يفتح السوق وتتحدث شموع M5.",
+            "disclaimer": "النسب تقديرية وغير مضمونة، ولا تنفذ أي صفقة تلقائيًا.",
+        }
+
+    current = float(_number(analysis.get("current_price")) or 0.0)
+    candles = [item for item in (analysis.get("candles") or []) if isinstance(item, dict)]
+    atr = max(0.25, _atr(candles))
+    zone_half_width = max(0.22, min(1.20, atr * 0.24))
+    stop_buffer = max(1.25, min(6.50, atr * 1.35))
+
+    result: dict[str, Any] = {
+        "available": True,
+        "current_price": round(current, 2),
+        "disclaimer": "نسبة النجاح تقديرية وغير مضمونة. راجع السعر والسبريد قبل إدخال الأوامر يدويًا في MT5.",
+    }
+
+    for side, key in (("buy", "buy_limit"), ("sell", "sell_limit")):
+        level = _pick_distant_limit_level(analysis, side=side, current=current, atr=atr)
+        entry = float(level["price"])
+        if side == "buy":
+            zone_low = entry - zone_half_width
+            zone_high = entry + zone_half_width
+            stop = zone_low - stop_buffer
+        else:
+            zone_low = entry - zone_half_width
+            zone_high = entry + zone_half_width
+            stop = zone_high + stop_buffer
+
+        risk = max(1.0, abs(entry - stop))
+        if side == "buy":
+            tp1 = max(current + atr * 0.85, entry + risk * 1.80)
+            tp2 = max(tp1 + atr * 1.10, entry + risk * 2.85)
+            tp3 = max(tp2 + atr * 1.45, entry + risk * 4.20)
+            reason = "منطقة انتظار أسفل السعر مبنية على دعم/قاع بعيد ضمن نافذة السوق."
+        else:
+            tp1 = min(current - atr * 0.85, entry - risk * 1.80)
+            tp2 = min(tp1 - atr * 1.10, entry - risk * 2.85)
+            tp3 = min(tp2 - atr * 1.45, entry - risk * 4.20)
+            reason = "منطقة انتظار أعلى السعر مبنية على مقاومة/قمة بعيدة ضمن نافذة السوق."
+
+        if level.get("projected"):
+            reason = "منطقة انتظار بعيدة محسوبة من تذبذب M5 لعدم توفر مستوى تاريخي بعيد مكتمل."
+
+        result[key] = {
+            "order_type": "Buy Limit" if side == "buy" else "Sell Limit",
+            "entry": round(entry, 2),
+            "zone_low": round(min(zone_low, zone_high), 2),
+            "zone_high": round(max(zone_low, zone_high), 2),
+            "stop_loss": round(stop, 2),
+            "target_1": round(tp1, 2),
+            "target_2": round(tp2, 2),
+            "target_3": round(tp3, 2),
+            "distance_to_entry": round(abs(current - entry), 2),
+            "estimated_success": _limit_recommendation_probability(analysis, side=side, level=level),
+            "level_strength": int(level.get("strength") or 42),
+            "source": str(level.get("source") or "market"),
+            "reason": reason,
+            "guaranteed": False,
+        }
+
+    buy_rate = int(result["buy_limit"]["estimated_success"])
+    sell_rate = int(result["sell_limit"]["estimated_success"])
+    if buy_rate > sell_rate:
+        result["stronger"] = "buy_limit"
+    elif sell_rate > buy_rate:
+        result["stronger"] = "sell_limit"
+    else:
+        result["stronger"] = "equal"
+    return result
+
 def _parse_market_candle_time(value: Any, timezone_name: str) -> datetime | None:
     """Parse a provider candle time and normalize it to UTC.
 
@@ -2072,6 +2281,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         ) + "استخدم التطبيق نافذة موحدة للشارت ومحور الأسعار، وأزال شريط أمر التداول العلوي بالقص عند ظهوره قبل معايرة الأسعار."
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
+    analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
 
     # The smart crop is used only to help read prices. The final image always uses
     # the original upload so the fixed production layout remains identical.
