@@ -17,7 +17,7 @@ from app import __version__
 from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
-from app.services.mailer import delivery_provider, owner_email, send_note_email, smtp_configured
+from app.services.mailer import delivery_provider, email_configured, owner_email, send_note_email
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -107,7 +107,8 @@ async def health():
         "decision_pipeline": "market-only-decision+image-only-axis-geometry",
         "feedback_store_path": os.getenv("SALEEM_FEEDBACK_STORE_PATH", "/tmp/saleem_feedback_store.json"),
         "owner_email_configured": bool(owner_email()),
-        "smtp_configured": smtp_configured(),
+        "email_configured": email_configured(),
+        "smtp_configured": False,
         "email_provider": delivery_provider(),
         "trade_mode": "single-highest-probability-scenario",
         "targets": 3,
@@ -153,7 +154,7 @@ async def submit_note(payload: NotePayload):
     )
     if was_emailed:
         message = "تم حفظ الملاحظة وإرسال نسخة إلى بريد مالك التطبيق."
-    elif not smtp_configured():
+    elif not email_configured():
         message = "تم حفظ الملاحظة. أضف RESEND_API_KEY وSALEEM_EMAIL في Railway لتفعيل الإرسال عبر HTTPS."
     else:
         message = "تم حفظ الملاحظة، لكن تعذر إرسال البريد. افتح Railway Logs لمعرفة سبب الرفض."
