@@ -25,6 +25,8 @@ from app.engine.renderer import (
     _fit_cover,
     _detect_top_trade_controls_band,
     _hide_top_trade_controls,
+    _remove_top_trade_controls_by_crop,
+    prepare_chart_viewport_image,
     _header_pattern_lines,
     _close_label,
     _horizontal_card_lanes,
@@ -515,6 +517,39 @@ def test_top_buy_sell_and_lot_toolbar_is_hidden_as_one_band():
     assert cleaned.getpixel((900, (top + bottom) // 2))[:3] == (3, 17, 35)
     # Chart body below the toolbar remains untouched.
     assert cleaned.getpixel((450, 180))[:3] == (245, 245, 245)
+
+
+def test_neutral_white_trade_toolbar_is_cropped_not_painted():
+    image = Image.new("RGBA", (1111, 2243), (248, 248, 248, 255))
+    draw = ImageDraw.Draw(image)
+    # A white/gray one-click trading row with internal separators and text-like blocks.
+    draw.rectangle((0, 0, 1110, 142), fill=(220, 220, 220, 255))
+    draw.rectangle((0, 0, 160, 142), fill=(185, 185, 185, 255))
+    draw.rectangle((600, 0, 1110, 142), fill=(205, 205, 205, 255))
+    draw.line((0, 142, 1110, 142), fill=(90, 90, 90, 255), width=3)
+    # Chart body starts below the toolbar and includes a unique marker.
+    draw.rectangle((0, 143, 1110, 2242), fill=(250, 250, 250, 255))
+    draw.rectangle((900, 220, 920, 400), fill=(30, 170, 120, 255))
+
+    band = _detect_top_trade_controls_band(image)
+    assert band is not None
+    cleaned, removed = _remove_top_trade_controls_by_crop(image)
+    assert removed is not None
+    assert cleaned.size == image.size
+    # The gray toolbar no longer occupies the top after a geometry-preserving crop.
+    assert cleaned.getpixel((400, 5))[:3] != (220, 220, 220)
+
+
+def test_plain_chart_top_is_not_mistaken_for_trade_toolbar():
+    image = Image.new("RGBA", (1111, 2243), (4, 8, 15, 255))
+    draw = ImageDraw.Draw(image)
+    for y in range(90, 2200, 120):
+        draw.line((0, y, 930, y), fill=(25, 35, 49, 255), width=1)
+    for x in range(90, 930, 120):
+        draw.line((x, 0, x, 2242), fill=(25, 35, 49, 255), width=1)
+    cleaned, removed = _remove_top_trade_controls_by_crop(image)
+    assert removed is None
+    assert cleaned.tobytes() == image.tobytes()
 
 
 def test_header_pattern_uses_two_lines_for_long_break_retest_name():

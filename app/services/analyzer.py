@@ -19,7 +19,12 @@ import httpx
 from PIL import Image, ImageEnhance
 
 from app.engine.memory_engine import memory_context
-from app.engine.renderer import AxisCalibrationError, render_result, validate_uploaded_axis
+from app.engine.renderer import (
+    AxisCalibrationError,
+    prepare_chart_viewport_image,
+    render_result,
+    validate_uploaded_axis,
+)
 from app.services.market_data import (
     MarketDataError,
     compact_market_context,
@@ -246,25 +251,29 @@ def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
 
 
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
-    """Create a smart chart crop when the upload contains surrounding app UI."""
+    """Create the same clean chart viewport used by the final renderer.
+
+    Geometry extraction and final rendering must see identical pixels. This
+    prevents the AI geometry reader from using the broker toolbar while the
+    renderer uses another crop, which previously shifted every price line.
+    """
     meta: dict[str, Any] = {"used_smart_crop": False}
+    prepared, viewport_meta = prepare_chart_viewport_image(image_path)
+    if prepared is None:
+        return image_path, meta
     try:
-        with Image.open(image_path) as image:
-            box = _detect_chart_box(image)
-            if not box:
-                return image_path, meta
-            left, top, right, bottom = box
-            crop = image.convert("RGBA").crop((left, top, right, bottom))
-            crop_path = image_path.with_name(f"{image_path.stem}_chartcrop.png")
-            crop.save(crop_path)
-            meta.update({
-                "used_smart_crop": True,
-                "smart_crop_box": [left, top, right, bottom],
-                "smart_crop_size": [right - left, bottom - top],
-            })
-            return crop_path, meta
+        crop_path = image_path.with_name(f"{image_path.stem}_chartviewport.png")
+        prepared.save(crop_path)
     except Exception:
         return image_path, meta
+
+    meta.update(viewport_meta)
+    meta.update({
+        "used_smart_crop": True,
+        "smart_crop_mode": "canonical_chart_viewport",
+        "smart_crop_size": [prepared.width, prepared.height],
+    })
+    return crop_path, meta
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -1983,7 +1992,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     if crop_meta.get("used_smart_crop"):
         analysis["axis_warning"] = (
             (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
-        ) + "استخدم التطبيق قصًا ذكيًا تلقائيًا لمنطقة الشارت مع محور الأسعار الأصلي، ثم أزاح الجزء الملتقط لليسار كما هو مطلوب."
+        ) + "استخدم التطبيق نافذة موحدة للشارت ومحور الأسعار، وأزال شريط أمر التداول العلوي بالقص عند ظهوره قبل معايرة الأسعار."
 
     # The smart crop is used only to help read prices. The final image always uses
     # the original upload so the fixed production layout remains identical.

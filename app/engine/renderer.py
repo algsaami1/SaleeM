@@ -1355,15 +1355,146 @@ def _estimate_visible_candle_count(chart_image: Image.Image) -> int | None:
 
 
 
-def _prepare_chart_background(
+def _resize_cover_right_aligned(source: Image.Image, size: tuple[int, int]) -> Image.Image:
+    """Uniformly fill ``size`` while preserving the original right price axis.
+
+    The chart is never stretched independently on one axis. Any horizontal
+    excess is removed from the left, because the right-side broker axis is the
+    authoritative visual reference.
+    """
+    target_w, target_h = size
+    if source.width <= 1 or source.height <= 1:
+        return Image.new("RGBA", size, (0, 0, 0, 255))
+    scale = max(target_w / source.width, target_h / source.height)
+    scaled_w = max(target_w, int(round(source.width * scale)))
+    scaled_h = max(target_h, int(round(source.height * scale)))
+    resized = source.convert("RGBA").resize((scaled_w, scaled_h), resample=Image.Resampling.LANCZOS)
+    crop_left = max(0, scaled_w - target_w)
+    crop_top = max(0, (scaled_h - target_h) // 2)
+    return resized.crop((crop_left, crop_top, crop_left + target_w, crop_top + target_h))
+
+
+def _detect_neutral_top_trade_controls_band(prepared: Image.Image) -> tuple[int, int] | None:
+    """Detect light or dark one-click-trading toolbars at the viewport top.
+
+    MetaTrader may render the BUY/SELL/lot row in blue/red, black/gray, or
+    white/gray. Colour-only detection therefore misses many real screenshots.
+    This detector looks for a strong horizontal change point near the top and
+    verifies that the region above it has a different brightness/texture from
+    the chart body below it. Ordinary chart grid lines are rejected because
+    they do not change the whole top region.
+    """
+    image = prepared.convert("RGBA")
+    width, height = image.size
+    if width < 180 or height < 300:
+        return None
+
+    scan_bottom = min(height - 20, max(170, int(height * 0.20)))
+    x_end = max(80, int(width * 0.84))
+    step_x = 2 if width >= 700 else 1
+    pixels = image.load()
+
+    row_mean: list[float] = []
+    row_texture: list[float] = []
+    vertical_change: list[float] = [0.0]
+    previous: list[float] | None = None
+
+    for y in range(scan_bottom):
+        values: list[float] = []
+        texture_hits = 0
+        last_value: float | None = None
+        for x in range(0, x_end, step_x):
+            r, g, b, a = pixels[x, y]
+            value = (float(r) + float(g) + float(b)) / 3.0 if a >= 80 else 0.0
+            values.append(value)
+            if last_value is not None and abs(value - last_value) >= 28.0:
+                texture_hits += 1
+            last_value = value
+        count = max(1, len(values))
+        row_mean.append(sum(values) / count)
+        row_texture.append(texture_hits / count)
+        if previous is not None:
+            vertical_change.append(sum(abs(a - b) for a, b in zip(values, previous)) / count)
+        previous = values
+
+    # Smooth the row-to-row change so text edges do not beat the toolbar's
+    # complete lower boundary.
+    radius = 2
+    smoothed: list[float] = []
+    for index in range(len(vertical_change)):
+        start = max(0, index - radius)
+        end = min(len(vertical_change), index + radius + 1)
+        smoothed.append(sum(vertical_change[start:end]) / max(1, end - start))
+
+    candidate_start = max(36, int(height * 0.018))
+    candidate_end = min(scan_bottom - 70, int(height * 0.18))
+    if candidate_end <= candidate_start:
+        return None
+    valid_boundaries: list[tuple[int, float, float]] = []
+    for boundary in range(candidate_start, candidate_end):
+        strength = smoothed[boundary]
+        if strength < 14.0:
+            continue
+        before_start = max(0, boundary - 76)
+        before_end = max(before_start + 1, boundary - 6)
+        after_start = min(scan_bottom - 1, boundary + 6)
+        after_end = min(scan_bottom, boundary + 96)
+        if after_end <= after_start:
+            continue
+
+        before_mean = sum(row_mean[before_start:before_end]) / max(1, before_end - before_start)
+        after_mean = sum(row_mean[after_start:after_end]) / max(1, after_end - after_start)
+        before_texture = sum(row_texture[before_start:before_end]) / max(1, before_end - before_start)
+        after_texture = sum(row_texture[after_start:after_end]) / max(1, after_end - after_start)
+        brightness_gap = abs(before_mean - after_mean)
+        texture_separation = before_texture >= after_texture * 1.45 + 0.003
+        if brightness_gap >= 8.0 or texture_separation:
+            valid_boundaries.append((boundary, strength, brightness_gap))
+
+    if not valid_boundaries:
+        return None
+
+    # The strongest edge may be an internal divider between the lot field and
+    # BUY/SELL cells. The actual chart begins after the *last* qualified edge
+    # of the toolbar, so choose the lowest valid boundary in the top region.
+    boundary = max(item[0] for item in valid_boundaries)
+    padding = max(5, int(height * 0.0035))
+    return 0, min(height, boundary + padding)
+
+
+def _remove_top_trade_controls_by_crop(prepared: Image.Image) -> tuple[Image.Image, tuple[int, int] | None]:
+    """Remove the broker toolbar by cropping, not by painting over the chart.
+
+    Cropping is essential: painting the row leaves a large dead strip and makes
+    the candles appear compressed toward the bottom. The remaining chart and
+    its original price axis are uniformly enlarged together, so price geometry
+    remains synchronized.
+    """
+    band = _detect_top_trade_controls_band(prepared)
+    if band is None:
+        return prepared, None
+    top, bottom = band
+    if top > int(prepared.height * 0.04) or bottom < 24 or bottom > int(prepared.height * 0.24):
+        return prepared, None
+    remaining = prepared.crop((0, bottom, prepared.width, prepared.height))
+    if remaining.height < int(prepared.height * 0.68):
+        return prepared, None
+    return _resize_cover_right_aligned(remaining, prepared.size), band
+
+
+def prepare_chart_viewport_image(
     chart_background_path: str | os.PathLike[str] | None,
-) -> tuple[Image.Image | None, int | None, int | None]:
-    """Extract the exact 1111×2243 visible viewport from the uploaded image."""
+) -> tuple[Image.Image | None, dict[str, Any]]:
+    """Return a clean canonical chart+axis viewport for geometry and rendering."""
+    meta: dict[str, Any] = {
+        "chart_viewport_prepared": False,
+        "top_trade_controls_removed": False,
+    }
     if not chart_background_path:
-        return None, None, None
+        return None, meta
     path = Path(chart_background_path)
     if not path.exists():
-        return None, None, None
+        return None, meta
 
     visible_left, visible_top, visible_right, visible_bottom = _source_background_box()
     visible_w = visible_right - visible_left
@@ -1371,8 +1502,31 @@ def _prepare_chart_background(
     try:
         with Image.open(path) as chart_image:
             prepared = _fit_cover(chart_image.convert("RGBA"), (visible_w, visible_h))
-            detected_local_y = _detect_green_reference_line_y(prepared)
-            visible_candles = _estimate_visible_candle_count(prepared)
+        prepared, removed_band = _remove_top_trade_controls_by_crop(prepared)
+    except Exception:  # pragma: no cover
+        return None, meta
+
+    meta.update({
+        "chart_viewport_prepared": True,
+        "chart_viewport_size": [visible_w, visible_h],
+        "top_trade_controls_removed": removed_band is not None,
+        "top_trade_controls_band": list(removed_band) if removed_band is not None else None,
+    })
+    return prepared, meta
+
+
+def _prepare_chart_background(
+    chart_background_path: str | os.PathLike[str] | None,
+) -> tuple[Image.Image | None, int | None, int | None]:
+    """Extract a clean 1111×2243 chart viewport with its original price axis."""
+    prepared, _meta = prepare_chart_viewport_image(chart_background_path)
+    if prepared is None:
+        return None, None, None
+
+    visible_top = _source_background_box()[1]
+    try:
+        detected_local_y = _detect_green_reference_line_y(prepared)
+        visible_candles = _estimate_visible_candle_count(prepared)
     except Exception:  # pragma: no cover
         return None, None, None
 
@@ -1412,7 +1566,7 @@ def _detect_top_trade_controls_band(prepared: Image.Image) -> tuple[int, int] | 
             active_rows.append(y)
 
     if not active_rows:
-        return None
+        return _detect_neutral_top_trade_controls_band(prepared)
 
     bands: list[list[int]] = []
     for y in active_rows:
@@ -1422,7 +1576,7 @@ def _detect_top_trade_controls_band(prepared: Image.Image) -> tuple[int, int] | 
             bands[-1].append(y)
     band = max(bands, key=len)
     if len(band) < max(3, int(height * 0.004)):
-        return None
+        return _detect_neutral_top_trade_controls_band(prepared)
 
     padding = max(8, int(height * TOP_CONTROL_PADDING_RATIO))
     top = max(0, band[0] - padding)
