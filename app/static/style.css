@@ -318,3 +318,11 @@ details[open] .details-arrow{transform:rotate(180deg)}
 }
 .limit-plan.unavailable-plan{opacity:.78;box-shadow:none}
 .limit-plan-empty{margin:18px 0 8px;padding:14px;border:1px dashed currentColor;border-radius:11px;background:rgba(255,255,255,.7);color:#69756e;font-size:9px;line-height:1.8;text-align:center}
+
+/* v3.22 analysis refresh and deterministic pattern audit */
+.analysis-refresh-time{
+  margin-top:7px;
+  color:#71857a;
+  font-size:12px;
+  line-height:1.55;
+}

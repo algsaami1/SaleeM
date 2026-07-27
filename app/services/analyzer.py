@@ -19,6 +19,7 @@ import httpx
 from PIL import Image, ImageEnhance
 
 from app.engine.memory_engine import memory_context
+from app.engine.pattern_engine import review_market_patterns
 from app.engine.renderer import (
     AxisCalibrationError,
     detect_market_zone_presence,
@@ -84,60 +85,113 @@ def _nearest_level_price(levels: Any, current_price: float, *, side: str) -> flo
 
 
 def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
-    """Build a neutral Arabic market-reading note capped at 220 characters.
+    """Build a fresh neutral reading from the latest closed-candle evidence.
 
-    The note describes structure, liquidity, support and resistance. It does
-    not repeat execution levels or provide a buy/sell recommendation. OB/FVG
-    are mentioned only when the chart renderer detects real zones.
+    Unlike the old direction-only template, this sentence includes timeframe
+    agreement, recent M5 momentum, the deterministic pattern review and nearby
+    levels. It remains educational, contains no execution recommendation and is
+    capped at 220 characters.
     """
     direction = str(analysis.get("direction") or "غير واضح")
-    structure_text = {
-        "صاعد": "البنية صاعدة بقمم وقيعان أعلى",
-        "هابط": "البنية هابطة بقمم وقيعان أدنى",
-        "عرضي": "البنية عرضية داخل نطاق متماسك",
-        "غير واضح": "البنية متداخلة وغير محسومة",
-    }.get(direction, "البنية متداخلة وغير محسومة")
+    frames = analysis.get("frame_directions")
 
-    liquidity_text = {
-        "صاعد": "والسيولة الأقرب فوق القمة الأخيرة",
-        "هابط": "والسيولة الأقرب أسفل القاع الأخير",
-        "عرضي": "والسيولة موزعة عند طرفي النطاق",
-        "غير واضح": "والسيولة موزعة حول القمم والقيعان القريبة",
-    }.get(direction, "والسيولة موزعة حول القمم والقيعان القريبة")
+    def frame_direction(name: str) -> str:
+        item = frames.get(name) if isinstance(frames, dict) else None
+        if isinstance(item, dict):
+            return str(item.get("direction") or "غير واضح")
+        return str(item or "غير واضح")
+
+    h4, h1, m15, m5 = [frame_direction(name) for name in ("H4", "H1", "M15", "M5")]
+    if m15 == m5 and m15 in {"صاعد", "هابط"}:
+        frame_text = f"M15 وM5 متفقان على اتجاه {m15}"
+    elif m15 in {"صاعد", "هابط"} and m5 in {"صاعد", "هابط"} and m15 != m5:
+        frame_text = "M15 وM5 متعارضان"
+    elif h4 == h1 and h4 in {"صاعد", "هابط"}:
+        frame_text = f"H4 وH1 {h4}ان مع تفعيل قصير غير مكتمل"
+    else:
+        frame_text = "الفريمات متداخلة بلا توافق كامل"
+
+    candles = analysis.get("candles") if isinstance(analysis.get("candles"), list) else []
+    momentum_text = "زخم M5 غير محسوم"
+    candle_text = ""
+    if len(candles) >= 5:
+        try:
+            atr = max(0.01, _atr(candles))
+            move = (float(candles[-1]["close"]) - float(candles[-5]["close"])) / atr
+            if move >= 0.65:
+                momentum_text = "زخم M5 صاعد"
+            elif move <= -0.65:
+                momentum_text = "زخم M5 هابط"
+            else:
+                momentum_text = "زخم M5 متوازن"
+            last = candles[-1]
+            body = abs(float(last["close"]) - float(last["open"]))
+            upper = max(0.0, float(last["high"]) - max(float(last["open"]), float(last["close"])))
+            lower = max(0.0, min(float(last["open"]), float(last["close"])) - float(last["low"]))
+            if upper > max(body * 1.4, atr * 0.18):
+                candle_text = "ورفض علوي ظاهر"
+            elif lower > max(body * 1.4, atr * 0.18):
+                candle_text = "ورفض سفلي ظاهر"
+        except (TypeError, ValueError, KeyError):
+            pass
 
     current = float(_number(analysis.get("current_price")) or 0.0)
     support = _nearest_level_price(analysis.get("support_levels"), current, side="support")
     resistance = _nearest_level_price(analysis.get("resistance_levels"), current, side="resistance")
-
     if support is not None and resistance is not None:
-        levels_text = f"الدعم الأقرب {support:.2f} والمقاومة الأقرب {resistance:.2f}"
+        levels_text = f"الدعم {support:.2f} والمقاومة {resistance:.2f}"
     elif support is not None:
-        levels_text = f"الدعم الأقرب {support:.2f}، والمقاومة لم تتأكد بعد"
+        levels_text = f"الدعم الأقرب {support:.2f}"
     elif resistance is not None:
-        levels_text = f"المقاومة الأقرب {resistance:.2f}، والدعم لم يتأكد بعد"
+        levels_text = f"المقاومة الأقرب {resistance:.2f}"
     else:
-        levels_text = "الدعم والمقاومة القريبان بحاجة إلى تأكيد إضافي"
+        levels_text = "المستويات القريبة لم تتأكد"
 
+    pattern = str(analysis.get("pattern_type") or "لا يوجد")
+    pattern_confidence = int(analysis.get("pattern_confidence") or 0)
+    if pattern != "لا يوجد" and pattern_confidence >= 60:
+        pattern_text = f"ورُصد {pattern} بثقة {pattern_confidence}٪"
+    else:
+        pattern_text = "ولا يوجد نموذج هندسي مكتمل"
+
+    direction_text = {
+        "صاعد": "البنية الحالية صاعدة",
+        "هابط": "البنية الحالية هابطة",
+        "عرضي": "البنية الحالية عرضية",
+        "غير واضح": "البنية الحالية غير محسومة",
+    }.get(direction, "البنية الحالية غير محسومة")
+    liquidity_text = {
+        "صاعد": "السيولة الأقرب فوق القمة الأخيرة",
+        "هابط": "السيولة الأقرب أسفل القاع الأخير",
+        "عرضي": "السيولة موزعة عند طرفي النطاق",
+        "غير واضح": "السيولة موزعة حول القمم والقيعان القريبة",
+    }.get(direction, "السيولة موزعة حول القمم والقيعان القريبة")
     zones = detect_market_zone_presence(analysis)
     zone_names: list[str] = []
     if zones.get("order_block"):
         zone_names.append("Order Block")
     if zones.get("fvg"):
         zone_names.append("FVG")
+    zones_text = f"ورُصد {' و'.join(zone_names)}" if zone_names else ""
 
-    parts = [f"{structure_text}، {liquidity_text}.", f"{levels_text}."]
-    if zone_names:
-        parts.append(f"رُصد {' و'.join(zone_names)} ضمن نطاق الحركة.")
+    clauses = [
+        f"{direction_text}؛ {frame_text}",
+        f"{momentum_text} {candle_text}".strip(),
+        pattern_text,
+        f"{liquidity_text}؛ {levels_text}",
+        zones_text,
+    ]
+    comment = "، ".join(clause for clause in clauses if clause).replace("، ،", "،") + "."
+    if len(comment) <= 220:
+        return comment
 
-    comment = " ".join(parts)
-    # Keep the sentence complete whenever possible instead of cutting a number.
-    if len(comment) > 220 and zone_names:
-        parts.pop()
-        comment = " ".join(parts)
-    if len(comment) > 220:
-        comment = comment[:217].rstrip(" ،.") + "..."
-    return comment
-
+    # Remove lower-priority clauses before truncating a numeric level.
+    for index in (2, 1):
+        reduced = [clause for pos, clause in enumerate(clauses) if pos != index]
+        candidate = "، ".join(clause for clause in reduced if clause) + "."
+        if len(candidate) <= 220:
+            return candidate
+    return comment[:217].rstrip(" ،.") + "..."
 
 
 def _confirmed_limit_candidates(
@@ -797,7 +851,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 3
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 4
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1025,14 +1079,53 @@ def _closed_market_context(
     return result
 
 
+def _analysis_rules_fingerprint() -> str:
+    """Invalidate cached decisions whenever rules, knowledge or code policy changes."""
+    digest = hashlib.sha256()
+    for path in (SPEC_PATH, PERMANENT_PROMPT_PATH):
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(str(path).encode("utf-8"))
+    if KNOWLEDGE_DIR.exists():
+        for path in sorted(KNOWLEDGE_DIR.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in {".json", ".md", ".svg"}:
+                continue
+            digest.update(str(path.relative_to(KNOWLEDGE_DIR)).encode("utf-8"))
+            try:
+                digest.update(path.read_bytes())
+            except OSError:
+                continue
+    return digest.hexdigest()[:20]
+
+
+def _frame_candle_fingerprint(frames: Any) -> str:
+    """Hash recent closed OHLC values, not only the candle timestamp."""
+    payload: dict[str, Any] = {}
+    for timeframe, keep in (("H4", 10), ("H1", 14), ("M15", 20), ("M5", 24)):
+        candles = frames.get(timeframe) if isinstance(frames, dict) else None
+        rows: list[list[Any]] = []
+        for item in candles[-keep:] if isinstance(candles, list) else []:
+            if not isinstance(item, dict):
+                continue
+            rows.append([
+                item.get("time") or item.get("datetime"),
+                item.get("open"), item.get("high"), item.get("low"), item.get("close"),
+            ])
+        payload[timeframe] = rows
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
+
+
 def _stable_market_snapshot_payload(market_context: dict[str, Any]) -> dict[str, Any]:
-    """Use the latest CLOSED M5 candle as the immutable analysis version key."""
+    """Use the latest CLOSED M5 candle plus data/rules fingerprints as key."""
     closed_context = (
         market_context
         if str(market_context.get("analysis_candle_mode") or "") == "closed_only"
         else _closed_market_context(market_context)
     )
-    m5 = (closed_context.get("frames") or {}).get("M5") or []
+    frames = closed_context.get("frames") or {}
+    m5 = frames.get("M5") or [] if isinstance(frames, dict) else []
     last_closed = m5[-1] if m5 else {}
     return {
         "version": ANALYSIS_SNAPSHOT_CACHE_VERSION,
@@ -1044,6 +1137,7 @@ def _stable_market_snapshot_payload(market_context: dict[str, Any]) -> dict[str,
             or last_closed.get("datetime")
             or ""
         ),
+        "rules_hash": _analysis_rules_fingerprint(),
     }
 
 
@@ -1165,7 +1259,8 @@ def _market_decision_prompt(
 9) اختر أقرب دعمين وأقرب مقاومتين حقيقيين من بيانات السوق، واجمع المستويات المتقاربة.
 10) اجعل النصوص الشرطية بلا أسعار رقمية داخل الجمل؛ الأسعار موجودة في الحقول الرقمية المنفصلة.
 11) entry قريب وواقعي، والوقف خلف أقرب إبطال محلي، وثلاثة أهداف مرتبة في جهة الصفقة.
-12) pattern_lines وpattern_path نسبية لنافذة M5 المرفقة، ولا ترسم نموذجًا غير واضح.
+12) راجع صراحةً نماذج القمتين والقاعين والمثلثات والأوتاد والقنوات والكسر وإعادة الاختبار. لا تُرجع نموذجًا إلا إذا اكتملت بنيته على الشموع المغلقة، واكتب في memory_matches القواعد أو النماذج التي طابقتها فعلًا.
+13) pattern_lines وpattern_path نسبية لنافذة M5 المرفقة، ولا ترسم نموذجًا غير واضح.
 
 ملخص الفريمات الحسابي:
 {json.dumps(market_summary, ensure_ascii=False)}
@@ -1858,14 +1953,23 @@ def _apply_level_pressure(
     sell_final = 100 - buy_final
     margin = abs(buy_final - sell_final)
 
-    if margin < 12:
+    # A nearby support/resistance may weaken or neutralize an existing signal,
+    # but it may not create a new direction from a neutral result. This removes
+    # the repeated bullish bias caused by always being near some support.
+    if direction not in {"صاعد", "هابط"}:
+        if margin > 10:
+            if buy_final > sell_final:
+                buy_final, sell_final = 55, 45
+            else:
+                buy_final, sell_final = 45, 55
+        return "غير واضح", buy_final, sell_final, context
+
+    preferred_is_buy = direction == "صاعد"
+    still_preferred = buy_final > sell_final if preferred_is_buy else sell_final > buy_final
+    if margin < 12 or not still_preferred:
         adjusted_direction = "غير واضح"
     else:
-        adjusted_direction = "صاعد" if buy_final > sell_final else "هابط"
-
-    # لا نقلب اتجاهًا قويًا بمجرد ضغط صغير؛ نجعله مراقبة عند التعارض المحدود.
-    if direction in {"صاعد", "هابط"} and adjusted_direction != direction and margin < 18:
-        adjusted_direction = "غير واضح"
+        adjusted_direction = direction
 
     return adjusted_direction, buy_final, sell_final, context
 
@@ -1981,6 +2085,45 @@ def _build_market_summary(market_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
+    """Use the deterministic closed-candle model review as source of truth."""
+    review = data.get("_pattern_review")
+    if not isinstance(review, dict):
+        review = {}
+    checked = list(review.get("checked_patterns") or [])
+    available = bool(review.get("available"))
+    model_pattern = str(data.get("pattern_type") or "لا يوجد")
+    model_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
+
+    if available:
+        pattern_type = str(review.get("pattern_type") or "لا يوجد")
+        confidence = max(0, min(100, int(review.get("pattern_confidence") or 0)))
+        if model_pattern == pattern_type and model_confidence >= 55:
+            confidence = min(94, confidence + 4)
+        timeframe = str(review.get("pattern_timeframe") or "M5")
+        evidence = str(review.get("pattern_evidence") or "اكتمل النموذج على الشموع المغلقة")
+        summary = f"رُوجعت {len(checked)} نماذج؛ الأقرب {pattern_type} على {timeframe} بثقة {confidence}٪: {evidence}."
+        data["pattern_type"] = pattern_type
+        data["pattern_confidence"] = confidence
+        data["pattern_lines"] = []
+        data["pattern_path"] = []
+        data["pattern_bias"] = str(review.get("pattern_bias") or "محايد")
+        data["pattern_timeframe"] = timeframe
+    else:
+        data["pattern_type"] = "لا يوجد"
+        data["pattern_confidence"] = 0
+        data["pattern_lines"] = []
+        data["pattern_path"] = []
+        data["pattern_bias"] = "محايد"
+        data["pattern_timeframe"] = ""
+        summary = f"رُوجعت {len(checked)} نماذج على M5 وM15 وH1، ولم يكتمل نموذج هندسي بشروط كافية."
+
+    data["pattern_review_summary"] = summary[:260]
+    data["pattern_candidates_checked"] = checked
+    data["pattern_review_candidates"] = list(review.get("candidates") or [])[:4]
+    return data
+
 def _choose_direction(
     data: dict[str, Any],
     candles: list[dict[str, Any]],
@@ -1988,95 +2131,145 @@ def _choose_direction(
     sell: int,
     market_summary: dict[str, Any] | None = None,
 ) -> tuple[str, int, int]:
-    """Choose the actionable M5 direction without hiding a lower-frame reversal.
+    """Choose the current actionable direction with M15/M5 as activation.
 
-    H4/H1 remain structural context, while M15/M5 determine whether the current
-    move is actionable. A strong aligned M15+M5 reversal may override the broad
-    direction, but its probability is capped until higher frames also align.
+    H4 and H1 describe context and may raise/lower confidence, but they cannot
+    keep the displayed direction bullish while both activation frames and
+    recent closed M5 price action are bearish. The language-model vote is only
+    a small advisory input; permanent rules are enforced here deterministically.
     """
     atr = max(0.01, _atr(candles))
-    full_move = _clip((float(candles[-1]["close"]) - float(candles[0]["close"])) / atr, -4.0, 4.0)
+    full_move = _clip(
+        (float(candles[-1]["close"]) - float(candles[0]["close"])) / atr,
+        -4.0,
+        4.0,
+    )
     recent_index = max(0, len(candles) - 7)
-    recent_move = _clip((float(candles[-1]["close"]) - float(candles[recent_index]["close"])) / atr, -4.0, 4.0)
+    recent_move = _clip(
+        (float(candles[-1]["close"]) - float(candles[recent_index]["close"])) / atr,
+        -4.0,
+        4.0,
+    )
     impulse_index = max(0, len(candles) - 4)
-    impulse_move = _clip((float(candles[-1]["close"]) - float(candles[impulse_index]["close"])) / atr, -4.0, 4.0)
+    impulse_move = _clip(
+        (float(candles[-1]["close"]) - float(candles[impulse_index]["close"])) / atr,
+        -4.0,
+        4.0,
+    )
+    m5_price_score = full_move * 0.18 + recent_move * 0.50 + impulse_move * 0.32
     model_score = _clip((buy - sell) / 45.0, -2.0, 2.0)
-    m5_price_score = full_move * 0.24 + recent_move * 0.46 + impulse_move * 0.30
 
     frames = (market_summary or {}).get("frames") if isinstance(market_summary, dict) else {}
-    frame_weights = {"H4": 0.22, "H1": 0.25, "M15": 0.29, "M5": 0.24}
-    frame_scores: dict[str, float] = {}
-    frame_score = 0.0
-    frame_weight_used = 0.0
-    for frame, weight in frame_weights.items():
-        item = frames.get(frame) if isinstance(frames, dict) else None
+
+    def frame_info(name: str) -> tuple[str, float, float]:
+        item = frames.get(name) if isinstance(frames, dict) else None
         if not isinstance(item, dict):
-            continue
+            return "غير واضح", 0.0, 0.0
+        direction = str(item.get("direction") or "غير واضح")
         try:
             score = _clip(float(item.get("score") or 0.0), -3.0, 3.0)
-            confidence = max(0.35, min(1.0, float(item.get("confidence") or 50) / 100.0))
+            confidence = _clip(float(item.get("confidence") or 0.0) / 100.0, 0.0, 1.0)
         except (TypeError, ValueError):
-            continue
-        frame_scores[frame] = score
-        frame_score += score * weight * confidence
-        frame_weight_used += weight * confidence
-    if frame_weight_used:
-        frame_score /= frame_weight_used
-    elif isinstance(market_summary, dict):
-        try:
-            frame_score = float(market_summary.get("score") or 0.0)
-        except (TypeError, ValueError):
-            frame_score = 0.0
+            return direction, 0.0, 0.0
+        return direction, score, confidence
 
-    # The model is advisory. Closed-price action and the four real frames decide.
-    combined = model_score * 0.10 + m5_price_score * 0.34 + frame_score * 0.56
+    h4, h4_score, h4_conf = frame_info("H4")
+    h1, h1_score, h1_conf = frame_info("H1")
+    m15, m15_score, m15_conf = frame_info("M15")
+    m5, m5_score, m5_conf = frame_info("M5")
 
-    h4 = str((frames.get("H4") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
-    h1 = str((frames.get("H1") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
-    m15 = str((frames.get("M15") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
-    m5 = str((frames.get("M5") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
-    higher_conflict = h4 in {"صاعد", "هابط"} and h1 in {"صاعد", "هابط"} and h4 != h1
+    lower_score = (
+        m15_score * 0.58 * max(0.45, m15_conf)
+        + m5_score * 0.42 * max(0.45, m5_conf)
+    )
+    higher_score = (
+        h4_score * 0.44 * max(0.35, h4_conf)
+        + h1_score * 0.56 * max(0.35, h1_conf)
+    )
+
     lower_aligned = m15 in {"صاعد", "هابط"} and m15 == m5
-    short_term_reversal = False
+    lower_conflict = m15 in {"صاعد", "هابط"} and m5 in {"صاعد", "هابط"} and m15 != m5
+    higher_aligned = h4 in {"صاعد", "هابط"} and h4 == h1
 
-    # Do not keep saying "صاعد" while both activation frames and the latest
-    # closed candles are clearly falling (and vice versa).
+    direction = "غير واضح"
+    evidence_score = 0.0
+    short_term_against_context = False
+
     if lower_aligned:
-        lower_direction = m15
-        lower_score = frame_scores.get("M15", 0.0) * 0.56 + frame_scores.get("M5", 0.0) * 0.44
-        if lower_direction == "هابط" and (lower_score <= -0.22 or recent_move <= -0.85 or impulse_move <= -0.60):
-            combined = min(combined, -0.42)
-            short_term_reversal = h4 == "صاعد" or h1 == "صاعد"
-        elif lower_direction == "صاعد" and (lower_score >= 0.22 or recent_move >= 0.85 or impulse_move >= 0.60):
-            combined = max(combined, 0.42)
-            short_term_reversal = h4 == "هابط" or h1 == "هابط"
+        sign = 1.0 if m15 == "صاعد" else -1.0
+        price_supports = m5_price_score * sign >= 0.12
+        if abs(lower_score) >= 0.14 or price_supports:
+            direction = m15
+            evidence_score = abs(lower_score) * 0.62 + max(0.0, m5_price_score * sign) * 0.38
+            short_term_against_context = (
+                (h4 in {"صاعد", "هابط"} and h4 != direction)
+                or (h1 in {"صاعد", "هابط"} and h1 != direction)
+            )
+    elif lower_conflict:
+        # A conflict between activation and timing is always monitoring; do not
+        # let H4/H1 or the model manufacture a directional result.
+        direction = "غير واضح"
+    else:
+        # One lower frame can lead only when closed M5 movement confirms it.
+        if m15 in {"صاعد", "هابط"}:
+            sign = 1.0 if m15 == "صاعد" else -1.0
+            if m5_price_score * sign >= 0.42 and abs(m15_score) >= 0.18:
+                direction = m15
+                evidence_score = abs(m15_score) * 0.55 + abs(m5_price_score) * 0.45
+        if direction == "غير واضح" and m5 in {"صاعد", "هابط"}:
+            sign = 1.0 if m5 == "صاعد" else -1.0
+            if m5_price_score * sign >= 0.70 and abs(m5_score) >= 0.35:
+                direction = m5
+                evidence_score = abs(m5_score) * 0.45 + abs(m5_price_score) * 0.55
 
-    neutral_threshold = 0.40 if higher_conflict else 0.32
-    if abs(combined) < neutral_threshold:
-        edge = int(round(min(6.0, abs(combined) * 16.0)))
-        if combined > 0:
+    if direction == "غير واضح" and not lower_conflict:
+        # Broad trend is used only if lower-price action agrees. It cannot act
+        # alone, which removes the persistent upward bias.
+        combined = (
+            lower_score * 0.40
+            + m5_price_score * 0.37
+            + higher_score * 0.18
+            + model_score * 0.05
+        )
+        lower_or_price_present = abs(lower_score) >= 0.16 or abs(m5_price_score) >= 0.42
+        if lower_or_price_present and abs(combined) >= 0.38:
+            direction = "صاعد" if combined > 0 else "هابط"
+            evidence_score = abs(combined)
+
+    if direction == "غير واضح":
+        directional_hint = lower_score * 0.55 + m5_price_score * 0.40 + model_score * 0.05
+        edge = int(round(min(5.0, abs(directional_hint) * 7.0)))
+        if directional_hint > 0:
             return "غير واضح", 50 + edge, 50 - edge
-        if combined < 0:
+        if directional_hint < 0:
             return "غير واضح", 50 - edge, 50 + edge
         return "غير واضح", 50, 50
 
-    direction = "صاعد" if combined > 0 else "هابط"
-    raw_probability = int(round(_clip(52 + abs(combined) * 18, 52, 86)))
+    sign = 1.0 if direction == "صاعد" else -1.0
+    agreement = 0
+    for frame_direction in (h4, h1, m15, m5):
+        if frame_direction == direction:
+            agreement += 1
+        elif frame_direction in {"صاعد", "هابط"}:
+            agreement -= 1
 
-    alignment = int((market_summary or {}).get("alignment") or 50) if isinstance(market_summary, dict) else 50
-    higher_direction = str((market_summary or {}).get("direction") or "عرضي") if isinstance(market_summary, dict) else "عرضي"
-    if higher_conflict:
-        raw_probability = min(raw_probability, 59)
-    elif short_term_reversal:
-        # It is a real lower-frame move, but not yet a fully aligned macro trend.
+    raw_probability = int(round(_clip(54 + evidence_score * 14 + max(0, agreement) * 2, 54, 88)))
+
+    if lower_aligned and m15 == direction:
+        raw_probability = max(raw_probability, 60)
+    if lower_conflict:
+        raw_probability = min(raw_probability, 54)
+    if short_term_against_context:
         raw_probability = min(raw_probability, 68)
-    elif higher_direction in {"صاعد", "هابط"} and higher_direction != direction:
-        raw_probability = min(raw_probability, 61)
-    elif h4 == direction and h1 == direction:
-        raw_probability = min(90, raw_probability + max(0, alignment - 50) // 10)
-    elif h4 in {"صاعد", "هابط"} and h4 != direction:
-        raw_probability = min(raw_probability, 62)
+    elif higher_aligned and h4 == direction:
+        raw_probability = min(90, raw_probability + 4)
+    elif higher_aligned and h4 != direction:
+        raw_probability = min(raw_probability, 64)
 
+    # Strong opposite recent movement always caps confidence, even if the
+    # broader averages still point the other way.
+    if m5_price_score * sign < -0.35:
+        raw_probability = min(raw_probability, 56)
     if isinstance(market_summary, dict) and market_summary.get("warnings"):
         raw_probability = min(raw_probability, 60)
 
@@ -2404,7 +2597,10 @@ def _validate_analysis(
         draw_mode = "watch"
     elif confirmation_complete:
         draw_mode = "confirmed"
-    elif lower_support:
+    elif lower_aligned and clear_scenario:
+        # Conditional requires an actual M15+M5 activation agreement. One lower
+        # frame alone is not enough, which prevents nearly every result from
+        # being labelled conditional.
         draw_mode = "conditional"
     else:
         draw_mode = "watch"
@@ -2420,6 +2616,7 @@ def _validate_analysis(
         entry_kind = "مراقبة"
         confirmation = market_activity["label"]
 
+    data = _apply_pattern_review(data)
     pattern_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
     if pattern_confidence < 60:
         data["pattern_lines"] = []
@@ -2566,8 +2763,11 @@ def _analyze(path: Path) -> dict[str, Any]:
         market_summary,
     )
 
+    pattern_review = review_market_patterns(market_context.get("frames") or {})
+
     canonical_input = {
         **market_decision,
+        "_pattern_review": pattern_review,
         "chart_readable": False,
         "_image_chart_readable": False,
         "_image_current_price": None,
@@ -2590,6 +2790,11 @@ def _analyze(path: Path) -> dict[str, Any]:
             "analysis_consistency_lock": "last_closed_m5",
             "analysis_last_closed_m5_time": market_context.get("m5_last_closed_candle_time"),
             "analysis_candle_mode": "closed_only",
+            "analysis_rules_hash": _analysis_rules_fingerprint(),
+            "rules_audit_summary": (
+                f"طُبقت قواعد H4/H1/M15/M5، ورُوجعت {len(pattern_review.get('checked_patterns') or [])} "
+                "نماذج على الشموع المغلقة، ثم فُرضت قواعد منع الانحياز والتأكيد برمجيًا."
+            ),
             "provider_closed_m5_price": round(provider_closed_price, 3),
             "provider_live_price": round(provider_live_price, 3),
         }
