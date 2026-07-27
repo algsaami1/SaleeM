@@ -254,18 +254,18 @@ def _pick_confirmed_limit_level(
     ranked: list[tuple[float, float, dict[str, Any]]] = []
     for item in candidates:
         distance = abs(current - float(item["price"]))
-        distance_atr = distance / max(0.01, atr)
-        # A confirmed higher-frame swing is preferred. Distance is only a mild
-        # reachability factor and never creates or moves the level.
+        # Once a swing is confirmed, its ranking must not drift with every new
+        # screenshot.  Current distance is reported to the user but is not used
+        # to replace one valid peak/trough with another.
         confirmations = len(set(item.get("confirmation_frames") or []))
         score = (
             float(item["strength"])
             + frame_bonus.get(str(item.get("timeframe") or ""), 0.0)
             + min(10.0, confirmations * 2.5)
             + min(6.0, int(item.get("touches") or 1) * 1.2)
-            - min(16.0, max(0.0, distance_atr - 2.0) * 1.35)
         )
-        ranked.append((score, -distance, item))
+        stable_tie = str(item.get("time") or "")
+        ranked.append((score, stable_tie, item))
     _, _, selected = max(ranked, key=lambda value: (value[0], value[1]))
     return {
         **selected,
@@ -323,15 +323,9 @@ def _opposing_target_levels(
             if value is not None:
                 values.append(float(value))
 
-    level_key = "resistance_levels" if side == "buy" else "support_levels"
-    for item in analysis.get(level_key) or []:
-        if not isinstance(item, dict):
-            continue
-        if str(item.get("source") or "") == "projected":
-            continue
-        value = _number(item.get("price"))
-        if value is not None:
-            values.append(float(value))
+    # Do not use the moving nearest M5 support/resistance list here.  Limit
+    # recommendations are long-waiting plans and their targets must stay tied
+    # to confirmed opposing swings (or fixed risk multiples) until invalidated.
 
     valid = [value for value in values if (value > entry if side == "buy" else value < entry)]
     valid.sort(reverse=side == "sell")
@@ -354,9 +348,9 @@ def _build_one_limit_plan(
         return None
 
     pivot = float(level["price"])
-    level_atr = max(atr, float(level.get("level_atr") or atr))
+    level_atr = max(0.25, float(level.get("level_atr") or atr))
     zone_half_width = max(0.20, min(1.80, level_atr * 0.12))
-    stop_buffer = max(0.70, atr * 0.80, min(4.50, level_atr * 0.20))
+    stop_buffer = max(0.90, min(5.50, level_atr * 0.28))
 
     if side == "buy":
         zone_low = pivot
@@ -372,24 +366,27 @@ def _build_one_limit_plan(
     risk = max(0.80, abs(entry - stop))
     real_targets = _opposing_target_levels(analysis, side=side, entry=entry)
     targets: list[float] = []
+    # Use only meaningful opposing levels that are sufficiently far away.  The
+    # ordering is deterministic, so the same confirmed pivot keeps the same
+    # targets until its invalidation condition is met.
     for value in real_targets:
-        if side == "buy" and value >= entry + risk * 1.20:
+        if side == "buy" and value >= entry + risk * 1.55:
             targets.append(value)
-        elif side == "sell" and value <= entry - risk * 1.20:
+        elif side == "sell" and value <= entry - risk * 1.55:
             targets.append(value)
         if len(targets) == 3:
             break
 
-    multipliers = (1.8, 2.8, 4.0)
+    multipliers = (2.0, 3.2, 4.8)
     for multiplier in multipliers:
         if len(targets) >= 3:
             break
         projected = entry + risk * multiplier if side == "buy" else entry - risk * multiplier
         if targets:
             if side == "buy":
-                projected = max(projected, targets[-1] + max(atr * 0.65, 0.50))
+                projected = max(projected, targets[-1] + max(level_atr * 0.55, 0.60))
             else:
-                projected = min(projected, targets[-1] - max(atr * 0.65, 0.50))
+                projected = min(projected, targets[-1] - max(level_atr * 0.55, 0.60))
         targets.append(projected)
 
     source_frame = str(level.get("timeframe") or "H1")
@@ -401,6 +398,16 @@ def _build_one_limit_plan(
             if level.get("confirmation_frames")
             else "."
         )
+    )
+    pivot_time = str(level.get("time") or "unknown")
+    plan_seed = f"{side}|{source_frame}|{pivot_time}|{pivot:.3f}"
+    plan_id = hashlib.sha256(plan_seed.encode("utf-8")).hexdigest()[:12]
+    confirmations = sorted(set(level.get("confirmation_frames") or []))
+    confirmed_conditions = int(level.get("strength") or 0) >= 75 and len(confirmations) >= 2
+    invalidation = (
+        f"إغلاق شمعة {source_frame} تحت {stop:.2f}"
+        if side == "buy"
+        else f"إغلاق شمعة {source_frame} فوق {stop:.2f}"
     )
     return {
         "order_type": "Buy Limit" if side == "buy" else "Sell Limit",
@@ -419,6 +426,11 @@ def _build_one_limit_plan(
         "level_strength": int(level.get("strength") or 0),
         "source": "confirmed_swing",
         "reason": reason,
+        "plan_id": plan_id,
+        "locked": True,
+        "confirmation_label": "مؤكدة الشروط" if confirmed_conditions else "المستوى مؤكد",
+        "invalidation_condition": invalidation,
+        "validity": "ثابتة حتى كسر القمة/القاع أو ظهور إلغاء بنيوي",
         "guaranteed": False,
     }
 
@@ -851,7 +863,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 4
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 5
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -2004,20 +2016,41 @@ def _market_frame_signal(candles: Any) -> dict[str, Any]:
     closes = [candle["close"] for candle in valid]
     fast = sum(closes[-8:]) / 8
     slow = sum(closes[-21:]) / 21
-    recent_move = (closes[-1] - closes[-10]) / atr
-    broad_index = max(0, len(closes) - 40)
+    impulse_move = (closes[-1] - closes[-4]) / atr
+    recent_move = (closes[-1] - closes[-9]) / atr
+    broad_index = max(0, len(closes) - 32)
     broad_move = (closes[-1] - closes[broad_index]) / atr
+
+    # Read the most recent closed-candle structure symmetrically.  This term is
+    # deliberately sensitive to lower highs/lows so a sharp bearish turn is not
+    # hidden by an older bullish moving average (and vice versa).
+    recent = valid[-6:]
+    older = valid[-12:-6]
+    recent_high = sum(item["high"] for item in recent) / len(recent)
+    recent_low = sum(item["low"] for item in recent) / len(recent)
+    older_high = sum(item["high"] for item in older) / len(older)
+    older_low = sum(item["low"] for item in older) / len(older)
+    structure_move = ((recent_high - older_high) + (recent_low - older_low)) / (2.0 * atr)
+
+    signed_pressure = sum(
+        (item["close"] - item["open"]) / max(0.01, item["high"] - item["low"])
+        for item in valid[-5:]
+    ) / 5.0
+
     score = _clip(
-        ((fast - slow) / atr) * 0.50
-        + recent_move * 0.30
-        + broad_move * 0.20,
+        ((fast - slow) / atr) * 0.22
+        + impulse_move * 0.28
+        + recent_move * 0.24
+        + structure_move * 0.16
+        + signed_pressure * 0.08
+        + broad_move * 0.02,
         -3.0,
         3.0,
     )
 
-    if score > 0.20:
+    if score > 0.18:
         direction = "صاعد"
-    elif score < -0.20:
+    elif score < -0.18:
         direction = "هابط"
     else:
         direction = "عرضي"
@@ -2673,10 +2706,32 @@ def _validate_analysis(
             "trade_side": (
                 market_activity["label"]
                 if draw_mode == "inactive"
-                else ("مراقبة" if draw_mode == "watch" else ("شراء" if direction == "صاعد" else "بيع"))
+                else (
+                    "مراقبة"
+                    if draw_mode == "watch"
+                    else (
+                        ("شراء مؤكد" if direction == "صاعد" else "بيع مؤكد")
+                        if draw_mode == "confirmed"
+                        else ("شراء مشروط" if direction == "صاعد" else "بيع مشروط")
+                    )
+                )
             ),
             "trade_probability": probability,
             "draw_mode": draw_mode,
+            "confirmation_status": (
+                "شراء مؤكد" if draw_mode == "confirmed" and direction == "صاعد"
+                else "بيع مؤكد" if draw_mode == "confirmed" and direction == "هابط"
+                else "شراء مشروط" if draw_mode == "conditional" and direction == "صاعد"
+                else "بيع مشروط" if draw_mode == "conditional" and direction == "هابط"
+                else "مراقبة"
+            ),
+            "confirmation_evidence": {
+                "m15_m5_aligned": bool(lower_aligned),
+                "closed_m5_confirmed": bool(price_action_confirmed),
+                "higher_frame_supportive": bool(higher_supportive),
+                "geometry_valid": bool(geometry_valid),
+                "warnings_clear": not warnings,
+            },
             "market_activity": market_activity,
             "market_status": market_activity["code"],
             "market_status_label": market_activity["label"],

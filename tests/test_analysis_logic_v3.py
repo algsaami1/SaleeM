@@ -350,7 +350,7 @@ def test_probability_70_with_complete_confirmation_is_confirmed():
     ):
         result = _validate_analysis(data, summary)
     assert result["draw_mode"] == "confirmed"
-    assert result["trade_side"] == "شراء"
+    assert result["trade_side"] == "شراء مؤكد"
 
 
 def test_old_m5_candle_becomes_closed_or_stale_instead_of_watch():
