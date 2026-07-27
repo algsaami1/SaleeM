@@ -140,106 +140,83 @@ def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
 
 
 
-def _limit_level_candidates(
+def _confirmed_limit_candidates(
     analysis: dict[str, Any],
     *,
     side: str,
     current: float,
 ) -> list[dict[str, Any]]:
-    """Collect real and market-derived levels for the distant limit panel."""
-    candles = [item for item in (analysis.get("candles") or []) if isinstance(item, dict)]
-    source_key = "support_levels" if side == "buy" else "resistance_levels"
-    kind = "support" if side == "buy" else "resistance"
-    combined: list[dict[str, Any]] = []
+    """Return only confirmed swing troughs/peaks from real market frames.
 
-    for item in analysis.get(source_key) or []:
-        if isinstance(item, dict):
-            combined.append(dict(item))
-    if candles:
-        combined.extend(_cluster_levels(candles, kind, current))
-
-    # Add the visible market extreme as a conservative distant fallback. It is
-    # marked as market-derived, never as a guaranteed support/resistance zone.
-    if candles:
-        extreme_key = "low" if side == "buy" else "high"
-        extreme = min(float(item[extreme_key]) for item in candles) if side == "buy" else max(float(item[extreme_key]) for item in candles)
-        combined.append(
-            {
-                "price": round(extreme, 2),
-                "strength": 48,
-                "touches": 1,
-                "source": "market_extreme",
-            }
-        )
-
-    result: list[dict[str, Any]] = []
-    seen: list[float] = []
-    for item in combined:
+    Buy Limit may use a confirmed trough below market. Sell Limit may use a
+    confirmed peak above market. No projected level, fixed-distance fallback,
+    or fabricated waiting area is allowed here.
+    """
+    swings = analysis.get("confirmed_limit_swings")
+    if not isinstance(swings, dict):
+        return []
+    source_key = "troughs" if side == "buy" else "peaks"
+    candidates: list[dict[str, Any]] = []
+    for item in swings.get(source_key) or []:
+        if not isinstance(item, dict):
+            continue
         price = _number(item.get("price"))
         if price is None:
             continue
         price = float(price)
-        valid_side = price < current if side == "buy" else price > current
-        if not valid_side:
+        if side == "buy" and price >= current:
             continue
-        if any(abs(price - known) < 0.18 for known in seen):
+        if side == "sell" and price <= current:
             continue
-        seen.append(price)
-        result.append(
+        if str(item.get("source") or "") != "confirmed_swing":
+            continue
+        candidates.append(
             {
+                **item,
                 "price": round(price, 2),
-                "strength": max(35, min(95, int(item.get("strength") or 45))),
-                "touches": max(0, min(12, int(item.get("touches") or 0))),
-                "source": str(item.get("source") or "market"),
+                "strength": max(1, min(95, int(item.get("strength") or 0))),
+                "touches": max(1, min(12, int(item.get("touches") or 1))),
+                "timeframe": str(item.get("timeframe") or "H1"),
+                "confirmation_frames": list(item.get("confirmation_frames") or []),
+                "level_atr": max(0.01, float(_number(item.get("level_atr")) or 1.0)),
             }
         )
-    return result
+    return candidates
 
 
-def _pick_distant_limit_level(
+def _pick_confirmed_limit_level(
     analysis: dict[str, Any],
     *,
     side: str,
     current: float,
     atr: float,
-) -> dict[str, Any]:
-    """Pick a level sufficiently far from market without pretending certainty."""
-    minimum_distance = max(1.80, atr * 1.65)
-    ideal_distance = max(2.80, atr * 2.40)
-    maximum_distance = max(12.0, atr * 7.0)
-    candidates = _limit_level_candidates(analysis, side=side, current=current)
+) -> dict[str, Any] | None:
+    """Pick the strongest confirmed peak/trough without imposing a distance."""
+    candidates = _confirmed_limit_candidates(analysis, side=side, current=current)
+    if not candidates:
+        return None
 
-    distant = []
+    frame_bonus = {"H4": 16.0, "H1": 12.0, "M15": 5.0, "M5": 1.0}
+    ranked: list[tuple[float, float, dict[str, Any]]] = []
     for item in candidates:
         distance = abs(current - float(item["price"]))
-        if distance < minimum_distance or distance > maximum_distance:
-            continue
-        source_bonus = 7 if item["source"] not in {"projected", "market_extreme"} else 0
-        touch_bonus = min(8, int(item["touches"]) * 1.5)
-        # Reward distance until roughly four ATR, then gently reduce the score
-        # so an obsolete extreme does not automatically become the recommendation.
         distance_atr = distance / max(0.01, atr)
-        distance_bonus = min(18.0, distance_atr * 5.0)
-        if distance_atr > 5.0:
-            distance_bonus -= min(12.0, (distance_atr - 5.0) * 3.0)
-        score = float(item["strength"]) * 0.70 + source_bonus + touch_bonus + distance_bonus
-        distant.append((score, distance, item))
-
-    if distant:
-        _, distance, selected = max(distant, key=lambda value: (value[0], value[1]))
-        return {**selected, "distance": round(distance, 2), "projected": False}
-
-    # If the recent window contains no sufficiently distant confirmed level,
-    # produce a clearly identified calculated waiting area instead of reusing a
-    # nearby scalp level. The lower score keeps its percentage conservative.
-    price = current - ideal_distance if side == "buy" else current + ideal_distance
+        # A confirmed higher-frame swing is preferred. Distance is only a mild
+        # reachability factor and never creates or moves the level.
+        confirmations = len(set(item.get("confirmation_frames") or []))
+        score = (
+            float(item["strength"])
+            + frame_bonus.get(str(item.get("timeframe") or ""), 0.0)
+            + min(10.0, confirmations * 2.5)
+            + min(6.0, int(item.get("touches") or 1) * 1.2)
+            - min(16.0, max(0.0, distance_atr - 2.0) * 1.35)
+        )
+        ranked.append((score, -distance, item))
+    _, _, selected = max(ranked, key=lambda value: (value[0], value[1]))
     return {
-        "price": round(price, 2),
-        "strength": 42,
-        "touches": 0,
-        "source": "calculated_waiting_area",
-        "distance": round(ideal_distance, 2),
-        "projected": True,
+        **selected,
+        "distance": round(abs(current - float(selected["price"])), 2),
+        "projected": False,
     }
 
 
@@ -261,18 +238,139 @@ def _limit_recommendation_probability(
         if isinstance(item, dict) and str(item.get("direction") or "") == expected_direction
     )
     frame_score = 50 if not any(isinstance(item, dict) for item in frame_items) else matching * 25
-    source_penalty = 8 if level.get("projected") else 0
-    warning_penalty = 5 if analysis.get("market_data_warnings") else 0
-    estimate = round(base * 0.50 + strength * 0.28 + frame_score * 0.22 - source_penalty - warning_penalty)
-    return max(38, min(89, int(estimate)))
+    confirmations = len(set(level.get("confirmation_frames") or []))
+    confirmation_score = min(100, 45 + confirmations * 14)
+    warning_penalty = 6 if analysis.get("market_data_warnings") else 0
+    estimate = round(
+        base * 0.34
+        + strength * 0.34
+        + frame_score * 0.18
+        + confirmation_score * 0.14
+        - warning_penalty
+    )
+    return max(40, min(88, int(estimate)))
+
+
+def _opposing_target_levels(
+    analysis: dict[str, Any],
+    *,
+    side: str,
+    entry: float,
+) -> list[float]:
+    """Collect real opposing swing/market levels before risk projections."""
+    values: list[float] = []
+    swings = analysis.get("confirmed_limit_swings")
+    swing_key = "peaks" if side == "buy" else "troughs"
+    if isinstance(swings, dict):
+        for item in swings.get(swing_key) or []:
+            if not isinstance(item, dict):
+                continue
+            value = _number(item.get("price"))
+            if value is not None:
+                values.append(float(value))
+
+    level_key = "resistance_levels" if side == "buy" else "support_levels"
+    for item in analysis.get(level_key) or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("source") or "") == "projected":
+            continue
+        value = _number(item.get("price"))
+        if value is not None:
+            values.append(float(value))
+
+    valid = [value for value in values if (value > entry if side == "buy" else value < entry)]
+    valid.sort(reverse=side == "sell")
+    unique: list[float] = []
+    for value in valid:
+        if not unique or all(abs(value - known) >= 0.25 for known in unique):
+            unique.append(value)
+    return unique
+
+
+def _build_one_limit_plan(
+    analysis: dict[str, Any],
+    *,
+    side: str,
+    current: float,
+    atr: float,
+) -> dict[str, Any] | None:
+    level = _pick_confirmed_limit_level(analysis, side=side, current=current, atr=atr)
+    if level is None:
+        return None
+
+    pivot = float(level["price"])
+    level_atr = max(atr, float(level.get("level_atr") or atr))
+    zone_half_width = max(0.20, min(1.80, level_atr * 0.12))
+    stop_buffer = max(0.70, atr * 0.80, min(4.50, level_atr * 0.20))
+
+    if side == "buy":
+        zone_low = pivot
+        zone_high = pivot + zone_half_width * 2.0
+        entry = pivot + zone_half_width * 0.85
+        stop = pivot - stop_buffer
+    else:
+        zone_low = pivot - zone_half_width * 2.0
+        zone_high = pivot
+        entry = pivot - zone_half_width * 0.85
+        stop = pivot + stop_buffer
+
+    risk = max(0.80, abs(entry - stop))
+    real_targets = _opposing_target_levels(analysis, side=side, entry=entry)
+    targets: list[float] = []
+    for value in real_targets:
+        if side == "buy" and value >= entry + risk * 1.20:
+            targets.append(value)
+        elif side == "sell" and value <= entry - risk * 1.20:
+            targets.append(value)
+        if len(targets) == 3:
+            break
+
+    multipliers = (1.8, 2.8, 4.0)
+    for multiplier in multipliers:
+        if len(targets) >= 3:
+            break
+        projected = entry + risk * multiplier if side == "buy" else entry - risk * multiplier
+        if targets:
+            if side == "buy":
+                projected = max(projected, targets[-1] + max(atr * 0.65, 0.50))
+            else:
+                projected = min(projected, targets[-1] - max(atr * 0.65, 0.50))
+        targets.append(projected)
+
+    source_frame = str(level.get("timeframe") or "H1")
+    pivot_label = "قاع" if side == "buy" else "قمة"
+    reason = (
+        f"مبنية على {pivot_label} مؤكد من {source_frame}"
+        + (
+            f" ومتوافق مع {', '.join(level.get('confirmation_frames') or [])}."
+            if level.get("confirmation_frames")
+            else "."
+        )
+    )
+    return {
+        "order_type": "Buy Limit" if side == "buy" else "Sell Limit",
+        "entry": round(entry, 2),
+        "pivot_price": round(pivot, 2),
+        "pivot_type": "قاع مؤكد" if side == "buy" else "قمة مؤكدة",
+        "pivot_timeframe": source_frame,
+        "zone_low": round(min(zone_low, zone_high), 2),
+        "zone_high": round(max(zone_low, zone_high), 2),
+        "stop_loss": round(stop, 2),
+        "target_1": round(targets[0], 2),
+        "target_2": round(targets[1], 2),
+        "target_3": round(targets[2], 2),
+        "distance_to_entry": round(abs(current - entry), 2),
+        "estimated_success": _limit_recommendation_probability(analysis, side=side, level=level),
+        "level_strength": int(level.get("strength") or 0),
+        "source": "confirmed_swing",
+        "reason": reason,
+        "guaranteed": False,
+    }
 
 
 def _build_limit_recommendations(analysis: dict[str, Any]) -> dict[str, Any]:
-    """Build two distant manual MT5 limit-order plans for the result page.
-
-    These plans are deliberately separate from the chart's primary scenario.
-    They never execute a trade and their percentages are estimates only.
-    """
+    """Build manual limit plans strictly from confirmed swing lows/highs."""
     market_activity = analysis.get("market_activity")
     active = bool(market_activity.get("active")) if isinstance(market_activity, dict) else analysis.get("draw_mode") != "inactive"
     if not active or analysis.get("draw_mode") == "inactive":
@@ -285,68 +383,40 @@ def _build_limit_recommendations(analysis: dict[str, Any]) -> dict[str, Any]:
     current = float(_number(analysis.get("current_price")) or 0.0)
     candles = [item for item in (analysis.get("candles") or []) if isinstance(item, dict)]
     atr = max(0.25, _atr(candles))
-    zone_half_width = max(0.22, min(1.20, atr * 0.24))
-    stop_buffer = max(1.25, min(6.50, atr * 1.35))
+    buy_plan = _build_one_limit_plan(analysis, side="buy", current=current, atr=atr)
+    sell_plan = _build_one_limit_plan(analysis, side="sell", current=current, atr=atr)
+
+    if buy_plan is None and sell_plan is None:
+        return {
+            "available": False,
+            "reason": "لا توجد قمة أو قاع صالح للتوصية حاليًا.",
+            "disclaimer": "النسب تقديرية وغير مضمونة، ولا تنفذ أي صفقة تلقائيًا.",
+        }
 
     result: dict[str, Any] = {
         "available": True,
         "current_price": round(current, 2),
-        "disclaimer": "نسبة النجاح تقديرية وغير مضمونة. راجع السعر والسبريد قبل إدخال الأوامر يدويًا في MT5.",
+        "buy_limit": buy_plan,
+        "sell_limit": sell_plan,
+        "disclaimer": "نسبة القوة تقديرية وغير مضمونة. راجع السعر والسبريد قبل إدخال الأوامر يدويًا في MT5.",
     }
 
-    for side, key in (("buy", "buy_limit"), ("sell", "sell_limit")):
-        level = _pick_distant_limit_level(analysis, side=side, current=current, atr=atr)
-        entry = float(level["price"])
-        if side == "buy":
-            zone_low = entry - zone_half_width
-            zone_high = entry + zone_half_width
-            stop = zone_low - stop_buffer
+    if buy_plan is not None and sell_plan is not None:
+        buy_rate = int(buy_plan["estimated_success"])
+        sell_rate = int(sell_plan["estimated_success"])
+        # Do not call one side stronger when the difference is only noise.
+        if buy_rate - sell_rate >= 10:
+            result["stronger"] = "buy_limit"
+        elif sell_rate - buy_rate >= 10:
+            result["stronger"] = "sell_limit"
         else:
-            zone_low = entry - zone_half_width
-            zone_high = entry + zone_half_width
-            stop = zone_high + stop_buffer
-
-        risk = max(1.0, abs(entry - stop))
-        if side == "buy":
-            tp1 = max(current + atr * 0.85, entry + risk * 1.80)
-            tp2 = max(tp1 + atr * 1.10, entry + risk * 2.85)
-            tp3 = max(tp2 + atr * 1.45, entry + risk * 4.20)
-            reason = "منطقة انتظار أسفل السعر مبنية على دعم/قاع بعيد ضمن نافذة السوق."
-        else:
-            tp1 = min(current - atr * 0.85, entry - risk * 1.80)
-            tp2 = min(tp1 - atr * 1.10, entry - risk * 2.85)
-            tp3 = min(tp2 - atr * 1.45, entry - risk * 4.20)
-            reason = "منطقة انتظار أعلى السعر مبنية على مقاومة/قمة بعيدة ضمن نافذة السوق."
-
-        if level.get("projected"):
-            reason = "منطقة انتظار بعيدة محسوبة من تذبذب M5 لعدم توفر مستوى تاريخي بعيد مكتمل."
-
-        result[key] = {
-            "order_type": "Buy Limit" if side == "buy" else "Sell Limit",
-            "entry": round(entry, 2),
-            "zone_low": round(min(zone_low, zone_high), 2),
-            "zone_high": round(max(zone_low, zone_high), 2),
-            "stop_loss": round(stop, 2),
-            "target_1": round(tp1, 2),
-            "target_2": round(tp2, 2),
-            "target_3": round(tp3, 2),
-            "distance_to_entry": round(abs(current - entry), 2),
-            "estimated_success": _limit_recommendation_probability(analysis, side=side, level=level),
-            "level_strength": int(level.get("strength") or 42),
-            "source": str(level.get("source") or "market"),
-            "reason": reason,
-            "guaranteed": False,
-        }
-
-    buy_rate = int(result["buy_limit"]["estimated_success"])
-    sell_rate = int(result["sell_limit"]["estimated_success"])
-    if buy_rate > sell_rate:
+            result["stronger"] = "equal"
+    elif buy_plan is not None:
         result["stronger"] = "buy_limit"
-    elif sell_rate > buy_rate:
-        result["stronger"] = "sell_limit"
     else:
-        result["stronger"] = "equal"
+        result["stronger"] = "sell_limit"
     return result
+
 
 def _parse_market_candle_time(value: Any, timezone_name: str) -> datetime | None:
     """Parse a provider candle time and normalize it to UTC.
@@ -727,7 +797,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 2
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 3
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1090,8 +1160,8 @@ def _market_decision_prompt(
 4) جميع أسعار support/resistance/entry/stop/targets تكون على مقياس Twelve Data الحالي فقط.
 5) الصورة ستستخدم لاحقًا في مرحلة مستقلة لمعايرة محور الوسيط وإسقاط الأسعار، فلا تعدّل القرار لتناسب أي مساحة مرئية.
 6) لنفس مفتاح آخر شمعة M5 مغلقة يجب أن تعيد نفس الاتجاه والحالة والاحتمالات والمستويات.
-7) لا يوجد انحياز شراء أو بيع. عند التعارض استخدم مراقبة أو مشروط.
-8) أقل من 55% مراقبة، 55 إلى أقل من 70% مشروط عند وجود سيناريو واضح، و70% فأكثر لا يصبح مؤكدًا إلا مع توافق قوي واكتمال التأكيد.
+7) لا يوجد انحياز شراء أو بيع. لا تحوّل التعادل إلى صعود. إذا اتفق M15 وM5 على حركة قوية معاكسة لـ H4/H1 فاعرض الحركة القصيرة أو استخدم مراقبة، ولا تكرر الاتجاه القديم آليًا.
+8) لا تجعل كل النتائج مشروطًا: أقل من 55% مراقبة؛ 55 إلى أقل من 70% مشروط فقط مع تفعيل M15/M5 واضح؛ و70% فأكثر يصبح مؤكدًا عند توافق M15 وM5 وتأكيد شمعة M5 مغلقة وعدم وجود تعارض يمنع التنفيذ.
 9) اختر أقرب دعمين وأقرب مقاومتين حقيقيين من بيانات السوق، واجمع المستويات المتقاربة.
 10) اجعل النصوص الشرطية بلا أسعار رقمية داخل الجمل؛ الأسعار موجودة في الحقول الرقمية المنفصلة.
 11) entry قريب وواقعي، والوقف خلف أقرب إبطال محلي، وثلاثة أهداف مرتبة في جهة الصفقة.
@@ -1174,6 +1244,18 @@ def _bind_market_analysis_to_image(
             shifted["price"] = _shift_numeric_price(level.get("price"), offset)
             shifted_levels.append(shifted)
         result[level_key] = shifted_levels
+
+    swings = result.get("confirmed_limit_swings")
+    if isinstance(swings, dict):
+        shifted_swings: dict[str, list[dict[str, Any]]] = {"troughs": [], "peaks": []}
+        for swing_key in ("troughs", "peaks"):
+            for item in swings.get(swing_key) or []:
+                if not isinstance(item, dict):
+                    continue
+                shifted = dict(item)
+                shifted["price"] = _shift_numeric_price(item.get("price"), offset)
+                shifted_swings[swing_key].append(shifted)
+        result["confirmed_limit_swings"] = shifted_swings
 
     for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
         result[key] = _shift_numeric_price(result.get(key), offset)
@@ -1302,6 +1384,209 @@ def _atr(candles: list[dict[str, Any]], periods: int = 8) -> float:
         return 2.0
     ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in sample]
     return sum(ranges) / len(ranges)
+
+
+
+def _raw_frame_candles(raw: Any) -> list[dict[str, Any]]:
+    """Normalize higher-frame candles for swing detection without UI limits."""
+    result: list[dict[str, Any]] = []
+    for index, item in enumerate(raw if isinstance(raw, list) else []):
+        if not isinstance(item, dict):
+            continue
+        values = [_number(item.get(key)) for key in ("open", "high", "low", "close")]
+        if any(value is None for value in values):
+            continue
+        open_, high, low, close = [float(value) for value in values]
+        true_high = max(high, open_, close)
+        true_low = min(low, open_, close)
+        if true_high <= true_low:
+            continue
+        result.append(
+            {
+                "time": _normalize_candle_time(item.get("time"), index),
+                "open": open_,
+                "high": true_high,
+                "low": true_low,
+                "close": close,
+            }
+        )
+    return result[-120:]
+
+
+def _frame_atr(candles: list[dict[str, Any]], periods: int = 14) -> float:
+    sample = candles[-periods:] if candles else []
+    if not sample:
+        return 1.0
+    return max(0.01, sum(float(item["high"]) - float(item["low"]) for item in sample) / len(sample))
+
+
+def _extract_confirmed_frame_swings(raw: Any, timeframe: str) -> list[dict[str, Any]]:
+    """Extract confirmed pivot highs/lows with candles on both sides."""
+    candles = _raw_frame_candles(raw)
+    settings = {
+        "H4": (2, 82),
+        "H1": (2, 76),
+        "M15": (3, 64),
+        "M5": (4, 54),
+    }
+    window, base_strength = settings.get(timeframe, (3, 58))
+    if len(candles) < window * 2 + 5:
+        return []
+    atr = _frame_atr(candles)
+    points: list[dict[str, Any]] = []
+
+    for index in range(window, len(candles) - window):
+        candle = candles[index]
+        left = candles[index - window:index]
+        right = candles[index + 1:index + window + 1]
+        high = float(candle["high"])
+        low = float(candle["low"])
+        left_high = max(float(item["high"]) for item in left)
+        right_high = max(float(item["high"]) for item in right)
+        left_low = min(float(item["low"]) for item in left)
+        right_low = min(float(item["low"]) for item in right)
+
+        is_peak = high > left_high and high >= right_high
+        is_trough = low < left_low and low <= right_low
+        age = len(candles) - 1 - index
+
+        if is_peak:
+            reversal_depth = min(high - left_low, high - right_low)
+            if reversal_depth >= atr * 0.48:
+                tolerance = max(0.15, atr * 0.16)
+                touches = sum(1 for item in candles if abs(float(item["high"]) - high) <= tolerance)
+                prominence = reversal_depth / atr
+                strength = int(round(base_strength + min(10.0, prominence * 3.0) + min(6, touches) - min(10.0, age * 0.16)))
+                points.append(
+                    {
+                        "kind": "peak",
+                        "price": round(high, 3),
+                        "time": candle.get("time"),
+                        "timeframe": timeframe,
+                        "strength": max(45, min(95, strength)),
+                        "touches": max(1, touches),
+                        "level_atr": round(atr, 3),
+                        "age": age,
+                    }
+                )
+
+        if is_trough:
+            reversal_depth = min(left_high - low, right_high - low)
+            if reversal_depth >= atr * 0.48:
+                tolerance = max(0.15, atr * 0.16)
+                touches = sum(1 for item in candles if abs(float(item["low"]) - low) <= tolerance)
+                prominence = reversal_depth / atr
+                strength = int(round(base_strength + min(10.0, prominence * 3.0) + min(6, touches) - min(10.0, age * 0.16)))
+                points.append(
+                    {
+                        "kind": "trough",
+                        "price": round(low, 3),
+                        "time": candle.get("time"),
+                        "timeframe": timeframe,
+                        "strength": max(45, min(95, strength)),
+                        "touches": max(1, touches),
+                        "level_atr": round(atr, 3),
+                        "age": age,
+                    }
+                )
+    return points
+
+
+def _build_confirmed_limit_swings(frames: Any, current: float) -> dict[str, list[dict[str, Any]]]:
+    """Build higher-frame swing levels for manual Buy/Sell Limit plans.
+
+    A level must originate from a real confirmed pivot. H4/H1 are primary;
+    M15/M5 only confirm a nearby higher-frame peak or trough.
+    """
+    if not isinstance(frames, dict):
+        return {"troughs": [], "peaks": []}
+
+    all_points: list[dict[str, Any]] = []
+    by_frame: dict[str, list[dict[str, Any]]] = {}
+    for timeframe in ("H4", "H1", "M15", "M5"):
+        points = _extract_confirmed_frame_swings(frames.get(timeframe), timeframe)
+        by_frame[timeframe] = points
+        all_points.extend(points)
+
+    result: dict[str, list[dict[str, Any]]] = {"troughs": [], "peaks": []}
+    primary = [point for point in all_points if point.get("timeframe") in {"H4", "H1"}]
+    for point in primary:
+        kind = str(point.get("kind"))
+        price = float(point["price"])
+        if kind == "trough" and price >= current:
+            continue
+        if kind == "peak" and price <= current:
+            continue
+
+        tolerance = max(0.25, min(3.0, float(point.get("level_atr") or 1.0) * 0.34))
+        confirming_frames: list[str] = []
+        for timeframe in ("H4", "H1", "M15", "M5"):
+            if timeframe == point.get("timeframe"):
+                confirming_frames.append(timeframe)
+                continue
+            if any(
+                other.get("kind") == kind
+                and abs(float(other["price"]) - price) <= tolerance
+                for other in by_frame.get(timeframe, [])
+            ):
+                confirming_frames.append(timeframe)
+
+        strength = int(point.get("strength") or 0)
+        if "M15" in confirming_frames:
+            strength += 4
+        if "M5" in confirming_frames:
+            strength += 3
+        if "H4" in confirming_frames and "H1" in confirming_frames:
+            strength += 6
+
+        item = {
+            **point,
+            "strength": max(50, min(95, strength)),
+            "source": "confirmed_swing",
+            "confirmation_frames": confirming_frames,
+        }
+        key = "troughs" if kind == "trough" else "peaks"
+        result[key].append(item)
+
+    for key in ("troughs", "peaks"):
+        ordered = sorted(
+            result[key],
+            key=lambda item: (
+                -int(item.get("strength") or 0),
+                int(item.get("age") or 999),
+                abs(float(item["price"]) - current),
+            ),
+        )
+        deduped: list[dict[str, Any]] = []
+        for item in ordered:
+            tolerance = max(0.25, min(2.5, float(item.get("level_atr") or 1.0) * 0.24))
+            if any(abs(float(item["price"]) - float(existing["price"])) <= tolerance for existing in deduped):
+                continue
+            deduped.append(item)
+        result[key] = deduped[:8]
+    return result
+
+
+def _closed_m5_confirmation(candles: list[dict[str, Any]], direction: str) -> bool:
+    """Require actual closed-M5 continuation/break evidence for confirmation."""
+    if len(candles) < 4 or direction not in {"صاعد", "هابط"}:
+        return False
+    last = candles[-1]
+    previous = candles[-2]
+    before = candles[-3]
+    if direction == "صاعد":
+        breakout = float(last["close"]) > float(previous["high"])
+        continuation = (
+            float(last["close"]) > float(last["open"])
+            and float(last["close"]) > float(previous["close"]) > float(before["close"])
+        )
+        return breakout or continuation
+    breakdown = float(last["close"]) < float(previous["low"])
+    continuation = (
+        float(last["close"]) < float(last["open"])
+        and float(last["close"]) < float(previous["close"]) < float(before["close"])
+    )
+    return breakdown or continuation
 
 
 def _cluster_levels(
@@ -1703,19 +1988,24 @@ def _choose_direction(
     sell: int,
     market_summary: dict[str, Any] | None = None,
 ) -> tuple[str, int, int]:
-    """اختيار غير منحاز للاتجاه مع إعطاء الفريمات العليا وزنها الحقيقي.
+    """Choose the actionable M5 direction without hiding a lower-frame reversal.
 
-    H4 يحدد الاتجاه العام، H1 البنية، M15 التفعيل، وM5 التوقيت.
-    عند ضعف الفارق أو تعارض H4/H1 نعيد اتجاهًا غير واضح بدل فرض BUY/SELL.
+    H4/H1 remain structural context, while M15/M5 determine whether the current
+    move is actionable. A strong aligned M15+M5 reversal may override the broad
+    direction, but its probability is capped until higher frames also align.
     """
     atr = max(0.01, _atr(candles))
-    full_move = _clip((float(candles[-1]["close"]) - float(candles[0]["close"])) / atr, -3.0, 3.0)
-    recent_move = _clip((float(candles[-1]["close"]) - float(candles[-6]["close"])) / atr, -3.0, 3.0)
+    full_move = _clip((float(candles[-1]["close"]) - float(candles[0]["close"])) / atr, -4.0, 4.0)
+    recent_index = max(0, len(candles) - 7)
+    recent_move = _clip((float(candles[-1]["close"]) - float(candles[recent_index]["close"])) / atr, -4.0, 4.0)
+    impulse_index = max(0, len(candles) - 4)
+    impulse_move = _clip((float(candles[-1]["close"]) - float(candles[impulse_index]["close"])) / atr, -4.0, 4.0)
     model_score = _clip((buy - sell) / 45.0, -2.0, 2.0)
-    m5_score = full_move * 0.42 + recent_move * 0.58
+    m5_price_score = full_move * 0.24 + recent_move * 0.46 + impulse_move * 0.30
 
     frames = (market_summary or {}).get("frames") if isinstance(market_summary, dict) else {}
-    frame_weights = {"H4": 0.36, "H1": 0.30, "M15": 0.22, "M5": 0.12}
+    frame_weights = {"H4": 0.22, "H1": 0.25, "M15": 0.29, "M5": 0.24}
+    frame_scores: dict[str, float] = {}
     frame_score = 0.0
     frame_weight_used = 0.0
     for frame, weight in frame_weights.items():
@@ -1723,11 +2013,12 @@ def _choose_direction(
         if not isinstance(item, dict):
             continue
         try:
-            score = float(item.get("score") or 0.0)
+            score = _clip(float(item.get("score") or 0.0), -3.0, 3.0)
+            confidence = max(0.35, min(1.0, float(item.get("confidence") or 50) / 100.0))
         except (TypeError, ValueError):
             continue
-        confidence = max(0.35, min(1.0, float(item.get("confidence") or 50) / 100.0))
-        frame_score += _clip(score, -3.0, 3.0) * weight * confidence
+        frame_scores[frame] = score
+        frame_score += score * weight * confidence
         frame_weight_used += weight * confidence
     if frame_weight_used:
         frame_score /= frame_weight_used
@@ -1737,34 +2028,54 @@ def _choose_direction(
         except (TypeError, ValueError):
             frame_score = 0.0
 
-    # النموذج يساهم، لكن لا يستطيع منفردًا فرض الاتجاه.
-    combined = model_score * 0.15 + m5_score * 0.28 + frame_score * 0.57
+    # The model is advisory. Closed-price action and the four real frames decide.
+    combined = model_score * 0.10 + m5_price_score * 0.34 + frame_score * 0.56
 
     h4 = str((frames.get("H4") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     h1 = str((frames.get("H1") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
+    m15 = str((frames.get("M15") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
+    m5 = str((frames.get("M5") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     higher_conflict = h4 in {"صاعد", "هابط"} and h1 in {"صاعد", "هابط"} and h4 != h1
+    lower_aligned = m15 in {"صاعد", "هابط"} and m15 == m5
+    short_term_reversal = False
 
-    # منطقة حياد حقيقية؛ لا تحويل تلقائي إلى شراء أو بيع.
-    neutral_threshold = 0.36 if higher_conflict else 0.30
+    # Do not keep saying "صاعد" while both activation frames and the latest
+    # closed candles are clearly falling (and vice versa).
+    if lower_aligned:
+        lower_direction = m15
+        lower_score = frame_scores.get("M15", 0.0) * 0.56 + frame_scores.get("M5", 0.0) * 0.44
+        if lower_direction == "هابط" and (lower_score <= -0.22 or recent_move <= -0.85 or impulse_move <= -0.60):
+            combined = min(combined, -0.42)
+            short_term_reversal = h4 == "صاعد" or h1 == "صاعد"
+        elif lower_direction == "صاعد" and (lower_score >= 0.22 or recent_move >= 0.85 or impulse_move >= 0.60):
+            combined = max(combined, 0.42)
+            short_term_reversal = h4 == "هابط" or h1 == "هابط"
+
+    neutral_threshold = 0.40 if higher_conflict else 0.32
     if abs(combined) < neutral_threshold:
-        edge = int(round(min(6.0, abs(combined) * 18.0)))
-        if combined >= 0:
+        edge = int(round(min(6.0, abs(combined) * 16.0)))
+        if combined > 0:
             return "غير واضح", 50 + edge, 50 - edge
-        return "غير واضح", 50 - edge, 50 + edge
+        if combined < 0:
+            return "غير واضح", 50 - edge, 50 + edge
+        return "غير واضح", 50, 50
 
     direction = "صاعد" if combined > 0 else "هابط"
-    raw_probability = int(round(_clip(52 + abs(combined) * 16, 52, 84)))
+    raw_probability = int(round(_clip(52 + abs(combined) * 18, 52, 86)))
 
     alignment = int((market_summary or {}).get("alignment") or 50) if isinstance(market_summary, dict) else 50
     higher_direction = str((market_summary or {}).get("direction") or "عرضي") if isinstance(market_summary, dict) else "عرضي"
     if higher_conflict:
-        raw_probability = min(raw_probability, 58)
-    elif higher_direction in {"صاعد", "هابط"} and higher_direction != direction:
         raw_probability = min(raw_probability, 59)
+    elif short_term_reversal:
+        # It is a real lower-frame move, but not yet a fully aligned macro trend.
+        raw_probability = min(raw_probability, 68)
+    elif higher_direction in {"صاعد", "هابط"} and higher_direction != direction:
+        raw_probability = min(raw_probability, 61)
     elif h4 == direction and h1 == direction:
         raw_probability = min(90, raw_probability + max(0, alignment - 50) // 10)
     elif h4 in {"صاعد", "هابط"} and h4 != direction:
-        raw_probability = min(raw_probability, 60)
+        raw_probability = min(raw_probability, 62)
 
     if isinstance(market_summary, dict) and market_summary.get("warnings"):
         raw_probability = min(raw_probability, 60)
@@ -2016,33 +2327,53 @@ def _validate_analysis(
     )
     probability = max(buy, sell) if direction == "غير واضح" else (buy if direction == "صاعد" else sell)
 
-    # في حالة الغموض نحتفظ بسيناريو مراقبة فقط ولا نعرض صفقة مؤكدة مختلقة.
-    working_direction = direction
-    if working_direction not in {"صاعد", "هابط"}:
-        working_direction = "صاعد" if buy >= sell else "هابط"
+    # الحسابات الهندسية قد تحتاج جهة مؤقتة، لكن الجهة المعروضة تبقى
+    # "غير واضح" عند التعادل ولا تتحول افتراضيًا إلى شراء.
+    calculation_direction = direction
+    if calculation_direction not in {"صاعد", "هابط"}:
+        recent_delta = float(candles[-1]["close"]) - float(candles[max(0, len(candles) - 4)]["close"])
+        if recent_delta > 0:
+            calculation_direction = "صاعد"
+        elif recent_delta < 0:
+            calculation_direction = "هابط"
+        elif buy > sell:
+            calculation_direction = "صاعد"
+        else:
+            calculation_direction = "هابط"
 
-    entry, entry_kind, confirmation = _nearest_entry(data, working_direction, current, supports, resistances)
-    confirmation = _short_confirmation(working_direction, entry_kind, confirmation)
+    entry, entry_kind, confirmation = _nearest_entry(data, calculation_direction, current, supports, resistances)
+    confirmation = _short_confirmation(calculation_direction, entry_kind, confirmation)
     if direction not in {"صاعد", "هابط"}:
-        confirmation = "انتظار توافق H4 وH1 وظهور شمعة تأكيد"
-    stop, stop_reason = _validated_stop(data, working_direction, entry, candles, supports, resistances)
-    targets = _validated_targets(data, working_direction, entry, stop, supports, resistances)
+        confirmation = "انتظار توافق M15 وM5 مع بنية H1/H4"
+    stop, stop_reason = _validated_stop(data, calculation_direction, entry, candles, supports, resistances)
+    targets = _validated_targets(data, calculation_direction, entry, stop, supports, resistances)
 
     frames = (market_summary or {}).get("frames") if isinstance(market_summary, dict) else {}
     h4_direction = str((frames.get("H4") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     h1_direction = str((frames.get("H1") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
+    m15_direction = str((frames.get("M15") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
+    m5_direction = str((frames.get("M5") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     alignment = int((market_summary or {}).get("alignment") or 0) if isinstance(market_summary, dict) else 0
     higher_aligned = direction in {"صاعد", "هابط"} and h4_direction == direction and h1_direction == direction
+    lower_aligned = direction in {"صاعد", "هابط"} and m15_direction == direction and m5_direction == direction
+    lower_support = direction in {"صاعد", "هابط"} and (m15_direction == direction or m5_direction == direction)
+    lower_conflict = (
+        direction in {"صاعد", "هابط"}
+        and m15_direction in {"صاعد", "هابط"}
+        and m5_direction in {"صاعد", "هابط"}
+        and m15_direction == m5_direction
+        and m15_direction != direction
+    )
     warnings = bool((market_summary or {}).get("warnings")) if isinstance(market_summary, dict) else False
     geometry_valid = (
-        (working_direction == "صاعد" and stop < entry and all(target > entry for target in targets))
-        or (working_direction == "هابط" and stop > entry and all(target < entry for target in targets))
+        (calculation_direction == "صاعد" and stop < entry and all(target > entry for target in targets))
+        or (calculation_direction == "هابط" and stop > entry and all(target < entry for target in targets))
     )
 
     model_state = str(data.get("setup_state") or "مراقبة")
     opposing_pressure = (
         int(level_pressure.get("resistance_pressure") or 0)
-        if working_direction == "صاعد"
+        if calculation_direction == "صاعد"
         else int(level_pressure.get("support_pressure") or 0)
     )
     market_activity = _market_activity_status(market_summary)
@@ -2051,27 +2382,32 @@ def _validate_analysis(
         and entry_kind != "مراقبة"
         and geometry_valid
     )
+    price_action_confirmed = _closed_m5_confirmation(candles, direction)
+    higher_supportive = higher_aligned or (direction in {"صاعد", "هابط"} and (h4_direction == direction or h1_direction == direction))
     confirmation_complete = (
-        model_state == "مؤكد"
-        and higher_aligned
-        and alignment >= 75
+        probability >= CONFIRMED_PROBABILITY
+        and lower_aligned
+        and price_action_confirmed
+        and higher_supportive
         and geometry_valid
         and not warnings
         and opposing_pressure < 8
+        and model_state != "غير صالح"
     )
 
     if not market_activity["active"]:
         draw_mode = "inactive"
-    elif probability < CONDITIONAL_PROBABILITY or not clear_scenario:
-        # أقل من 55%، أو لا يوجد سيناريو فني واضح: مراقبة فقط.
+    elif probability < CONDITIONAL_PROBABILITY or not clear_scenario or model_state == "غير صالح":
         draw_mode = "watch"
-    elif probability >= CONFIRMED_PROBABILITY and confirmation_complete:
-        # 70% فأكثر لا تكفي وحدها؛ يجب اكتمال التأكيد أيضًا.
+    elif lower_conflict:
+        # تعارض M15 وM5 مع الجهة المختارة يلغي حالة مشروط بدل تكرارها.
+        draw_mode = "watch"
+    elif confirmation_complete:
         draw_mode = "confirmed"
-    else:
-        # من 55% إلى أقل من 70% مع سيناريو واضح، وكذلك 70%+ قبل
-        # اكتمال التأكيد: صفقة مشروطة وليست تنفيذًا مباشرًا.
+    elif lower_support:
         draw_mode = "conditional"
+    else:
+        draw_mode = "watch"
 
     if draw_mode == "watch":
         # المراقبة نقطة قرار محايدة: Entry يساوي السعر الحالي، ولا يوجد
@@ -2136,11 +2472,11 @@ def _validate_analysis(
             "buy_probability": buy,
             "sell_probability": sell,
             "direction": direction,
-            "analysis_direction": working_direction,
+            "analysis_direction": direction,
             "trade_side": (
                 market_activity["label"]
                 if draw_mode == "inactive"
-                else ("مراقبة" if draw_mode == "watch" else ("شراء" if working_direction == "صاعد" else "بيع"))
+                else ("مراقبة" if draw_mode == "watch" else ("شراء" if direction == "صاعد" else "بيع"))
             ),
             "trade_probability": probability,
             "draw_mode": draw_mode,
@@ -2243,6 +2579,10 @@ def _analyze(path: Path) -> dict[str, Any]:
         "image_axis_labels": [],
     }
     canonical = _validate_analysis(canonical_input, market_summary=market_summary)
+    canonical["confirmed_limit_swings"] = _build_confirmed_limit_swings(
+        market_context.get("frames") or {},
+        provider_closed_price,
+    )
     canonical.update(
         {
             "analysis_snapshot_key": snapshot_key,

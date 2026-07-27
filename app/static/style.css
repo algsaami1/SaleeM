@@ -316,3 +316,5 @@ details[open] .details-arrow{transform:rotate(180deg)}
   .limit-plan{padding:11px}
   .limit-levels>div{min-height:50px;padding:7px}
 }
+.limit-plan.unavailable-plan{opacity:.78;box-shadow:none}
+.limit-plan-empty{margin:18px 0 8px;padding:14px;border:1px dashed currentColor;border-radius:11px;background:rgba(255,255,255,.7);color:#69756e;font-size:9px;line-height:1.8;text-align:center}

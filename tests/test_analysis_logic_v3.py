@@ -88,6 +88,7 @@ def test_unclear_analysis_is_watch_and_not_confirmed():
     assert result["draw_mode"] == "watch"
     assert result["trade_side"] == "مراقبة"
     assert result["direction"] == "غير واضح"
+    assert result["analysis_direction"] == "غير واضح"
 
 
 def test_bearish_frames_can_produce_sell_without_buy_bias():
@@ -112,6 +113,30 @@ def test_bearish_frames_can_produce_sell_without_buy_bias():
     assert sell > buy
     assert sell >= 65
 
+
+
+
+def test_strong_m15_m5_drop_is_not_hidden_by_bullish_h4_h1():
+    candles = _flat_candles(price=4120.0)
+    for index, candle in enumerate(candles):
+        base = 4132.0 - index * 0.42
+        candle.update(open=base + 0.16, high=base + 0.35, low=base - 0.35, close=base - 0.18)
+    summary = {
+        "direction": "صاعد",
+        "alignment": 50,
+        "frames": {
+            "H4": _frame("صاعد", 0.8, 78),
+            "H1": _frame("صاعد", 0.5, 72),
+            "M15": _frame("هابط", -1.25, 82),
+            "M5": _frame("هابط", -1.45, 86),
+        },
+        "warnings": [],
+    }
+    direction, buy, sell = _choose_direction({}, candles, 58, 42, summary)
+    assert direction == "هابط"
+    assert sell > buy
+    # Lower-frame reversal is valid but capped until H1/H4 also turn.
+    assert sell <= 68
 
 def test_unreadable_image_uses_market_fallback_without_stopping():
     candles = _flat_candles(price=4120.0)
@@ -314,6 +339,11 @@ def test_probability_55_to_69_with_clear_scenario_is_conditional():
 
 def test_probability_70_with_complete_confirmation_is_confirmed():
     data, summary = _threshold_data(70)
+    # Three rising closed M5 candles provide actual continuation confirmation.
+    data["candles"][-3].update(open=4119.7, high=4120.0, low=4119.5, close=4119.8)
+    data["candles"][-2].update(open=4119.8, high=4120.25, low=4119.7, close=4120.05)
+    data["candles"][-1].update(open=4120.0, high=4120.8, low=4119.9, close=4120.55)
+    data["current_price"] = 4120.55
     with (
         patch("app.services.analyzer._choose_direction", return_value=("صاعد", 70, 30)),
         patch("app.services.analyzer._apply_level_pressure", return_value=("صاعد", 70, 30, {})),

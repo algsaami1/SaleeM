@@ -181,7 +181,7 @@
 
     <details class="card limit-recommendations" id="limit-recommendations-card">
       <summary>
-        <span><b>توصية الصفقة</b><small>Buy Limit وSell Limit لمناطق دخول وأهداف بعيدة</small></span>
+        <span><b>توصية الصفقة</b><small>Buy Limit من قاع مؤكد وSell Limit من قمة مؤكدة</small></span>
         <span class="details-arrow" aria-hidden="true">⌄</span>
       </summary>
       {% set recommendations = result.limit_recommendations %}
@@ -190,13 +190,15 @@
         <div class="limit-market-line"><span>السعر الحالي</span><b>{{ '%.2f'|format(recommendations.current_price) }}</b></div>
         <div class="limit-plans-grid">
           {% set buy_plan = recommendations.buy_limit %}
+          {% if buy_plan %}
           <article class="limit-plan buy-limit{% if recommendations.stronger == 'buy_limit' %} strongest{% endif %}">
             <header class="limit-plan-header">
-              <div><span class="limit-order-dot"></span><div><small>أمر شراء معلّق</small><h3>Buy Limit</h3></div></div>
+              <div><span class="limit-order-dot"></span><div><small>أمر شراء معلّق من قاع</small><h3>Buy Limit</h3></div></div>
               <div class="limit-rate"><strong>{{ buy_plan.estimated_success }}٪</strong><small>غير مضمونة</small></div>
             </header>
-            {% if recommendations.stronger == 'buy_limit' %}<span class="stronger-badge">الأقوى حاليًا</span>{% endif %}
+            {% if recommendations.stronger == 'buy_limit' %}<span class="stronger-badge">الأقوى بفارق واضح</span>{% endif %}
             <div class="limit-levels">
+              <div><span>القاع المعتمد</span><b>{{ '%.2f'|format(buy_plan.pivot_price) }} — {{ buy_plan.pivot_timeframe }}</b></div>
               <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(buy_plan.zone_low) }} – {{ '%.2f'|format(buy_plan.zone_high) }}</b></div>
               <div class="primary-level"><span>الدخول المقترح</span><b>{{ '%.2f'|format(buy_plan.entry) }}</b></div>
               <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(buy_plan.stop_loss) }}</b></div>
@@ -207,15 +209,23 @@
             <p class="limit-distance">يبعد الدخول {{ '%.2f'|format(buy_plan.distance_to_entry) }} دولار عن السعر الحالي.</p>
             <p class="limit-reason">{{ buy_plan.reason }}</p>
           </article>
+          {% else %}
+          <article class="limit-plan buy-limit unavailable-plan">
+            <header class="limit-plan-header"><div><span class="limit-order-dot"></span><div><small>أمر شراء معلّق</small><h3>Buy Limit</h3></div></div></header>
+            <p class="limit-plan-empty">لا يوجد قاع مؤكد صالح أسفل السعر حاليًا.</p>
+          </article>
+          {% endif %}
 
           {% set sell_plan = recommendations.sell_limit %}
+          {% if sell_plan %}
           <article class="limit-plan sell-limit{% if recommendations.stronger == 'sell_limit' %} strongest{% endif %}">
             <header class="limit-plan-header">
-              <div><span class="limit-order-dot"></span><div><small>أمر بيع معلّق</small><h3>Sell Limit</h3></div></div>
+              <div><span class="limit-order-dot"></span><div><small>أمر بيع معلّق من قمة</small><h3>Sell Limit</h3></div></div>
               <div class="limit-rate"><strong>{{ sell_plan.estimated_success }}٪</strong><small>غير مضمونة</small></div>
             </header>
-            {% if recommendations.stronger == 'sell_limit' %}<span class="stronger-badge">الأقوى حاليًا</span>{% endif %}
+            {% if recommendations.stronger == 'sell_limit' %}<span class="stronger-badge">الأقوى بفارق واضح</span>{% endif %}
             <div class="limit-levels">
+              <div><span>القمة المعتمدة</span><b>{{ '%.2f'|format(sell_plan.pivot_price) }} — {{ sell_plan.pivot_timeframe }}</b></div>
               <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(sell_plan.zone_low) }} – {{ '%.2f'|format(sell_plan.zone_high) }}</b></div>
               <div class="primary-level"><span>الدخول المقترح</span><b>{{ '%.2f'|format(sell_plan.entry) }}</b></div>
               <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(sell_plan.stop_loss) }}</b></div>
@@ -226,14 +236,20 @@
             <p class="limit-distance">يبعد الدخول {{ '%.2f'|format(sell_plan.distance_to_entry) }} دولار عن السعر الحالي.</p>
             <p class="limit-reason">{{ sell_plan.reason }}</p>
           </article>
+          {% else %}
+          <article class="limit-plan sell-limit unavailable-plan">
+            <header class="limit-plan-header"><div><span class="limit-order-dot"></span><div><small>أمر بيع معلّق</small><h3>Sell Limit</h3></div></div></header>
+            <p class="limit-plan-empty">لا توجد قمة مؤكدة صالحة أعلى السعر حاليًا.</p>
+          </article>
+          {% endif %}
         </div>
         <div class="limit-disclaimer"><b>تنبيه:</b> {{ recommendations.disclaimer }} لا تستخدم Market Execution في هذه الخاصية، ولا تُفتح الصفقات تلقائيًا.</div>
       </div>
       {% else %}
       <div class="limit-unavailable">
         <strong>التوصية غير متاحة الآن</strong>
-        <p>{{ recommendations.reason if recommendations else 'انتظر تحديث بيانات السوق ثم أعد التحليل.' }}</p>
-        <small>نسبة النجاح تقديرية وغير مضمونة، ولا يتم تنفيذ أي أمر تلقائيًا.</small>
+        <p>{{ recommendations.reason if recommendations else 'لا توجد قمة أو قاع صالح للتوصية حاليًا.' }}</p>
+        <small>نسبة القوة تقديرية وغير مضمونة، ولا يتم تنفيذ أي أمر تلقائيًا.</small>
       </div>
       {% endif %}
     </details>
