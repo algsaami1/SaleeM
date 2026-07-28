@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -18,6 +19,8 @@ from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
 from app.services.mailer import delivery_provider, email_configured, owner_email, send_note_email
+from app.services.market_data import market_status_snapshot
+from app.services.system_status import fetch_openai_costs, system_status_store
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "app" / "static"
@@ -35,6 +38,29 @@ app = FastAPI(
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATES_DIR)
 feedback_store = FeedbackStore()
+
+
+@app.middleware("http")
+async def track_anonymous_user(request: Request, call_next):
+    """عدّ مستخدمًا مجهولًا عبر ملف تعريف ارتباط ثابت دون حفظ اسم أو عنوان IP."""
+    path = request.url.path
+    visitor_id = request.cookies.get("saleem_uid", "").strip()
+    new_visitor = not visitor_id
+    if new_visitor:
+        visitor_id = uuid.uuid4().hex
+    if not path.startswith("/static/") and path != "/health":
+        system_status_store.touch_user(visitor_id)
+    response = await call_next(request)
+    if new_visitor:
+        response.set_cookie(
+            "saleem_uid",
+            visitor_id,
+            max_age=31536000,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+    return response
 
 
 def _logic_text(value: object) -> Markup:
@@ -96,8 +122,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-market-snapshot-axis-projection-v3.24.0",
-        "ui": "saleem-unified-result-template-v3.24.0",
+        "renderer": "saleem-market-snapshot-axis-projection-v3.25.1",
+        "ui": "saleem-unified-result-template-v3.25.1",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
@@ -106,6 +132,8 @@ async def health():
         "analysis_cache_path": os.getenv("ANALYSIS_SNAPSHOT_CACHE_PATH", "/tmp/saleem_analysis_snapshot_cache.json"),
         "decision_pipeline": "market-only-decision+image-only-axis-geometry",
         "feedback_store_path": os.getenv("SALEEM_FEEDBACK_STORE_PATH", "/tmp/saleem_feedback_store.json"),
+        "system_status_path": os.getenv("SALEEM_SYSTEM_STATUS_PATH", "/tmp/saleem_system_status.json"),
+        "system_status_access": "direct-no-pin",
         "owner_email_configured": bool(owner_email()),
         "email_configured": email_configured(),
         "smtp_configured": False,
@@ -121,6 +149,52 @@ async def health():
 @app.get("/api/summary")
 async def summary_api():
     return feedback_store.summary()
+
+
+@app.get("/api/system-status")
+async def system_status_api():
+    # تفتح لوحة حالة التطبيق مباشرة دون رمز سري.
+    # لا تعيد الواجهة أي مفاتيح API أو قيم سرية.
+    local = system_status_store.local_summary()
+    official_costs = await run_in_threadpool(fetch_openai_costs)
+    openai_local = local["openai_local"]
+    if isinstance(official_costs, dict) and official_costs.get("status") == "connected":
+        used_today = float(official_costs.get("used_today_usd") or 0)
+        used_month = float(official_costs.get("used_month_usd") or 0)
+        cost_source = "رسمي"
+    else:
+        used_today = float(openai_local.get("used_today_usd") or 0)
+        used_month = float(openai_local.get("used_month_usd") or 0)
+        cost_source = "تقديري"
+
+    try:
+        credit_total = float(os.getenv("OPENAI_CREDIT_USD", "").strip())
+    except ValueError:
+        credit_total = 0.0
+    remaining = round(max(0.0, credit_total - used_month), 2) if credit_total > 0 else None
+
+    return {
+        "app": {
+            "status": "يعمل",
+            "version": __version__,
+        },
+        "users": local["users"],
+        "market": market_status_snapshot(),
+        "openai": {
+            "status": "متصل" if os.getenv("OPENAI_API_KEY", "").strip() else "غير متصل",
+            "balance_usd": remaining,
+            "credit_total_usd": round(credit_total, 2) if credit_total > 0 else None,
+            "used_today_usd": round(used_today, 4),
+            "used_month_usd": round(used_month, 4),
+            "last_analysis_usd": openai_local.get("last_analysis_usd", 0),
+            "model": openai_local.get("model"),
+            "cost_source": cost_source,
+        },
+        "system": {
+            "cache": "يعمل",
+            "last_error": "لا يوجد",
+        },
+    }
 
 
 @app.post("/api/feedback")
@@ -197,6 +271,7 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
             "XAUUSD",
             "M5",
         )
+        system_status_store.record_analysis()
         return templates.TemplateResponse(
             request,
             "index.html",

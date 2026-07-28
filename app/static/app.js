@@ -41,6 +41,13 @@
   const summaryOpenTrades = document.getElementById('summary-open-trades');
   const summaryStars = document.getElementById('summary-stars');
 
+  const systemStatusLauncher = document.getElementById('system-status-launcher');
+  const systemStatusModal = document.getElementById('system-status-modal');
+  const systemStatusClose = document.getElementById('system-status-close');
+  const systemCodePanel = document.getElementById('system-code-panel');
+  const systemStatusRefresh = document.getElementById('system-status-refresh');
+  const systemStatusMessage = document.getElementById('system-status-message');
+
 
   const updateFileName = () => {
     if (fileName) fileName.textContent = fileInput?.files?.[0]?.name || 'لم يتم اختيار صورة';
@@ -393,6 +400,103 @@
       if (submitButton) submitButton.disabled = false;
     }
   });
+
+  const statusValue = (id, value, tone = '') => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.textContent = value ?? '—';
+    element.classList.remove('good', 'warn', 'bad', 'info');
+    if (tone) element.classList.add(tone);
+  };
+
+  const money = (value, digits = 2) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return 'غير مضبوط';
+    return `$${Number(value).toFixed(digits)}`;
+  };
+
+  const integer = (value) => String(Math.max(0, Math.round(Number(value) || 0)));
+
+  const statusTone = (value) => {
+    const text = String(value || '');
+    if (text.includes('متصل') || text.includes('يعمل') || text.includes('محدث')) return 'good';
+    if (text.includes('غير') || text.includes('خطأ') || text.includes('متوقف')) return 'bad';
+    return 'info';
+  };
+
+  const renderSystemStatus = (payload) => {
+    const app = payload.app || {};
+    const users = payload.users || {};
+    const market = payload.market || {};
+    const openai = payload.openai || {};
+    const system = payload.system || {};
+
+    statusValue('status-app-state', app.status, statusTone(app.status));
+    statusValue('status-app-version', app.version, 'info');
+
+    statusValue('status-market-state', market.status, statusTone(market.status));
+    statusValue('status-market-plan', market.plan || 'Basic', 'info');
+    statusValue('status-market-daily', `${integer(market.daily_left)} من ${integer(market.daily_limit)}`, Number(market.daily_left) < 50 ? 'bad' : Number(market.daily_left) < 200 ? 'warn' : 'good');
+    const minuteText = market.minute_left === null || market.minute_left === undefined
+      ? 'بانتظار أول جلب'
+      : `${integer(market.minute_left)} من ${integer(market.minute_limit)}`;
+    statusValue('status-market-minute', minuteText, Number(market.minute_left) <= 1 ? 'warn' : 'good');
+    statusValue('status-market-refreshes', integer(market.full_refreshes_left), 'info');
+    statusValue('status-market-last-fetch', market.last_request_at || 'لم يتم الجلب بعد', market.last_request_at ? 'info' : 'warn');
+    const frames = market.frames || {};
+    const framesText = ['M5', 'M15', 'H1', 'H4']
+      .map((name) => `${name}: ${frames[name]?.status || 'غير متوفر'}`)
+      .join(' | ');
+    statusValue('status-market-frames', framesText, 'info');
+
+    statusValue('status-users-total', integer(users.total), 'info');
+    statusValue('status-users-today', integer(users.today), 'info');
+    statusValue('status-users-online', integer(users.online), 'good');
+    statusValue('status-analyses-today', integer(users.analyses_today), 'info');
+
+    statusValue('status-openai-state', openai.status, statusTone(openai.status));
+    statusValue('status-openai-balance', money(openai.balance_usd), openai.balance_usd === null ? 'warn' : Number(openai.balance_usd) < 1 ? 'bad' : Number(openai.balance_usd) < 5 ? 'warn' : 'good');
+    statusValue('status-openai-today', money(openai.used_today_usd, 4), 'info');
+    statusValue('status-openai-month', money(openai.used_month_usd, 4), 'info');
+    statusValue('status-openai-last', money(openai.last_analysis_usd, 4), 'info');
+    statusValue('status-openai-source', openai.cost_source || 'تقديري', openai.cost_source === 'رسمي' ? 'good' : 'warn');
+
+    statusValue('status-cache-state', system.cache, statusTone(system.cache));
+    statusValue('status-last-error', system.last_error, system.last_error === 'لا يوجد' ? 'good' : 'bad');
+  };
+
+  const loadSystemStatus = async () => {
+    if (systemStatusMessage) systemStatusMessage.textContent = 'جاري تحديث البيانات...';
+    if (systemStatusRefresh) systemStatusRefresh.disabled = true;
+    try {
+      const response = await fetch('/api/system-status', { cache: 'no-store' });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || 'تعذر فتح حالة التطبيق.');
+      renderSystemStatus(payload);
+      if (systemStatusMessage) systemStatusMessage.textContent = 'تم تحديث البيانات.';
+    } catch (error) {
+      if (systemStatusMessage) systemStatusMessage.textContent = error.message || 'تعذر تحديث البيانات.';
+    } finally {
+      if (systemStatusRefresh) systemStatusRefresh.disabled = false;
+    }
+  };
+
+  systemStatusLauncher?.addEventListener('click', () => {
+    if (typeof systemStatusModal?.showModal === 'function') systemStatusModal.showModal();
+    else systemStatusModal?.setAttribute('open', '');
+    loadSystemStatus();
+  });
+
+  const closeSystemStatus = () => {
+    if (typeof systemStatusModal?.close === 'function') systemStatusModal.close();
+    else systemStatusModal?.removeAttribute('open');
+  };
+
+  systemStatusClose?.addEventListener('click', closeSystemStatus);
+  systemStatusModal?.addEventListener('click', (event) => {
+    if (event.target === systemStatusModal) closeSystemStatus();
+  });
+
+  systemStatusRefresh?.addEventListener('click', loadSystemStatus);
 
   notesForm?.addEventListener('submit', async (event) => {
     event.preventDefault();

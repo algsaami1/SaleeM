@@ -32,6 +32,7 @@ from app.services.market_data import (
     compact_market_context,
     fetch_market_data,
 )
+from app.services.system_status import system_status_store
 
 OPENAI_URL = "https://api.openai.com/v1/responses"
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -985,7 +986,13 @@ def _request_structured_openai(
         raise RuntimeError(f"خطأ خدمة التحليل ({response.status_code}): {detail}.")
 
     try:
-        return json.loads(_text(response.json()))
+        response_payload = response.json()
+        system_status_store.record_openai_response(
+            model=str(body.get("model") or ""),
+            usage=response_payload.get("usage") if isinstance(response_payload, dict) else None,
+            request_id=response.headers.get("x-request-id", ""),
+        )
+        return json.loads(_text(response_payload))
     except (TypeError, json.JSONDecodeError) as exc:
         raise RuntimeError("لم ترجع خدمة التحليل JSON صالحًا.") from exc
 

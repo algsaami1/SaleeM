@@ -349,6 +349,60 @@
     {% endif %}
   </main>
 
+  <button class="system-status-launcher" id="system-status-launcher" type="button" aria-haspopup="dialog" aria-controls="system-status-modal">
+    <span aria-hidden="true">&lt;/&gt;</span> حالة التطبيق
+  </button>
+
+  <dialog class="system-status-modal" id="system-status-modal" aria-labelledby="system-status-title">
+    <div class="system-status-window">
+      <header class="system-status-header">
+        <div><small>لوحة الإدارة</small><h2 id="system-status-title">حالة تطبيق SaleeM</h2></div>
+        <button class="system-status-close" id="system-status-close" type="button" aria-label="إغلاق">×</button>
+      </header>
+
+      <div class="system-code-panel" id="system-code-panel" aria-live="polite">
+        <section>
+          <h3>[ التطبيق ]</h3>
+          <div><span>الحالة</span><b id="status-app-state">—</b></div>
+          <div><span>الإصدار</span><b id="status-app-version">—</b></div>
+        </section>
+        <section>
+          <h3>[ بيانات السوق ]</h3>
+          <div><span>الحالة</span><b id="status-market-state">—</b></div>
+          <div><span>الخطة</span><b id="status-market-plan">—</b></div>
+          <div><span>المتبقي اليوم</span><b id="status-market-daily">—</b></div>
+          <div><span>المتبقي الآن</span><b id="status-market-minute">—</b></div>
+          <div><span>تحديثات كاملة متبقية</span><b id="status-market-refreshes">—</b></div>
+          <div><span>آخر جلب</span><b id="status-market-last-fetch">—</b></div>
+          <div><span>الفريمات</span><b id="status-market-frames">—</b></div>
+        </section>
+        <section>
+          <h3>[ المستخدمون ]</h3>
+          <div><span>إجمالي المستخدمين</span><b id="status-users-total">—</b></div>
+          <div><span>المستخدمون اليوم</span><b id="status-users-today">—</b></div>
+          <div><span>المستخدمون الآن</span><b id="status-users-online">—</b></div>
+          <div><span>التحليلات اليوم</span><b id="status-analyses-today">—</b></div>
+        </section>
+        <section>
+          <h3>[ OpenAI API ]</h3>
+          <div><span>الحالة</span><b id="status-openai-state">—</b></div>
+          <div><span>الرصيد المتبقي</span><b id="status-openai-balance">—</b></div>
+          <div><span>استهلاك اليوم</span><b id="status-openai-today">—</b></div>
+          <div><span>استهلاك الشهر</span><b id="status-openai-month">—</b></div>
+          <div><span>تكلفة آخر تحليل</span><b id="status-openai-last">—</b></div>
+          <div><span>طريقة الحساب</span><b id="status-openai-source">—</b></div>
+        </section>
+        <section>
+          <h3>[ النظام ]</h3>
+          <div><span>التخزين المؤقت</span><b id="status-cache-state">—</b></div>
+          <div><span>آخر خطأ</span><b id="status-last-error">—</b></div>
+        </section>
+        <button class="system-status-refresh" id="system-status-refresh" type="button">تحديث البيانات</button>
+        <p class="system-status-message" id="system-status-message"></p>
+      </div>
+    </div>
+  </dialog>
+
   {% if not result %}
   <dialog class="capture-help-modal" id="capture-help-modal" aria-labelledby="capture-help-title">
     <div class="modal-header">

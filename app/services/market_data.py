@@ -7,6 +7,7 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -39,6 +40,7 @@ DEFAULT_CACHE_TTLS: dict[str, int] = {
 
 CACHE_VERSION = 3
 _CACHE_LOCK = threading.Lock()
+_MUSCAT = ZoneInfo("Asia/Muscat")
 
 
 class MarketDataError(RuntimeError):
@@ -298,6 +300,13 @@ def _empty_cache(config: TwelveDataConfig) -> dict[str, Any]:
         "timezone": config.timezone_name,
         "saved_at": None,
         "frames": {},
+        "credits": {
+            "date": datetime.now(timezone.utc).date().isoformat(),
+            "daily_used": 0,
+            "minute_used": None,
+            "minute_left": None,
+            "last_request_at": None,
+        },
     }
 
 
@@ -332,6 +341,15 @@ def _load_cache(config: TwelveDataConfig) -> dict[str, Any]:
     ):
         _delete_cache_file(path)
         return _empty_cache(config)
+    credits = payload.setdefault("credits", {})
+    if not isinstance(credits, dict):
+        payload["credits"] = {}
+        credits = payload["credits"]
+    credits.setdefault("date", datetime.now(timezone.utc).date().isoformat())
+    credits.setdefault("daily_used", 0)
+    credits.setdefault("minute_used", None)
+    credits.setdefault("minute_left", None)
+    credits.setdefault("last_request_at", None)
     return payload
 
 
@@ -397,6 +415,16 @@ def fetch_market_data(
     with _CACHE_LOCK:
         cache = _load_cache(config)
         cached_frames = cache.setdefault("frames", {})
+        credit_state = cache.setdefault("credits", {})
+        current_credit_date = datetime.now(timezone.utc).date().isoformat()
+        if credit_state.get("date") != current_credit_date:
+            credit_state.update({
+                "date": current_credit_date,
+                "daily_used": 0,
+                "minute_used": None,
+                "minute_left": None,
+                "last_request_at": None,
+            })
         result_frames: dict[str, list[dict[str, Any]]] = {}
         cache_status: dict[str, dict[str, Any]] = {}
         warnings: list[str] = []
@@ -452,6 +480,10 @@ def fetch_market_data(
                     }
                     refreshed_any = True
                     last_credit_info = dict(client.last_credit_info)
+                    credit_state["daily_used"] = int(credit_state.get("daily_used") or 0) + 1
+                    credit_state["minute_used"] = last_credit_info.get("used")
+                    credit_state["minute_left"] = last_credit_info.get("left")
+                    credit_state["last_request_at"] = fetched_at
 
                 except MarketDataError as exc:
                     stale = _cached_candles(entry, count)
@@ -472,6 +504,7 @@ def fetch_market_data(
         if refreshed_any:
             cache["saved_at"] = _utc_now_iso()
             cache["frames"] = cached_frames
+            cache["credits"] = credit_state
             _write_cache_atomic(config.cache_path, cache)
 
         latest_times = [
@@ -492,8 +525,95 @@ def fetch_market_data(
                 "frames": cache_status,
             },
             "warnings": warnings,
-            "credit_info": last_credit_info,
+            "credit_info": {
+                "used": last_credit_info.get("used") or credit_state.get("minute_used"),
+                "left": last_credit_info.get("left") or credit_state.get("minute_left"),
+                "daily_used": int(credit_state.get("daily_used") or 0),
+                "daily_limit": int(os.getenv("TWELVE_DATA_DAILY_LIMIT", "800") or 800),
+                "last_request_at": credit_state.get("last_request_at"),
+            },
         }
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _frame_status(entry: Any, now_epoch: float) -> dict[str, Any]:
+    if not isinstance(entry, dict):
+        return {"status": "غير متوفر", "age_seconds": None}
+    fetched_epoch = entry.get("fetched_at_epoch")
+    try:
+        age = max(0, int(now_epoch - float(fetched_epoch)))
+    except (TypeError, ValueError):
+        age = None
+    expires_epoch = entry.get("expires_at_epoch")
+    try:
+        fresh = now_epoch < float(expires_epoch)
+    except (TypeError, ValueError):
+        fresh = False
+    return {
+        "status": "محدث" if fresh else "محفوظ مؤقتًا",
+        "age_seconds": age,
+        "fetched_at": entry.get("fetched_at"),
+    }
+
+def market_status_snapshot() -> dict[str, Any]:
+    """ملخص عربي مبسط للوحة الإدارة دون استهلاك اعتماد جديد."""
+    try:
+        config = TwelveDataConfig.from_env()
+    except MarketDataError:
+        return {
+            "status": "غير متصل",
+            "plan": "Basic",
+            "daily_limit": _safe_int(os.getenv("TWELVE_DATA_DAILY_LIMIT"), 800),
+            "daily_used": 0,
+            "daily_left": 0,
+            "minute_limit": _safe_int(os.getenv("TWELVE_DATA_MINUTE_LIMIT"), 8),
+            "minute_used": None,
+            "minute_left": None,
+            "full_refreshes_left": 0,
+            "last_request_at": None,
+            "frames": {},
+        }
+    with _CACHE_LOCK:
+        cache = _load_cache(config)
+    credits = cache.get("credits") if isinstance(cache.get("credits"), dict) else {}
+    daily_limit = max(1, _safe_int(os.getenv("TWELVE_DATA_DAILY_LIMIT"), 800))
+    minute_limit = max(1, _safe_int(os.getenv("TWELVE_DATA_MINUTE_LIMIT"), 8))
+    daily_used = max(0, _safe_int(credits.get("daily_used"), 0))
+    minute_used = credits.get("minute_used")
+    minute_left = credits.get("minute_left")
+    if minute_left is not None:
+        minute_left = max(0, _safe_int(minute_left, 0))
+    if minute_used is not None:
+        minute_used = max(0, _safe_int(minute_used, 0))
+    frames = cache.get("frames") if isinstance(cache.get("frames"), dict) else {}
+    now_epoch = time.time()
+    last_request = credits.get("last_request_at")
+    if isinstance(last_request, str):
+        try:
+            parsed = datetime.fromisoformat(last_request.replace("Z", "+00:00"))
+            last_request = parsed.astimezone(_MUSCAT).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
+    return {
+        "status": "متصل" if frames else "بانتظار أول تحديث",
+        "plan": os.getenv("TWELVE_DATA_PLAN", "Basic").strip() or "Basic",
+        "daily_limit": daily_limit,
+        "daily_used": daily_used,
+        "daily_left": max(0, daily_limit - daily_used),
+        "minute_limit": minute_limit,
+        "minute_used": minute_used,
+        "minute_left": minute_left,
+        "full_refreshes_left": max(0, (daily_limit - daily_used) // 4),
+        "last_request_at": last_request,
+        "frames": {name: _frame_status(frames.get(name), now_epoch) for name in ("M5", "M15", "H1", "H4")},
+        "cache_shared": True,
+    }
 
 
 def clear_market_data_cache() -> bool:

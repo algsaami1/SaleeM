@@ -1,8 +1,0 @@
-SaleeM v3.11.0 / SaleeM(26)
-Changes:
-- Watch mode: Entry only; no single Cancel card.
-- One normalized S1/S2/R1/R2 source for chart and explanation text.
-- Axis calibrated from all readable source-axis labels.
-- No vertical collision shifting; overlap is allowed.
-- S/R labels show exact two-decimal prices.
-Verification: 66 tests passed.
