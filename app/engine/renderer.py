@@ -2617,8 +2617,19 @@ def _draw_trade_risk_reward_zones(
     stop_y = _price_y(stop, price_min, price_max)
     target_y = _price_y(target, price_min, price_max)
 
-    profit_top, profit_bottom = sorted((entry_y, target_y))
-    loss_top, loss_bottom = sorted((entry_y, stop_y))
+    # Leave a visible neutral separator around Entry.  Entry is the boundary
+    # between reward and loss; it must never look embedded inside the red zone.
+    entry_gap = 7
+    if direction == "صاعد":
+        profit_top = min(target_y, entry_y)
+        profit_bottom = max(profit_top, entry_y - entry_gap)
+        loss_top = min(stop_y, entry_y + entry_gap)
+        loss_bottom = max(stop_y, entry_y + entry_gap)
+    else:
+        profit_top = min(entry_y + entry_gap, target_y)
+        profit_bottom = max(entry_y + entry_gap, target_y)
+        loss_top = min(stop_y, entry_y - entry_gap)
+        loss_bottom = max(stop_y, entry_y - entry_gap)
     # No border: transparent zones should explain risk/reward without adding
     # another competing frame over the chart.
     draw.rectangle((x1, profit_top, x2, profit_bottom), fill=(25, 211, 112, 46))

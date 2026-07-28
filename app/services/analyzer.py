@@ -56,7 +56,7 @@ def load_permanent_analysis_prompt() -> str:
     return PERMANENT_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
-CONFIRMED_PROBABILITY = 70
+CONFIRMED_PROBABILITY = 64
 CONDITIONAL_PROBABILITY = 55
 MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
@@ -84,114 +84,109 @@ def _nearest_level_price(levels: Any, current_price: float, *, side: str) -> flo
     return min(preferred) if preferred else min(values, key=lambda value: abs(value - current_price))
 
 
-def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
-    """Build a fresh neutral reading from the latest closed-candle evidence.
+def _nearest_real_level_price(levels: Any, current_price: float, *, side: str) -> float | None:
+    """Return the nearest non-projected level, with a safe fallback.
 
-    Unlike the old direction-only template, this sentence includes timeframe
-    agreement, recent M5 momentum, the deterministic pattern review and nearby
-    levels. It remains educational, contains no execution recommendation and is
-    capped at 220 characters.
+    The breakout sentence must point to a real market level whenever one is
+    available. Projected drawing-only levels are used only when the provider
+    did not return a historical support/resistance level at all.
     """
+    iterable = levels if isinstance(levels, list) else []
+    real_levels = [
+        item
+        for item in iterable
+        if isinstance(item, dict) and str(item.get("source") or "") != "projected"
+    ]
+    return _nearest_level_price(real_levels or levels, current_price, side=side)
+
+
+def _market_reason_factors(analysis: dict[str, Any]) -> list[str]:
+    """Build short evidence phrases without target prices."""
     direction = str(analysis.get("direction") or "غير واضح")
-    frames = analysis.get("frame_directions")
+    factors: list[str] = []
 
-    def frame_direction(name: str) -> str:
-        item = frames.get(name) if isinstance(frames, dict) else None
-        if isinstance(item, dict):
-            return str(item.get("direction") or "غير واضح")
-        return str(item or "غير واضح")
-
-    h4, h1, m15, m5 = [frame_direction(name) for name in ("H4", "H1", "M15", "M5")]
+    frames = analysis.get("frame_directions") if isinstance(analysis.get("frame_directions"), dict) else {}
+    m15_item = frames.get("M15") if isinstance(frames, dict) else None
+    m5_item = frames.get("M5") if isinstance(frames, dict) else None
+    m15 = str(m15_item.get("direction") or "غير واضح") if isinstance(m15_item, dict) else str(m15_item or "غير واضح")
+    m5 = str(m5_item.get("direction") or "غير واضح") if isinstance(m5_item, dict) else str(m5_item or "غير واضح")
     if m15 == m5 and m15 in {"صاعد", "هابط"}:
-        frame_text = f"M15 وM5 متفقان على اتجاه {m15}"
+        factors.append(f"توافق M15 وM5 على اتجاه {m15}")
     elif m15 in {"صاعد", "هابط"} and m5 in {"صاعد", "هابط"} and m15 != m5:
-        frame_text = "M15 وM5 متعارضان"
-    elif h4 == h1 and h4 in {"صاعد", "هابط"}:
-        frame_text = f"H4 وH1 {h4}ان مع تفعيل قصير غير مكتمل"
-    else:
-        frame_text = "الفريمات متداخلة بلا توافق كامل"
-
-    candles = analysis.get("candles") if isinstance(analysis.get("candles"), list) else []
-    momentum_text = "زخم M5 غير محسوم"
-    candle_text = ""
-    if len(candles) >= 5:
-        try:
-            atr = max(0.01, _atr(candles))
-            move = (float(candles[-1]["close"]) - float(candles[-5]["close"])) / atr
-            if move >= 0.65:
-                momentum_text = "زخم M5 صاعد"
-            elif move <= -0.65:
-                momentum_text = "زخم M5 هابط"
-            else:
-                momentum_text = "زخم M5 متوازن"
-            last = candles[-1]
-            body = abs(float(last["close"]) - float(last["open"]))
-            upper = max(0.0, float(last["high"]) - max(float(last["open"]), float(last["close"])))
-            lower = max(0.0, min(float(last["open"]), float(last["close"])) - float(last["low"]))
-            if upper > max(body * 1.4, atr * 0.18):
-                candle_text = "ورفض علوي ظاهر"
-            elif lower > max(body * 1.4, atr * 0.18):
-                candle_text = "ورفض سفلي ظاهر"
-        except (TypeError, ValueError, KeyError):
-            pass
-
-    current = float(_number(analysis.get("current_price")) or 0.0)
-    support = _nearest_level_price(analysis.get("support_levels"), current, side="support")
-    resistance = _nearest_level_price(analysis.get("resistance_levels"), current, side="resistance")
-    if support is not None and resistance is not None:
-        levels_text = f"الدعم {support:.2f} والمقاومة {resistance:.2f}"
-    elif support is not None:
-        levels_text = f"الدعم الأقرب {support:.2f}"
-    elif resistance is not None:
-        levels_text = f"المقاومة الأقرب {resistance:.2f}"
-    else:
-        levels_text = "المستويات القريبة لم تتأكد"
+        factors.append("تعارض M15 وM5")
 
     pattern = str(analysis.get("pattern_type") or "لا يوجد")
     pattern_confidence = int(analysis.get("pattern_confidence") or 0)
     if pattern != "لا يوجد" and pattern_confidence >= 60:
-        pattern_text = f"ورُصد {pattern} بثقة {pattern_confidence}٪"
-    else:
-        pattern_text = "ولا يوجد نموذج هندسي مكتمل"
+        factors.append(f"نموذج {pattern}")
 
-    direction_text = {
-        "صاعد": "البنية الحالية صاعدة",
-        "هابط": "البنية الحالية هابطة",
-        "عرضي": "البنية الحالية عرضية",
-        "غير واضح": "البنية الحالية غير محسومة",
-    }.get(direction, "البنية الحالية غير محسومة")
-    liquidity_text = {
-        "صاعد": "السيولة الأقرب فوق القمة الأخيرة",
-        "هابط": "السيولة الأقرب أسفل القاع الأخير",
-        "عرضي": "السيولة موزعة عند طرفي النطاق",
-        "غير واضح": "السيولة موزعة حول القمم والقيعان القريبة",
-    }.get(direction, "السيولة موزعة حول القمم والقيعان القريبة")
+    if direction == "صاعد":
+        factors.append("السيولة فوق القمة الأخيرة")
+    elif direction == "هابط":
+        factors.append("السيولة أسفل القاع الأخير")
+    else:
+        factors.append("السيولة موزعة عند طرفي النطاق")
+
     zones = detect_market_zone_presence(analysis)
     zone_names: list[str] = []
     if zones.get("order_block"):
-        zone_names.append("Order Block")
+        zone_names.append("منطقة أوامر (Order Block)")
     if zones.get("fvg"):
-        zone_names.append("FVG")
-    zones_text = f"ورُصد {' و'.join(zone_names)}" if zone_names else ""
+        zone_names.append("فجوة سعرية (FVG)")
+    if zone_names:
+        factors.append(" و".join(zone_names))
 
-    clauses = [
-        f"{direction_text}؛ {frame_text}",
-        f"{momentum_text} {candle_text}".strip(),
-        pattern_text,
-        f"{liquidity_text}؛ {levels_text}",
-        zones_text,
-    ]
-    comment = "، ".join(clause for clause in clauses if clause).replace("، ،", "،") + "."
-    if len(comment) <= 220:
-        return comment
+    # Keep the sentence compact and deterministic.
+    unique: list[str] = []
+    for factor in factors:
+        if factor not in unique:
+            unique.append(factor)
+    return unique[:4]
 
-    # Remove lower-priority clauses before truncating a numeric level.
-    for index in (2, 1):
-        reduced = [clause for pos, clause in enumerate(clauses) if pos != index]
-        candidate = "، ".join(clause for clause in reduced if clause) + "."
-        if len(candidate) <= 220:
-            return candidate
-    return comment[:217].rstrip(" ،.") + "..."
+
+def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
+    """Summarize why price is rising, falling or ranging.
+
+    Target prices are intentionally omitted here. The nearby breakout levels
+    are presented in a separate sentence so the explanation stays readable.
+    """
+    direction = str(analysis.get("direction") or "غير واضح")
+    prefix = {
+        "صاعد": "سبب الميل للصعود في البنية الحالية",
+        "هابط": "سبب الميل للهبوط في البنية الحالية",
+        "عرضي": "سبب تذبذب البنية الحالية",
+        "غير واضح": "سبب عدم وضوح البنية الحالية",
+    }.get(direction, "سبب عدم وضوح البنية الحالية")
+    factors = _market_reason_factors(analysis)
+    current = float(_number(analysis.get("current_price")) or 0.0)
+    support = _nearest_real_level_price(analysis.get("support_levels"), current, side="support")
+    resistance = _nearest_real_level_price(analysis.get("resistance_levels"), current, side="resistance")
+    levels = ""
+    if support is not None and resistance is not None:
+        levels = f"؛ الدعم {support:.2f} والمقاومة {resistance:.2f}"
+    elif support is not None:
+        levels = f"؛ الدعم {support:.2f}"
+    elif resistance is not None:
+        levels = f"؛ المقاومة {resistance:.2f}"
+    comment = f"{prefix}: " + "، ".join(factors) + levels + "."
+    return comment if len(comment) <= 210 else comment[:207].rstrip(" ،.") + "..."
+
+
+def _build_breakout_summary(analysis: dict[str, Any]) -> str:
+    """Return the decisive upper/lower M5 close levels without target prices."""
+    current = float(_number(analysis.get("current_price")) or 0.0)
+    support = _nearest_real_level_price(analysis.get("support_levels"), current, side="support")
+    resistance = _nearest_real_level_price(analysis.get("resistance_levels"), current, side="resistance")
+    if resistance is not None and support is not None:
+        return (
+            f"إغلاق M5 فوق {resistance:.2f} يفتح أهدافًا أعلى، "
+            f"وإغلاقه تحت {support:.2f} يفتح أهدافًا أسفل."
+        )
+    if resistance is not None:
+        return f"إغلاق M5 فوق {resistance:.2f} يفتح أهدافًا أعلى."
+    if support is not None:
+        return f"إغلاق M5 تحت {support:.2f} يفتح أهدافًا أسفل."
+    return "لا يوجد مستوى كسر مؤكد حاليًا؛ انتظر قمة أو قاعًا أوضح."
 
 
 def _confirmed_limit_candidates(
@@ -391,14 +386,23 @@ def _build_one_limit_plan(
 
     source_frame = str(level.get("timeframe") or "H1")
     pivot_label = "قاع" if side == "buy" else "قمة"
-    reason = (
-        f"مبنية على {pivot_label} مؤكد من {source_frame}"
-        + (
-            f" ومتوافق مع {', '.join(level.get('confirmation_frames') or [])}."
-            if level.get("confirmation_frames")
-            else "."
-        )
-    )
+    reason_parts = [f"{pivot_label} مؤكد من {source_frame}"]
+    if level.get("confirmation_frames"):
+        reason_parts.append(f"تأكيد من {', '.join(level.get('confirmation_frames') or [])}")
+
+    zones = detect_market_zone_presence(analysis)
+    if zones.get("order_block"):
+        reason_parts.append("منطقة أوامر قريبة")
+    if zones.get("fvg"):
+        reason_parts.append("فجوة سعرية داعمة")
+
+    pattern = str(analysis.get("pattern_type") or "لا يوجد")
+    pattern_confidence = int(analysis.get("pattern_confidence") or 0)
+    if pattern != "لا يوجد" and pattern_confidence >= 60:
+        reason_parts.append(f"نموذج {pattern}")
+
+    reason_parts.append("سيولة سفلية متوقعة" if side == "buy" else "سيولة علوية متوقعة")
+    reason = "السبب: " + "، ".join(reason_parts) + ". الأهداف موزعة على البنية المقابلة دون ضمان."
     pivot_time = str(level.get("time") or "unknown")
     plan_seed = f"{side}|{source_frame}|{pivot_time}|{pivot:.3f}"
     plan_id = hashlib.sha256(plan_seed.encode("utf-8")).hexdigest()[:12]
@@ -428,6 +432,7 @@ def _build_one_limit_plan(
         "reason": reason,
         "plan_id": plan_id,
         "locked": True,
+        "entry_outside_loss_zone": True,
         "confirmation_label": "مؤكدة الشروط" if confirmed_conditions else "المستوى مؤكد",
         "invalidation_condition": invalidation,
         "validity": "ثابتة حتى كسر القمة/القاع أو ظهور إلغاء بنيوي",
@@ -863,7 +868,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 5
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 6
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1675,25 +1680,47 @@ def _build_confirmed_limit_swings(frames: Any, current: float) -> dict[str, list
 
 
 def _closed_m5_confirmation(candles: list[dict[str, Any]], direction: str) -> bool:
-    """Require actual closed-M5 continuation/break evidence for confirmation."""
+    """Require actual closed-M5 continuation, sweep or rejection evidence."""
     if len(candles) < 4 or direction not in {"صاعد", "هابط"}:
         return False
     last = candles[-1]
     previous = candles[-2]
     before = candles[-3]
+    body = max(0.01, abs(float(last["close"]) - float(last["open"])))
+    upper_wick = max(0.0, float(last["high"]) - max(float(last["open"]), float(last["close"])))
+    lower_wick = max(0.0, min(float(last["open"]), float(last["close"])) - float(last["low"]))
+    previous_mid = (float(previous["high"]) + float(previous["low"])) / 2.0
     if direction == "صاعد":
         breakout = float(last["close"]) > float(previous["high"])
         continuation = (
             float(last["close"]) > float(last["open"])
             and float(last["close"]) > float(previous["close"]) > float(before["close"])
         )
-        return breakout or continuation
+        rejection = (
+            float(last["close"]) > float(last["open"])
+            and lower_wick >= body * 1.15
+            and float(last["close"]) >= previous_mid
+        )
+        liquidity_sweep = (
+            float(last["low"]) < min(float(previous["low"]), float(before["low"]))
+            and float(last["close"]) > float(previous["close"])
+        )
+        return breakout or continuation or rejection or liquidity_sweep
     breakdown = float(last["close"]) < float(previous["low"])
     continuation = (
         float(last["close"]) < float(last["open"])
         and float(last["close"]) < float(previous["close"]) < float(before["close"])
     )
-    return breakdown or continuation
+    rejection = (
+        float(last["close"]) < float(last["open"])
+        and upper_wick >= body * 1.15
+        and float(last["close"]) <= previous_mid
+    )
+    liquidity_sweep = (
+        float(last["high"]) > max(float(previous["high"]), float(before["high"]))
+        and float(last["close"]) < float(previous["close"])
+    )
+    return breakdown or continuation or rejection or liquidity_sweep
 
 
 def _cluster_levels(
@@ -2574,6 +2601,15 @@ def _validate_analysis(
     stop, stop_reason = _validated_stop(data, calculation_direction, entry, candles, supports, resistances)
     targets = _validated_targets(data, calculation_direction, entry, stop, supports, resistances)
 
+    # Pattern evidence is applied before selecting the final state so completed
+    # patterns can support a real confirmation instead of being display-only.
+    data = _apply_pattern_review(data)
+    pattern_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
+    if pattern_confidence < 60:
+        data["pattern_lines"] = []
+        data["pattern_path"] = []
+        data["pattern_type"] = "لا يوجد"
+
     frames = (market_summary or {}).get("frames") if isinstance(market_summary, dict) else {}
     h4_direction = str((frames.get("H4") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     h1_direction = str((frames.get("H1") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
@@ -2610,14 +2646,33 @@ def _validate_analysis(
     )
     price_action_confirmed = _closed_m5_confirmation(candles, direction)
     higher_supportive = higher_aligned or (direction in {"صاعد", "هابط"} and (h4_direction == direction or h1_direction == direction))
+    higher_both_opposed = (
+        direction in {"صاعد", "هابط"}
+        and h4_direction in {"صاعد", "هابط"}
+        and h1_direction in {"صاعد", "هابط"}
+        and h4_direction != direction
+        and h1_direction != direction
+    )
+    pattern_bias = str(data.get("pattern_bias") or "محايد")
+    aligned_pattern = (
+        pattern_confidence >= 60
+        and (
+            (direction == "صاعد" and pattern_bias in {"صاعد", "شراء"})
+            or (direction == "هابط" and pattern_bias in {"هابط", "بيع"})
+        )
+    )
+    zones = detect_market_zone_presence(data)
+    zone_confluence = bool(zones.get("order_block") or zones.get("fvg"))
+    pressure_limit = 13 if aligned_pattern or zone_confluence else 11
+    context_acceptable = not higher_both_opposed or probability >= 76 or aligned_pattern
     confirmation_complete = (
         probability >= CONFIRMED_PROBABILITY
         and lower_aligned
         and price_action_confirmed
-        and higher_supportive
+        and context_acceptable
         and geometry_valid
         and not warnings
-        and opposing_pressure < 8
+        and opposing_pressure <= pressure_limit
         and model_state != "غير صالح"
     )
 
@@ -2638,6 +2693,29 @@ def _validate_analysis(
     else:
         draw_mode = "watch"
 
+    missing_confirmation: list[str] = []
+    if not lower_aligned:
+        missing_confirmation.append("توافق M15 وM5")
+    if not price_action_confirmed:
+        missing_confirmation.append("شمعة M5 مؤكدة")
+    if probability < CONFIRMED_PROBABILITY:
+        missing_confirmation.append(f"قوة {CONFIRMED_PROBABILITY}٪ فأعلى")
+    if not context_acceptable:
+        missing_confirmation.append("عدم تعارض H4 وH1 مع الحركة")
+    if opposing_pressure > pressure_limit:
+        missing_confirmation.append("ابتعاد الضغط المعاكس")
+    if warnings:
+        missing_confirmation.append("بيانات سوق سليمة")
+    if not geometry_valid:
+        missing_confirmation.append("دخول ووقف وأهداف صحيحة")
+    confirmation_explanation = (
+        "اكتملت شروط التأكيد على الشموع المغلقة."
+        if confirmation_complete
+        else "ينقص التأكيد: " + "، ".join(missing_confirmation[:3]) + "."
+        if missing_confirmation
+        else "السيناريو غير واضح بما يكفي للتأكيد."
+    )
+
     if draw_mode == "watch":
         # المراقبة نقطة قرار محايدة: Entry يساوي السعر الحالي، ولا يوجد
         # Cancel أو Stop ظاهر. يبدأ السهمان من هذا السعر نفسه.
@@ -2648,13 +2726,6 @@ def _validate_analysis(
         entry = round(current, 2)
         entry_kind = "مراقبة"
         confirmation = market_activity["label"]
-
-    data = _apply_pattern_review(data)
-    pattern_confidence = max(0, min(100, int(data.get("pattern_confidence") or 0)))
-    if pattern_confidence < 60:
-        data["pattern_lines"] = []
-        data["pattern_path"] = []
-        data["pattern_type"] = "لا يوجد"
 
     scenario = " ".join(str(data.get("scenario") or "").split())[:92]
     bullish_scenario = " ".join(str(data.get("bullish_scenario") or "").split())[:150]
@@ -2731,13 +2802,17 @@ def _validate_analysis(
                 "higher_frame_supportive": bool(higher_supportive),
                 "geometry_valid": bool(geometry_valid),
                 "warnings_clear": not warnings,
+                "pattern_aligned": bool(aligned_pattern),
+                "zone_confluence": bool(zone_confluence),
             },
+            "confirmation_explanation": confirmation_explanation,
             "market_activity": market_activity,
             "market_status": market_activity["code"],
             "market_status_label": market_activity["label"],
             "support_levels": supports,
             "resistance_levels": resistances,
             "entry": entry,
+            "entry_outside_loss_zone": bool(geometry_valid),
             "entry_kind": entry_kind,
             "confirmation": confirmation,
             "stop_loss": stop,
@@ -2881,6 +2956,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         ) + "استخدم التطبيق نافذة موحدة للشارت ومحور الأسعار، وأزال شريط أمر التداول العلوي بالقص عند ظهوره قبل معايرة الأسعار."
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
+    analysis["breakout_summary"] = _build_breakout_summary(analysis)
     analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
 
     # The smart crop is used only to help read prices. The final image always uses
