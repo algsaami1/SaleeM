@@ -11,19 +11,15 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_processing_steps_have_the_approved_order():
     html = (ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
     steps = [
-        "جلب آخر تحديث لبيانات سوق الذهب",
-        "تحديد اتجاه الفريمات الأخرى",
-        "تحليل الهيكل السعري",
-        "تحديد مناطق المقاومة والدعم",
-        "مسح مناطق العرض والطلب",
-        "حساب مؤشرات الزخم",
-        "بناء أقرب سيناريو",
-        "إعادة رسم وتوليد الشارت النهائي",
+        "قراءة صورة الشارت",
+        "مزامنة بيانات السوق",
+        "تحديد الاتجاه والدخول",
+        "توليد النتيجة النهائية",
     ]
     positions = [html.index(step) for step in steps]
     assert positions == sorted(positions)
     assert "تمت المتابعة تلقائيًا" not in html
-    assert "اكتملت قراءة الصورة والتحليل" in html
+    assert "اكتملت قراءة الصورة" in html
     assert "result.market_reading_comment" in html
 
 
@@ -44,7 +40,7 @@ def test_market_reading_comment_is_neutral_complete_and_short(monkeypatch):
     )
 
     assert len(text) <= 220
-    for required in ("البنية", "السيولة", "الدعم", "المقاومة", "Order Block", "FVG"):
+    for required in ("القراءة", "السيولة", "الدعم", "المقاومة", "Order Block", "FVG"):
         assert required in text
     for banned in ("شراء", "بيع", "Entry", "Stop", "TP1", "TP2", "TP3"):
         assert banned not in text
@@ -61,6 +57,10 @@ def test_logic_words_are_arabic_red_spans_and_input_is_escaped():
 def test_pattern_card_never_returns_empty_or_dash_only():
     assert _header_pattern_lines("") == ["غير مكتمل"]
     assert _header_pattern_lines("لا يوجد") == ["غير مكتمل"]
+    assert _header_pattern_lines("-") == ["غير مكتمل"]
+    assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
+    assert len(_header_pattern_lines("نموذج طويل يحتاج إلى سطرين")) <= 2
+"]
     assert _header_pattern_lines("-") == ["غير مكتمل"]
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
     assert len(_header_pattern_lines("نموذج طويل يحتاج إلى سطرين")) <= 2

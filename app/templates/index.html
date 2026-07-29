@@ -65,14 +65,10 @@
       <div class="processing-copy">
         <h2>جاري التحليل...</h2>
         <div class="steps" id="processing-steps">
-          <span class="current">جلب آخر تحديث لبيانات سوق الذهب</span>
-          <span>تحديد اتجاه الفريمات الأخرى</span>
-          <span>تحليل الهيكل السعري</span>
-          <span>تحديد مناطق المقاومة والدعم</span>
-          <span>مسح مناطق العرض والطلب</span>
-          <span>حساب مؤشرات الزخم</span>
-          <span>بناء أقرب سيناريو</span>
-          <span>إعادة رسم وتوليد الشارت النهائي</span>
+          <span class="current">قراءة صورة الشارت</span>
+          <span>مزامنة بيانات السوق</span>
+          <span>تحديد الاتجاه والدخول</span>
+          <span>توليد النتيجة النهائية</span>
         </div>
       </div>
     </section>
@@ -145,14 +141,19 @@
       <p class="result-action-status" id="result-action-status" aria-live="polite"></p>
 
       <div class="result-status-strip">
-        <div><span>نوع الصفقة</span><b class="trade-type-pill {{ trade_type_class }}">{{ trade_type_label }}</b></div>
+        <div><span>النوع</span><b class="trade-type-pill {{ trade_type_class }}">{{ trade_type_label }}</b></div>
         <div><span>الحالة</span><b>{{ state_label }}</b></div>
-        <div><span>الاحتمال</span><b>{% if result.draw_mode == 'inactive' %}—{% else %}{{ result.trade_probability }}٪{% endif %}</b></div>
+        <div><span>القوة</span><b>{% if result.draw_mode == 'inactive' %}—{% else %}{{ result.trade_probability }}٪{% endif %}</b></div>
       </div>
     </section>
 
     <section class="card axis-soft-warning">
-      <strong>اكتملت قراءة الصورة والتحليل</strong>
+      <strong>اكتملت قراءة الصورة</strong>
+      <div class="reading-summary-grid">
+        <div class="reading-chip"><span>الاتجاه العام</span><b>{{ result.higher_timeframe_direction or result.direction }}</b></div>
+        <div class="reading-chip"><span>الحركة الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
+        <div class="reading-chip full"><span>شرط التفعيل</span><b>{{ result.entry_activation_reason or result.confirmation or 'بانتظار وضوح التفعيل' }}</b></div>
+      </div>
       <p>{{ result.market_reading_comment or 'تمت قراءة بنية السوق والسيولة وتحديد أقرب مستويات الدعم والمقاومة.' }}</p>
       <p class="analysis-breakout-line">{{ result.breakout_summary or 'لا يوجد مستوى كسر مؤكد حاليًا.' }}</p>
       {% if result.analysis_last_closed_m5_time %}<p class="analysis-refresh-time">آخر مراجعة: شمعة M5 المغلقة {{ result.analysis_last_closed_m5_time }}</p>{% endif %}
@@ -163,30 +164,24 @@
 
     <details class="card analysis-details" id="analysis-notes-card">
       <summary>
-        <span><b>لماذا ظهرت هذه النتيجة؟</b><small>الاتجاه والنمط والدخول والوقف والأهداف</small></span>
+        <span><b>ملخص النتيجة</b><small>أهم النقاط فقط</small></span>
         <span class="details-arrow" aria-hidden="true">⌄</span>
       </summary>
       <div class="analysis-notes-grid">
-        <div class="analysis-note-row"><span>الاتجاه</span><b>{{ result.direction }} — احتمال {{ result.trade_probability }}٪ — {{ state_label }}</b></div>
-        <div class="analysis-note-row"><span>النمط</span><b>{% if result.pattern_type and result.pattern_type != 'لا يوجد' %}{{ result.pattern_type }} — ثقة {{ result.pattern_confidence }}٪{% else %}لا يوجد نموذج مكتمل{% endif %}</b></div>
-        <div class="analysis-note-row"><span>مراجعة النماذج</span><b>{{ result.pattern_review_summary or 'لم تكتمل مراجعة النماذج.' }}</b></div>
-        <div class="analysis-note-row"><span>تنفيذ القواعد</span><b>{{ result.rules_audit_summary or 'تم تطبيق قواعد الفريمات والشموع المغلقة.' }}</b></div>
-        <div class="analysis-note-row"><span>حالة التأكيد</span><b>{{ result.confirmation_explanation or 'لم تكتمل شروط التأكيد بعد.' }}</b></div>
-        <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ (result.confirmation or 'انتظار تأكيد واضح')|logic_text }}</b></div>
+        <div class="analysis-note-row"><span>الاتجاه</span><b>{{ result.higher_timeframe_direction or result.direction }} — {{ state_label }}</b></div>
+        <div class="analysis-note-row"><span>الحركة الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
+        <div class="analysis-note-row"><span>النمط</span><b>{% if result.pattern_type and result.pattern_type != 'لا يوجد' %}{{ result.pattern_type }} — {{ result.pattern_confidence }}٪{% else %}لا يوجد نموذج واضح{% endif %}</b></div>
+        <div class="analysis-note-row"><span>شرط التفعيل</span><b>{{ (result.entry_activation_reason or result.confirmation or 'انتظار تأكيد واضح')|logic_text }}</b></div>
         <div class="analysis-note-row"><span>وقف الخسارة</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] and result.stop_loss is not none %}{{ '%.2f'|format(result.stop_loss) }}{% else %}—{% endif %}</b></div>
-        <div class="analysis-note-row"><span>مسار الأهداف</span><b>{% if result.draw_mode in ['conditional', 'confirmed'] and result.direction == 'صاعد' %}أهداف أعلى موزعة خلف المقاومات والسيولة العلوية{% elif result.draw_mode in ['conditional', 'confirmed'] and result.direction == 'هابط' %}أهداف أسفل موزعة خلف الدعوم والسيولة السفلية{% elif result.draw_mode == 'inactive' %}السوق مغلق/البيانات غير محدثة{% else %}لا تُعرض أرقام أهداف قبل وضوح السيناريو{% endif %}</b></div>
-        <div class="analysis-note-row"><span>السيناريو المختار</span><b>{{ (result.scenario or 'مراقبة حتى تتوافق الفريمات وتظهر شمعة تأكيد')|logic_text }}</b></div>
-        <div class="analysis-note-row scenario-up"><span>سيناريو الصعود</span><b>{{ (result.bullish_scenario or 'إذا ثبت السعر فوق المقاومة الأقرب فإن الحركة تتجه نحو الهدف الصاعد التالي')|logic_text }}</b></div>
-        <div class="analysis-note-row scenario-down"><span>سيناريو الهبوط</span><b>{{ (result.bearish_scenario or 'إذا أغلق السعر تحت الدعم الأقرب فإن الحركة تتجه نحو الهدف الهابط التالي')|logic_text }}</b></div>
-        <div class="analysis-note-row"><span>إلغاء السيناريو</span><b>{{ (result.invalidation_condition or 'عند كسر مستوى الإبطال المقابل')|logic_text }}</b></div>
-        <div class="analysis-note-row"><span>الأخبار والدولار</span><b>{{ result.macro_note or 'لا تتوفر بيانات أخبار أو DXY ضمن المدخلات الحالية' }}</b></div>
+        <div class="analysis-note-row"><span>السيناريو</span><b>{{ (result.scenario or 'انتظار حتى يتضح الاتجاه')|logic_text }}</b></div>
+        <div class="analysis-note-row"><span>إلغاء السيناريو</span><b>{{ (result.invalidation_condition or 'عند كسر مستوى الإبطال')|logic_text }}</b></div>
       </div>
-      <p class="analysis-notes-footnote">تحليل فني تعليمي منظم، وليس توصية استثمارية أو ضمانًا للربح.</p>
+      <p class="analysis-notes-footnote">للتعليم فقط وليست توصية استثمارية.</p>
     </details>
 
     <details class="card limit-recommendations" id="limit-recommendations-card">
       <summary>
-        <span><b>توصية الصفقة</b><small>Buy Limit من قاع مؤكد وSell Limit من قمة مؤكدة</small></span>
+        <span><b>توصية الصفقة</b><small>عرض مبسط لأقرب Buy Limit وSell Limit</small></span>
         <span class="details-arrow" aria-hidden="true">⌄</span>
       </summary>
       {% set recommendations = result.limit_recommendations %}
@@ -198,23 +193,35 @@
           {% if buy_plan %}
           <article class="limit-plan buy-limit{% if recommendations.stronger == 'buy_limit' %} strongest{% endif %}">
             <header class="limit-plan-header">
-              <div><span class="limit-order-dot"></span><div><small>أمر شراء معلّق من قاع</small><h3>Buy Limit</h3></div></div>
-              <div class="limit-rate"><strong>{{ buy_plan.estimated_success }}٪</strong><small>غير مضمونة</small></div>
+              <div><span class="limit-order-dot"></span><div><small>شراء من قاع مؤكد</small><h3>Buy Limit</h3></div></div>
+              <div class="limit-rate"><strong>{{ buy_plan.estimated_success }}٪</strong><small>تقريبي</small></div>
             </header>
-            {% if recommendations.stronger == 'buy_limit' %}<span class="stronger-badge">الأقوى بفارق واضح</span>{% endif %}
-            <span class="stronger-badge stable-badge">{{ buy_plan.confirmation_label }} — ثابتة حتى الإلغاء</span>
+            {% if recommendations.stronger == 'buy_limit' %}<span class="stronger-badge">الأقوى الآن</span>{% endif %}
+            {% if buy_plan.probability_scenarios %}
+            <div class="limit-probability-cases">
+              <div class="limit-probability-case">
+                <span>{{ buy_plan.probability_scenarios.current_label }}</span>
+                <b>{{ buy_plan.probability_scenarios.current_probability }}٪</b>
+              </div>
+              <div class="limit-probability-case alt">
+                <span>{{ buy_plan.probability_scenarios.change_label }}</span>
+                <b>{{ buy_plan.probability_scenarios.change_probability }}٪</b>
+              </div>
+            </div>
+            {% endif %}
             <div class="limit-levels">
               <div><span>القاع المعتمد</span><b>{{ '%.2f'|format(buy_plan.pivot_price) }} — {{ buy_plan.pivot_timeframe }}</b></div>
               <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(buy_plan.zone_low) }} – {{ '%.2f'|format(buy_plan.zone_high) }}</b></div>
-              <div class="primary-level"><span>الدخول المقترح</span><b>{{ '%.2f'|format(buy_plan.entry) }}</b></div>
+              <div class="primary-level"><span>الدخول</span><b>{{ '%.2f'|format(buy_plan.entry) }}</b></div>
               <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(buy_plan.stop_loss) }}</b></div>
               <div><span>TP1</span><b>{{ '%.2f'|format(buy_plan.target_1) }}</b></div>
               <div><span>TP2</span><b>{{ '%.2f'|format(buy_plan.target_2) }}</b></div>
               <div><span>TP3</span><b>{{ '%.2f'|format(buy_plan.target_3) }}</b></div>
-              <div><span>إلغاء التوصية</span><b>{{ buy_plan.invalidation_condition }}</b></div>
+              <div><span>الإلغاء</span><b>{{ buy_plan.invalidation_condition }}</b></div>
             </div>
-            <p class="limit-distance">يبعد الدخول {{ '%.2f'|format(buy_plan.distance_to_entry) }} دولار عن السعر الحالي.</p>
-            <p class="limit-reason">{{ buy_plan.reason }}</p>
+            <p class="limit-distance">يبعد {{ '%.2f'|format(buy_plan.distance_to_entry) }} عن السعر الحالي.</p>
+            <p class="limit-reason">{{ buy_plan.short_reason or buy_plan.reason }}</p>
+            {% if buy_plan.probability_scenarios %}<p class="limit-scenario-note">{{ buy_plan.probability_scenarios.note }}</p>{% endif %}
           </article>
           {% else %}
           <article class="limit-plan buy-limit unavailable-plan">
@@ -227,23 +234,35 @@
           {% if sell_plan %}
           <article class="limit-plan sell-limit{% if recommendations.stronger == 'sell_limit' %} strongest{% endif %}">
             <header class="limit-plan-header">
-              <div><span class="limit-order-dot"></span><div><small>أمر بيع معلّق من قمة</small><h3>Sell Limit</h3></div></div>
-              <div class="limit-rate"><strong>{{ sell_plan.estimated_success }}٪</strong><small>غير مضمونة</small></div>
+              <div><span class="limit-order-dot"></span><div><small>بيع من قمة مؤكدة</small><h3>Sell Limit</h3></div></div>
+              <div class="limit-rate"><strong>{{ sell_plan.estimated_success }}٪</strong><small>تقريبي</small></div>
             </header>
-            {% if recommendations.stronger == 'sell_limit' %}<span class="stronger-badge">الأقوى بفارق واضح</span>{% endif %}
-            <span class="stronger-badge stable-badge">{{ sell_plan.confirmation_label }} — ثابتة حتى الإلغاء</span>
+            {% if recommendations.stronger == 'sell_limit' %}<span class="stronger-badge">الأقوى الآن</span>{% endif %}
+            {% if sell_plan.probability_scenarios %}
+            <div class="limit-probability-cases">
+              <div class="limit-probability-case">
+                <span>{{ sell_plan.probability_scenarios.current_label }}</span>
+                <b>{{ sell_plan.probability_scenarios.current_probability }}٪</b>
+              </div>
+              <div class="limit-probability-case alt">
+                <span>{{ sell_plan.probability_scenarios.change_label }}</span>
+                <b>{{ sell_plan.probability_scenarios.change_probability }}٪</b>
+              </div>
+            </div>
+            {% endif %}
             <div class="limit-levels">
               <div><span>القمة المعتمدة</span><b>{{ '%.2f'|format(sell_plan.pivot_price) }} — {{ sell_plan.pivot_timeframe }}</b></div>
               <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(sell_plan.zone_low) }} – {{ '%.2f'|format(sell_plan.zone_high) }}</b></div>
-              <div class="primary-level"><span>الدخول المقترح</span><b>{{ '%.2f'|format(sell_plan.entry) }}</b></div>
+              <div class="primary-level"><span>الدخول</span><b>{{ '%.2f'|format(sell_plan.entry) }}</b></div>
               <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(sell_plan.stop_loss) }}</b></div>
               <div><span>TP1</span><b>{{ '%.2f'|format(sell_plan.target_1) }}</b></div>
               <div><span>TP2</span><b>{{ '%.2f'|format(sell_plan.target_2) }}</b></div>
               <div><span>TP3</span><b>{{ '%.2f'|format(sell_plan.target_3) }}</b></div>
-              <div><span>إلغاء التوصية</span><b>{{ sell_plan.invalidation_condition }}</b></div>
+              <div><span>الإلغاء</span><b>{{ sell_plan.invalidation_condition }}</b></div>
             </div>
-            <p class="limit-distance">يبعد الدخول {{ '%.2f'|format(sell_plan.distance_to_entry) }} دولار عن السعر الحالي.</p>
-            <p class="limit-reason">{{ sell_plan.reason }}</p>
+            <p class="limit-distance">يبعد {{ '%.2f'|format(sell_plan.distance_to_entry) }} عن السعر الحالي.</p>
+            <p class="limit-reason">{{ sell_plan.short_reason or sell_plan.reason }}</p>
+            {% if sell_plan.probability_scenarios %}<p class="limit-scenario-note">{{ sell_plan.probability_scenarios.note }}</p>{% endif %}
           </article>
           {% else %}
           <article class="limit-plan sell-limit unavailable-plan">
@@ -266,12 +285,12 @@
     <section class="card feedback-card" id="feedback-card" aria-labelledby="feedback-title">
       <div class="section-heading compact-heading">
         <span class="section-icon">★</span>
-        <div><small>بعد كل تحليل</small><h2 id="feedback-title">قيّم التحليل السابق</h2></div>
+        <div><small>بعد ظهور النتيجة</small><h2 id="feedback-title">نتيجة الصفقة السابقة</h2></div>
       </div>
 
       <form id="trade-feedback-form" class="trade-feedback-form">
         <fieldset class="trade-fieldset">
-          <legend>ما نتيجة الصفقة المرتبطة بالتحليل السابق؟</legend>
+          <legend>كيف انتهت الصفقة السابقة؟</legend>
           <div class="trade-result-grid" id="trade-result-grid">
             <button type="button" class="trade-result-option success" data-result="win"><span class="option-icon">✓</span><span>نجحت</span></button>
             <button type="button" class="trade-result-option danger" data-result="loss"><span class="option-icon">×</span><span>فشلت</span></button>
@@ -413,6 +432,17 @@
       <span><b>1</b> افتح XAUUSD على فريم M5.</span>
       <span><b>2</b> أظهر الشموع ومحور الأسعار اليميني كاملًا.</span>
       <span><b>3</b> أظهر خط السعر الحالي ولا تلصق صورة فوق الشارت.</span>
+      <span><b>4</b> استخدم Reset Vertical Scale عند ضغط الشموع.</span>
+    </div>
+    <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>
+    <button class="modal-primary" type="button" data-close-modal>فهمت</button>
+  </dialog>
+  {% endif %}
+
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
+</body>
+</html>
+ فوق الشارت.</span>
       <span><b>4</b> استخدم Reset Vertical Scale عند ضغط الشموع.</span>
     </div>
     <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>

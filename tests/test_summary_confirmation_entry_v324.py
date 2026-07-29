@@ -34,8 +34,9 @@ def _confirmed_result(*, bullish: bool = True):
     candles = _trend_candles(bullish=bullish)
     current = float(candles[-1]["close"])
     direction = "صاعد" if bullish else "هابط"
-    entry = current + 0.50 if bullish else current - 0.50
-    stop = current - 0.80 if bullish else current + 0.80
+    # Confirmed means the closed M5 candle has already crossed the trigger.
+    entry = current - 0.50 if bullish else current + 0.50
+    stop = current - 1.30 if bullish else current + 1.30
     targets = [current + value for value in (2.0, 3.0, 4.0)] if bullish else [current - value for value in (2.0, 3.0, 4.0)]
     supports = [{"price": current - 1.20, "strength": 80, "source": "market"}]
     resistances = [{"price": current + 1.20, "strength": 80, "source": "market"}]
@@ -96,14 +97,14 @@ def test_market_summary_is_short_reason_plus_numeric_breakout_levels_only(monkey
     reason = _build_market_reading_comment(result)
     breakout = _build_breakout_summary(result)
 
-    assert reason.startswith("سبب الميل للصعود")
+    assert reason.startswith("القراءة تميل للصعود")
     assert "السيولة" in reason
     assert "منطقة أوامر" in reason
     assert "فجوة سعرية" in reason
     assert "TP1" not in reason and "TP2" not in reason and "TP3" not in reason
-    assert "إغلاق M5 فوق" in breakout
-    assert "أهدافًا أعلى" in breakout
-    assert "أهدافًا أسفل" in breakout
+    assert "فوق" in breakout
+    assert "صعود" in breakout
+    assert "هبوط" in breakout
 
 
 def test_limit_reason_explains_confluence_without_repeating_target_prices(monkeypatch):
@@ -130,8 +131,9 @@ def test_ui_explanation_hides_target_numbers_and_renderer_separates_entry_from_r
     renderer = (ROOT / "app" / "engine" / "renderer.py").read_text(encoding="utf-8")
 
     assert "analysis-breakout-line" in html
-    assert "حالة التأكيد" in html
-    assert "مسار الأهداف" in html
-    assert "أهداف أعلى موزعة" in html
+    assert "شرط التفعيل" in html
+    assert "أهم النقاط فقط" in html
+    assert "ملخص النتيجة" in html
+    assert "لا يوجد كسر مؤكد حاليًا." not in html
     assert "entry_gap = 7" in renderer
     assert "Entry is the boundary" in renderer

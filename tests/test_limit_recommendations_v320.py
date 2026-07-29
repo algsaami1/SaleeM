@@ -99,6 +99,17 @@ def test_limit_recommendations_use_confirmed_trough_and_peak_only():
     assert 40 <= sell["estimated_success"] <= 88
     assert buy["guaranteed"] is False
     assert sell["guaranteed"] is False
+    buy_scenarios = buy["probability_scenarios"]
+    assert buy_scenarios["current_probability"] == buy["estimated_success"]
+    assert buy_scenarios["reference_peak"] == 4057.4
+    assert buy_scenarios["change_probability"] >= buy_scenarios["current_probability"]
+    assert "قمة أعلى" in buy_scenarios["change_label"]
+
+    sell_scenarios = sell["probability_scenarios"]
+    assert sell_scenarios["current_probability"] == sell["estimated_success"]
+    assert sell_scenarios["reference_trough"] == 4043.2
+    assert sell_scenarios["change_probability"] >= sell_scenarios["current_probability"]
+    assert "قاع أدنى" in sell_scenarios["change_label"]
 
 
 def test_no_confirmed_peak_or_trough_means_no_limit_recommendation():
@@ -116,9 +127,9 @@ def test_limit_recommendations_are_disabled_when_market_is_inactive():
 
 def test_limit_panel_is_below_why_result_and_contains_required_labels():
     html = (ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
-    why_position = html.index("لماذا ظهرت هذه النتيجة؟")
+    why_position = html.index("ملخص النتيجة")
     recommendation_position = html.index("توصية الصفقة")
-    feedback_position = html.index("قيّم التحليل السابق")
+    feedback_position = html.index("نتيجة الصفقة السابقة")
     assert why_position < recommendation_position < feedback_position
     for required in (
         "Buy Limit",
@@ -130,6 +141,8 @@ def test_limit_panel_is_below_why_result_and_contains_required_labels():
         "TP1",
         "TP2",
         "TP3",
-        "غير مضمونة",
+        "تقريبي",
+        "probability_scenarios.change_label",
+        "probability_scenarios.change_probability",
     ):
         assert required in html

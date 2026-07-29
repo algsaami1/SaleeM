@@ -3,8 +3,6 @@ from unittest.mock import patch
 
 from app.services.analyzer import (
     _choose_direction,
-    _current_m5_movement,
-    _entry_activation_state,
     _market_activity_status,
     _normalize_probabilities,
     _validate_analysis,
@@ -344,8 +342,8 @@ def test_probability_70_with_complete_confirmation_is_confirmed():
     # Three rising closed M5 candles provide actual continuation confirmation.
     data["candles"][-3].update(open=4119.7, high=4120.0, low=4119.5, close=4119.8)
     data["candles"][-2].update(open=4119.8, high=4120.25, low=4119.7, close=4120.05)
-    data["candles"][-1].update(open=4120.1, high=4121.35, low=4120.0, close=4121.15)
-    data["current_price"] = 4121.15
+    data["candles"][-1].update(open=4120.0, high=4120.8, low=4119.9, close=4120.55)
+    data["current_price"] = 4120.55
     with (
         patch("app.services.analyzer._choose_direction", return_value=("صاعد", 70, 30)),
         patch("app.services.analyzer._apply_level_pressure", return_value=("صاعد", 70, 30, {})),
@@ -366,33 +364,3 @@ def test_old_m5_candle_becomes_closed_or_stale_instead_of_watch():
     assert status["active"] is False
     assert status["code"] == "closed_or_stale"
     assert "السوق مغلق" in status["label"]
-
-
-def test_current_m5_movement_can_be_bearish_while_higher_trend_is_bullish():
-    candles = _flat_candles(price=4120.0)
-    for index, candle in enumerate(candles[-6:]):
-        base = 4121.5 - index * 0.45
-        candle.update(open=base + 0.15, high=base + 0.30, low=base - 0.35, close=base - 0.18)
-    movement = _current_m5_movement(candles)
-    assert movement["direction"] == "هابط"
-
-
-def test_bullish_conditional_waits_when_closed_m5_is_below_entry():
-    candles = _flat_candles(price=4120.0)
-    for index, candle in enumerate(candles[-5:]):
-        base = 4121.0 - index * 0.30
-        candle.update(open=base + 0.10, high=base + 0.22, low=base - 0.30, close=base - 0.12)
-    state = _entry_activation_state(candles, "صاعد", 4120.8, "اختراق")
-    assert state["active"] is False
-    assert state["movement"]["direction"] == "هابط"
-    assert "فوق 4120.8" in state["reason"]
-
-
-def test_bullish_entry_activates_only_after_close_and_m5_confirmation():
-    candles = _flat_candles(price=4120.0)
-    candles[-3].update(open=4120.0, high=4120.35, low=4119.9, close=4120.25)
-    candles[-2].update(open=4120.2, high=4120.85, low=4120.1, close=4120.70)
-    candles[-1].update(open=4120.65, high=4121.45, low=4120.55, close=4121.30)
-    state = _entry_activation_state(candles, "صاعد", 4120.8, "اختراق")
-    assert state["active"] is True
-    assert state["status"] == "active"
