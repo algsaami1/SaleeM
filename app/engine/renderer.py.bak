@@ -68,8 +68,6 @@ CANCEL_CARD = (205, 99, 19, 255)
 TP1_CARD = (37, 166, 106, 255)
 TP2_CARD = (20, 142, 84, 255)
 TP3_CARD = (8, 112, 64, 255)
-PEAK_CARD = (124, 58, 237, 255)
-TROUGH_CARD = (8, 145, 178, 255)
 
 # تخطيط مطابق لصورة الآيفون المرفوعة: نحافظ على مقاس الصورة الكاملة
 # 1320×2868، ونُظهر داخلها الجزء المحدد 1111×2243 بالبكسل نفسه.
@@ -1773,23 +1771,14 @@ def _draw_rtl_lines_centered(
 
 def _analysis_state(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
     state = str(analysis.get("draw_mode") or "watch")
-    direction = str(analysis.get("direction") or "غير واضح")
-    if state == "inactive":
-        return "السوق مغلق", GOLD
-    if state == "watch":
-        return "مراقبة", BLUE
-    if state == "conditional":
-        if direction == "صاعد":
-            return "شراء بشرط", ORANGE
-        if direction == "هابط":
-            return "بيع بشرط", ORANGE
-        return "بانتظار التفعيل", ORANGE
-    if state == "confirmed":
-        if direction == "صاعد":
-            return "شراء", GREEN
-        if direction == "هابط":
-            return "بيع", RED
-    return "مراقبة", BLUE
+    value = {
+        "confirmed": "مؤكد",
+        "conditional": "مشروط",
+        "watch": "مراقبة",
+        "inactive": "السوق مغلق",
+    }.get(state, "مراقبة")
+    color = GREEN if state == "confirmed" else (GOLD if state in {"conditional", "inactive"} else BLUE)
+    return value, color
 
 
 def _nearest_zone_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
@@ -1828,29 +1817,6 @@ def _behavior_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int,
         "مراقبة": ("تذبذب", BLUE),
     }
     return mapping.get(kind, ("مراقبة", BLUE))
-
-
-def _current_movement_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
-    """Show the latest M5 movement separately from the higher-timeframe trend."""
-    movement = str(analysis.get("current_movement") or "").strip()
-    if not movement:
-        frames = analysis.get("frame_directions")
-        if isinstance(frames, dict):
-            m5 = frames.get("M5")
-            if isinstance(m5, dict):
-                movement = str(m5.get("direction") or "").strip()
-    if movement == "صاعد":
-        return movement, GREEN
-    if movement == "هابط":
-        return movement, RED
-    if movement == "عرضي":
-        return movement, BLUE
-    candle_value, candle_color = _candle_shape_label(analysis)
-    if candle_value in {"صاعدة", "رفض صاعد"}:
-        return "صاعد", GREEN
-    if candle_value in {"هابطة", "رفض هابط"}:
-        return "هابط", RED
-    return "غير واضح", candle_color
 
 
 def _momentum_label(analysis: dict[str, Any]) -> tuple[str, tuple[int, int, int, int]]:
@@ -1987,12 +1953,12 @@ def _draw_summary_card(
     else:
         safe_values = [str(value).strip() for value in values if str(value).strip()]
         if not safe_values:
-            safe_values = ["غير مكتمل"] if label == "النمط" else ["—"]
+            safe_values = ["غير مكتمل"] if label == "النموذج" else ["—"]
         font = _summary_value_font(
             draw,
             safe_values,
             max(20, x2 - x1 - 22),
-            compact=label == "النمط",
+            compact=label == "النموذج",
         )
         font_size = int(getattr(font, "size", 18))
         spacing = max(22, min(29, font_size + 4))
@@ -2011,14 +1977,13 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
 
     state_value, state_color = _analysis_state(analysis)
     direction = str(analysis.get("direction") or "غير واضح")
-    general_direction = str(analysis.get("higher_timeframe_direction") or direction)
-    direction_color = GREEN if general_direction == "صاعد" else (RED if general_direction == "هابط" else BLUE)
+    direction_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else BLUE)
     probability = max(0, min(100, int(analysis.get("trade_probability") or 50)))
     probability_text = "—" if str(analysis.get("draw_mode") or "watch") == "inactive" else f"{probability}%"
     pattern_lines = _header_pattern_lines(str(analysis.get("pattern_type") or "لا يوجد"))
     close_value, close_color = _close_label(analysis)
     zone_value, zone_color = _nearest_zone_label(analysis)
-    movement_value, movement_color = _current_movement_label(analysis)
+    behavior_value, behavior_color = _behavior_label(analysis)
     momentum_value, momentum_color = _momentum_label(analysis)
     candle_value, candle_color = _candle_shape_label(analysis)
     alignment = _frame_match_count(analysis)
@@ -2026,22 +1991,24 @@ def _draw_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     # Lists are left-to-right on the canvas; RTL reading begins at the right.
     rows = [
         [
-            ("الاتجاه العام", [general_direction], direction_color, False),
-            ("الحركة الحالية", [movement_value], movement_color, False),
+            ("الاتجاه", [direction], direction_color, False),
             ("الحالة", [state_value], state_color, False),
-            ("المنطقة", [zone_value], zone_color, False),
+            ("الإغلاق", [close_value], close_color, False),
+            ("الاحتمال", [probability_text], GOLD, True),
+            ("النموذج", pattern_lines, CYAN, False),
         ],
         [
-            ("الإغلاق", [close_value], close_color, False),
+            ("المنطقة", [zone_value], zone_color, False),
+            ("السلوك", [behavior_value], behavior_color, False),
             ("الزخم", [momentum_value], momentum_color, False),
-            ("شكل الشمعة", [candle_value], candle_color, False),
-            ("النموذج", pattern_lines, CYAN, False),
+            ("التوافق", [f"{alignment}/4"], PURPLE, True),
+            ("شكل شمعة", [candle_value], candle_color, False),
         ],
     ]
 
     margin_x = TOP_SUMMARY_PANEL[0] + 13
     gap_x = 13
-    card_w = (TOP_SUMMARY_PANEL[2] - TOP_SUMMARY_PANEL[0] - 26 - gap_x * 3) // 4
+    card_w = (TOP_SUMMARY_PANEL[2] - TOP_SUMMARY_PANEL[0] - 26 - gap_x * 4) // 5
     row_gap = 12
     y_top = TOP_SUMMARY_PANEL[1] + 14
     card_h = (TOP_SUMMARY_PANEL[3] - TOP_SUMMARY_PANEL[1] - 28 - row_gap) // 2
@@ -2616,55 +2583,18 @@ def _draw_trade_risk_reward_zones(
     price_max: float,
     candle_right: int,
 ) -> None:
-    """Draw the simplified transparent zones requested by the user.
+    """Draw transparent target and stop areas for actionable scenarios.
 
-    - في الشراء/البيع المؤكدين أو المفعّلين: منطقة الدخول/الخسارة حمراء،
-      ومنطقة الأهداف خضراء.
-    - في المراقبة: تظهر منطقة حمراء صغيرة عند التفعيل، ومنطقتان خضراوان
-      نحو القمة والقاع المحتملين معًا لعرض الاحتمالين.
+    The zones are shown for conditional, confirmed-buy and confirmed-sell
+    results.  Watch mode remains visually neutral because it has two competing
+    paths and no committed risk/reward structure yet.
     """
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-
-    x1 = min(CHART[2] - 210, max(candle_right + 10, PROJECTION_X1 - 35))
-    x2 = CHART[2] - 8
-    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-
-    entry = _number(analysis.get("entry"))
-    current = _number(analysis.get("current_price"))
-    focus = entry if entry is not None else current
-    if focus is None or not _is_visible_price(focus, price_min, price_max):
-        return
-
-    focus_y = _price_y(focus, price_min, price_max)
-    # Entry is the boundary between the neutral center and the surrounding zones.
-    entry_gap = 7
-
-    if draw_mode == "watch":
-        peak = ((analysis.get("most_probable_peak") or {}).get("price"))
-        trough = ((analysis.get("most_probable_trough") or {}).get("price"))
-        peak = _number(peak)
-        trough = _number(trough)
-
-        zone_half = max(10, min(26, int((price_max - price_min) * 0.04)))
-        draw.rectangle((x1, focus_y - zone_half, x2, focus_y + zone_half), fill=(245, 63, 70, 44))
-
-        if peak is not None and peak > focus and _is_visible_price(peak, price_min, price_max):
-            peak_y = _price_y(peak, price_min, price_max)
-            draw.rectangle((x1, min(peak_y, focus_y - entry_gap), x2, max(peak_y, focus_y - entry_gap)), fill=(25, 211, 112, 44))
-        if trough is not None and trough < focus and _is_visible_price(trough, price_min, price_max):
-            trough_y = _price_y(trough, price_min, price_max)
-            draw.rectangle((x1, min(focus_y + entry_gap, trough_y), x2, max(focus_y + entry_gap, trough_y)), fill=(25, 211, 112, 44))
-
-        image.alpha_composite(layer)
-        return
-
     if draw_mode not in {"conditional", "confirmed"} or direction not in {"صاعد", "هابط"}:
         return
-    if draw_mode == "conditional" and not bool(analysis.get("show_targets_as_active")):
-        return
 
+    entry = _number(analysis.get("entry"))
     stop = _number(analysis.get("stop_loss"))
     targets = [_number(analysis.get(key)) for key in ("target_1", "target_2", "target_3")]
     targets = [value for value in targets if value is not None]
@@ -2679,12 +2609,31 @@ def _draw_trade_risk_reward_zones(
     if not valid:
         return
 
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    x1 = min(CHART[2] - 210, max(candle_right + 10, PROJECTION_X1 - 35))
+    x2 = CHART[2] - 8
     entry_y = _price_y(entry, price_min, price_max)
     stop_y = _price_y(stop, price_min, price_max)
     target_y = _price_y(target, price_min, price_max)
 
-    draw.rectangle((x1, min(stop_y, entry_y + entry_gap), x2, max(stop_y, entry_y + entry_gap)), fill=(245, 63, 70, 44))
-    draw.rectangle((x1, min(target_y, entry_y - entry_gap), x2, max(target_y, entry_y - entry_gap)), fill=(25, 211, 112, 48))
+    # Leave a visible neutral separator around Entry.  Entry is the boundary
+    # between reward and loss; it must never look embedded inside the red zone.
+    entry_gap = 7
+    if direction == "صاعد":
+        profit_top = min(target_y, entry_y)
+        profit_bottom = max(profit_top, entry_y - entry_gap)
+        loss_top = min(stop_y, entry_y + entry_gap)
+        loss_bottom = max(stop_y, entry_y + entry_gap)
+    else:
+        profit_top = min(entry_y + entry_gap, target_y)
+        profit_bottom = max(entry_y + entry_gap, target_y)
+        loss_top = min(stop_y, entry_y - entry_gap)
+        loss_bottom = max(stop_y, entry_y - entry_gap)
+    # No border: transparent zones should explain risk/reward without adding
+    # another competing frame over the chart.
+    draw.rectangle((x1, profit_top, x2, profit_bottom), fill=(25, 211, 112, 46))
+    draw.rectangle((x1, loss_top, x2, loss_bottom), fill=(245, 63, 70, 42))
     image.alpha_composite(layer)
 
 
@@ -2745,13 +2694,11 @@ def _draw_scenario_arrows(
     price_min: float,
     price_max: float,
 ) -> None:
-    """Draw the cleaner green/red arrows requested by the user."""
+    """Draw retest arrows for conditional and two alternatives for watch."""
     draw_mode = str(analysis.get("draw_mode") or "watch")
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     entry = _number(analysis.get("entry"))
-    if draw_mode not in {"watch", "conditional", "confirmed"} or entry is None:
-        return
-    if draw_mode == "conditional" and not bool(analysis.get("directional_path_enabled")):
+    if draw_mode not in {"watch", "conditional"} or entry is None:
         return
     if not _is_visible_price(entry, price_min, price_max):
         return
@@ -2766,25 +2713,40 @@ def _draw_scenario_arrows(
     move_px = max(74, min(190, abs(_price_y(entry + move, price_min, price_max) - entry_y)))
 
     def retest_path(sign: int, color: tuple[int, int, int, int]) -> None:
+        # sign=-1 means visually upward; sign=+1 means visually downward.
         first_end = (x0 + 74, entry_y + sign * move_px * 0.72)
-        first = _bezier_points((x0, entry_y), (x0 + 24, entry_y + sign * move_px * 0.15), (x0 + 45, entry_y + sign * move_px * 0.78), first_end, steps=20)
+        first = _bezier_points(
+            (x0, entry_y),
+            (x0 + 24, entry_y + sign * move_px * 0.15),
+            (x0 + 45, entry_y + sign * move_px * 0.78),
+            first_end,
+            steps=20,
+        )
         retest_end = (x0 + 132, entry_y + sign * move_px * 0.25)
-        second = _bezier_points(first_end, (x0 + 92, entry_y + sign * move_px * 0.78), (x0 + 108, entry_y + sign * move_px * 0.22), retest_end, steps=18)
+        second = _bezier_points(
+            first_end,
+            (x0 + 92, entry_y + sign * move_px * 0.78),
+            (x0 + 108, entry_y + sign * move_px * 0.22),
+            retest_end,
+            steps=18,
+        )
         final_end = (x3, entry_y + sign * move_px * 1.12)
-        third = _bezier_points(retest_end, (x0 + 154, entry_y + sign * move_px * 0.18), (x3 - 34, entry_y + sign * move_px * 1.00), final_end, steps=24)
+        third = _bezier_points(
+            retest_end,
+            (x0 + 154, entry_y + sign * move_px * 0.18),
+            (x3 - 34, entry_y + sign * move_px * 1.00),
+            final_end,
+            steps=24,
+        )
         path = first + second[1:] + third[1:]
         _draw_curved_arrow(draw, path, color, width=5)
 
-    green_arrow = (25, 211, 112, 225)
-    red_arrow = (245, 63, 70, 225)
-
-    if draw_mode == "watch":
-        retest_path(-1, green_arrow)
-        retest_path(1, red_arrow)
-    elif direction == "صاعد":
-        retest_path(-1, green_arrow)
-    elif direction == "هابط":
-        retest_path(1, red_arrow)
+    if draw_mode == "conditional" and direction in {"صاعد", "هابط"}:
+        retest_path(-1 if direction == "صاعد" else 1, (249, 115, 22, 225))
+    elif draw_mode == "watch":
+        # Two equal alternatives begin from the exact Entry level.
+        retest_path(-1, (38, 117, 247, 215))
+        retest_path(1, (249, 115, 22, 215))
 
     image.alpha_composite(layer)
 
@@ -2805,8 +2767,6 @@ def _draw_projection_candles(
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     entry = _number(analysis.get("entry"))
     if draw_mode not in {"conditional", "confirmed"} or direction not in {"صاعد", "هابط"} or entry is None:
-        return
-    if draw_mode == "conditional" and not bool(analysis.get("directional_path_enabled")):
         return
 
     targets: list[float] = []
@@ -3090,28 +3050,14 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
     return draw_mode, items
 
 
-def _extreme_display_items(analysis: dict[str, Any], price_min: float, price_max: float) -> list[tuple[str, float, int, tuple[int, int, int, int]]]:
-    """Return the most probable peak and trough as right-axis cards."""
-    items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
-    peak = analysis.get("most_probable_peak") or {}
-    trough = analysis.get("most_probable_trough") or {}
-    peak_price = _number(peak.get("price"))
-    trough_price = _number(trough.get("price"))
-
-    if peak_price is not None and _is_visible_price(peak_price, price_min, price_max):
-        items.append(("قمة", float(peak_price), _price_y(float(peak_price), price_min, price_max), PEAK_CARD))
-    if trough_price is not None and _is_visible_price(trough_price, price_min, price_max):
-        items.append(("قاع", float(trough_price), _price_y(float(trough_price), price_min, price_max), TROUGH_CARD))
-    return items
-
-
 def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float, candle_right: int) -> None:
     _left, _top, right, _bottom = CHART
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     draw_mode, trade_items = _trade_display_items(analysis, price_min, price_max)
     level_items = _level_display_items(analysis, price_min, price_max)
-    extreme_items = _extreme_display_items(analysis, price_min, price_max)
 
+    # Execution lines stay at their true prices.  Support/resistance true lines
+    # were already drawn by _draw_levels and are never displaced.
     if trade_items and direction in {"صاعد", "هابط"}:
         trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
         dashed = draw_mode in {"watch", "conditional"}
@@ -3121,16 +3067,32 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
             else:
                 draw.line((trade_line_left, exact_y, right, exact_y), fill=color, width=2)
 
+    # Left S/R cards and right execution cards use independent collision lanes.
+    # Their real chart lines never move; only the display card center changes.
     level_centers = _resolve_axis_card_centers(level_items)
     for index, (label, price, exact_y, color) in enumerate(level_items):
-        _draw_left_level_card(draw, label=label, price=price, exact_y=exact_y, card_y=level_centers.get(index, exact_y), color=color)
+        _draw_left_level_card(
+            draw,
+            label=label,
+            price=price,
+            exact_y=exact_y,
+            card_y=level_centers.get(index, exact_y),
+            color=color,
+        )
 
-    right_items = trade_items + extreme_items
-    right_centers = _resolve_axis_card_centers(right_items)
-    for index, (label, price, exact_y, color) in enumerate(right_items):
-        _draw_trade_axis_card(draw, label=label, price=price, exact_y=exact_y, card_y=right_centers.get(index, exact_y), color=color)
+    trade_centers = _resolve_axis_card_centers(trade_items)
+    for index, (label, price, exact_y, color) in enumerate(trade_items):
+        _draw_trade_axis_card(
+            draw,
+            label=label,
+            price=price,
+            exact_y=exact_y,
+            card_y=trade_centers.get(index, exact_y),
+            color=color,
+        )
 
-    if direction in {"صاعد", "هابط"} or draw_mode == "watch":
+    if trade_items and direction in {"صاعد", "هابط"}:
+        _draw_projection_candles(image, analysis, price_min, price_max)
         _draw_scenario_arrows(image, analysis, price_min, price_max)
 
 def _parse_session_range(name: str, default: str) -> tuple[int, int]:
@@ -3202,7 +3164,7 @@ def _draw_sessions(
 
 def _pattern_name(analysis: dict[str, Any]) -> str:
     name = str(analysis.get("pattern_type") or "لا يوجد")
-    return {"قمتان": "M", "قاعان": "W", "M": "M", "W": "W"}.get(name, name)
+    return {"قمتان": "نموذج M", "قاعان": "نموذج W"}.get(name, name)
 
 
 def _note_row(draw: ImageDraw.ImageDraw, y: int, label: str, value: str, dot_color, *, ltr_value: bool = False) -> None:
@@ -3237,28 +3199,28 @@ def _draw_bottom_summary(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) ->
         confirmation_value, confirmation_color = "بيانات قديمة", GOLD
         decision_value, decision_color = "انتظار السوق", GOLD
     else:
-        entry_value = "جاهز" if state == "confirmed" else ("بانتظار" if state == "conditional" else "مراقبة")
+        entry_value = "جاهز" if state == "confirmed" else ("مشروط" if state == "conditional" else "مراقبة")
         entry_color = GREEN if state == "confirmed" else (ORANGE if state == "conditional" else BLUE)
+        confirmation_value = "مكتمل" if state == "confirmed" else "بانتظار"
+        confirmation_color = GREEN if state == "confirmed" else ORANGE
     if state == "confirmed":
         decision_value = "شراء" if direction == "صاعد" else ("بيع" if direction == "هابط" else "انتظار")
         decision_color = GREEN if direction == "صاعد" else (RED if direction == "هابط" else ORANGE)
-    elif state == "conditional":
-        decision_value = "شراء بشرط" if direction == "صاعد" else ("بيع بشرط" if direction == "هابط" else "بانتظار")
-        decision_color = ORANGE
     elif state != "inactive":
         decision_value, decision_color = "انتظار", ORANGE
     breakout_value, breakout_color = _breakout_label(analysis)
     rebound_value, rebound_color = _rebound_label(analysis)
 
     cards = [
-        ("التفعيل", [entry_value], entry_color, False),
+        ("الدخول", [entry_value], entry_color, False),
+        ("التأكيد", [confirmation_value], confirmation_color, False),
         ("القرار", [decision_value], decision_color, False),
         ("الاختراق", [breakout_value], breakout_color, False),
         ("الارتداد", [rebound_value], rebound_color, False),
     ]
     margin_x = BOTTOM_SUMMARY_PANEL[0] + 13
     gap_x = 13
-    card_w = (BOTTOM_SUMMARY_PANEL[2] - BOTTOM_SUMMARY_PANEL[0] - 26 - gap_x * 3) // 4
+    card_w = (BOTTOM_SUMMARY_PANEL[2] - BOTTOM_SUMMARY_PANEL[0] - 26 - gap_x * 4) // 5
     for index, (label, values, color, latin_value) in enumerate(cards):
         x1 = margin_x + index * (card_w + gap_x)
         x2 = x1 + card_w

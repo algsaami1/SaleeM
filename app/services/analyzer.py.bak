@@ -63,9 +63,6 @@ MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
 MAX_STOP_DISTANCE = 4.0
 STOP_ATR_MULTIPLIER = 1.10
-DUAL_SCENARIO_CONFIRMED_PROBABILITY = 70
-DUAL_SCENARIO_CONDITIONAL_PROBABILITY = 55
-DEFAULT_SCALP_POINT_SIZE = 0.10
 
 
 def _nearest_level_price(levels: Any, current_price: float, *, side: str) -> float | None:
@@ -149,45 +146,48 @@ def _market_reason_factors(analysis: dict[str, Any]) -> list[str]:
 
 
 def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
-    """Short user-friendly explanation without crowding the UI."""
+    """Summarize why price is rising, falling or ranging.
+
+    Target prices are intentionally omitted here. The nearby breakout levels
+    are presented in a separate sentence so the explanation stays readable.
+    """
     direction = str(analysis.get("direction") or "غير واضح")
     prefix = {
-        "صاعد": "القراءة تميل للصعود",
-        "هابط": "القراءة تميل للهبوط",
-        "عرضي": "القراءة عرضية",
-        "غير واضح": "القراءة غير واضحة",
-    }.get(direction, "القراءة غير واضحة")
-    factors = _market_reason_factors(analysis)[:3]
+        "صاعد": "سبب الميل للصعود في البنية الحالية",
+        "هابط": "سبب الميل للهبوط في البنية الحالية",
+        "عرضي": "سبب تذبذب البنية الحالية",
+        "غير واضح": "سبب عدم وضوح البنية الحالية",
+    }.get(direction, "سبب عدم وضوح البنية الحالية")
+    factors = _market_reason_factors(analysis)
     current = float(_number(analysis.get("current_price")) or 0.0)
     support = _nearest_real_level_price(analysis.get("support_levels"), current, side="support")
     resistance = _nearest_real_level_price(analysis.get("resistance_levels"), current, side="resistance")
-    parts: list[str] = []
-    if factors:
-        parts.append("، ".join(factors))
+    levels = ""
     if support is not None and resistance is not None:
-        parts.append(f"الدعم {support:.2f} والمقاومة {resistance:.2f}")
+        levels = f"؛ الدعم {support:.2f} والمقاومة {resistance:.2f}"
     elif support is not None:
-        parts.append(f"الدعم {support:.2f}")
+        levels = f"؛ الدعم {support:.2f}"
     elif resistance is not None:
-        parts.append(f"المقاومة {resistance:.2f}")
-    if not parts:
-        return prefix + "."
-    comment = prefix + ": " + " — ".join(parts) + "."
-    return comment if len(comment) <= 150 else comment[:147].rstrip(" ،.-") + "..."
+        levels = f"؛ المقاومة {resistance:.2f}"
+    comment = f"{prefix}: " + "، ".join(factors) + levels + "."
+    return comment if len(comment) <= 210 else comment[:207].rstrip(" ،.") + "..."
 
 
 def _build_breakout_summary(analysis: dict[str, Any]) -> str:
-    """Short decisive levels in simple Arabic."""
+    """Return the decisive upper/lower M5 close levels without target prices."""
     current = float(_number(analysis.get("current_price")) or 0.0)
     support = _nearest_real_level_price(analysis.get("support_levels"), current, side="support")
     resistance = _nearest_real_level_price(analysis.get("resistance_levels"), current, side="resistance")
     if resistance is not None and support is not None:
-        return f"فوق {resistance:.2f} صعود، وتحت {support:.2f} هبوط."
+        return (
+            f"إغلاق M5 فوق {resistance:.2f} يفتح أهدافًا أعلى، "
+            f"وإغلاقه تحت {support:.2f} يفتح أهدافًا أسفل."
+        )
     if resistance is not None:
-        return f"فوق {resistance:.2f} ترجح الحركة للصعود."
+        return f"إغلاق M5 فوق {resistance:.2f} يفتح أهدافًا أعلى."
     if support is not None:
-        return f"تحت {support:.2f} ترجح الحركة للهبوط."
-    return "لا يوجد كسر واضح الآن."
+        return f"إغلاق M5 تحت {support:.2f} يفتح أهدافًا أسفل."
+    return "لا يوجد مستوى كسر مؤكد حاليًا؛ انتظر قمة أو قاعًا أوضح."
 
 
 def _confirmed_limit_candidates(
@@ -403,7 +403,6 @@ def _build_one_limit_plan(
         reason_parts.append(f"نموذج {pattern}")
 
     reason_parts.append("سيولة سفلية متوقعة" if side == "buy" else "سيولة علوية متوقعة")
-    short_reason = "، ".join(reason_parts[:4])
     reason = "السبب: " + "، ".join(reason_parts) + ". الأهداف موزعة على البنية المقابلة دون ضمان."
     pivot_time = str(level.get("time") or "unknown")
     plan_seed = f"{side}|{source_frame}|{pivot_time}|{pivot:.3f}"
@@ -432,7 +431,6 @@ def _build_one_limit_plan(
         "level_strength": int(level.get("strength") or 0),
         "source": "confirmed_swing",
         "reason": reason,
-        "short_reason": short_reason,
         "plan_id": plan_id,
         "locked": True,
         "entry_outside_loss_zone": True,
@@ -440,98 +438,6 @@ def _build_one_limit_plan(
         "invalidation_condition": invalidation,
         "validity": "ثابتة حتى كسر القمة/القاع أو ظهور إلغاء بنيوي",
         "guaranteed": False,
-    }
-
-
-
-
-
-
-def _buy_limit_peak_change_outlook(analysis: dict[str, Any], buy_plan: dict[str, Any]) -> dict[str, Any] | None:
-    """Return two Buy Limit probability cases.
-
-    Case 1 is the current probability. Case 2 improves if the market forms a
-    higher confirmed peak while the confirmed trough remains valid.
-    """
-    swings = analysis.get("confirmed_limit_swings")
-    if not isinstance(swings, dict):
-        return None
-
-    peaks: list[float] = []
-    for item in swings.get("peaks") or []:
-        if not isinstance(item, dict):
-            continue
-        price = _number(item.get("price"))
-        if price is not None:
-            peaks.append(float(price))
-    if not peaks:
-        return None
-
-    current_case = int(buy_plan.get("estimated_success") or 0)
-    highest_peak = max(peaks)
-    base_bonus = 6
-    if str(analysis.get("higher_timeframe_direction") or "") == "صاعد":
-        base_bonus += 3
-    if str(analysis.get("direction") or "") == "صاعد":
-        base_bonus += 2
-    if int(analysis.get("pattern_confidence") or 0) >= 60:
-        base_bonus += 1
-    improved = max(current_case + 4, min(92, current_case + base_bonus))
-
-    return {
-        "current_label": "الاحتمال الحالي",
-        "current_probability": current_case,
-        "change_label": f"إذا ظهرت قمة أعلى فوق {highest_peak:.2f}",
-        "change_probability": improved,
-        "reference_peak": round(highest_peak, 2),
-        "note": (
-            f"إذا تكوّنت قمة أعلى وثبت الإغلاق فوق {highest_peak:.2f} مع بقاء القاع المعتمد سليمًا، "
-            f"ترتفع قوة Buy Limit إلى {improved}٪ تقريبًا."
-        ),
-    }
-
-
-def _sell_limit_trough_change_outlook(analysis: dict[str, Any], sell_plan: dict[str, Any]) -> dict[str, Any] | None:
-    """Return two Sell Limit probability cases.
-
-    Case 1 is the current probability. Case 2 improves if the market forms a
-    lower confirmed trough while the confirmed peak remains valid.
-    """
-    swings = analysis.get("confirmed_limit_swings")
-    if not isinstance(swings, dict):
-        return None
-
-    troughs: list[float] = []
-    for item in swings.get("troughs") or []:
-        if not isinstance(item, dict):
-            continue
-        price = _number(item.get("price"))
-        if price is not None:
-            troughs.append(float(price))
-    if not troughs:
-        return None
-
-    current_case = int(sell_plan.get("estimated_success") or 0)
-    lowest_trough = min(troughs)
-    base_bonus = 6
-    if str(analysis.get("higher_timeframe_direction") or "") == "هابط":
-        base_bonus += 3
-    if str(analysis.get("direction") or "") == "هابط":
-        base_bonus += 2
-    if int(analysis.get("pattern_confidence") or 0) >= 60:
-        base_bonus += 1
-    improved = max(current_case + 4, min(92, current_case + base_bonus))
-
-    return {
-        "current_label": "الاحتمال الحالي",
-        "current_probability": current_case,
-        "change_label": f"إذا ظهر قاع أدنى تحت {lowest_trough:.2f}",
-        "change_probability": improved,
-        "reference_trough": round(lowest_trough, 2),
-        "note": (
-            f"إذا تكوّن قاع أدنى وثبت الإغلاق تحت {lowest_trough:.2f} مع بقاء القمة المعتمدة سليمًا، "
-            f"ترتفع قوة Sell Limit إلى {improved}٪ تقريبًا."
-        ),
     }
 
 
@@ -558,15 +464,6 @@ def _build_limit_recommendations(analysis: dict[str, Any]) -> dict[str, Any]:
             "reason": "لا توجد قمة أو قاع صالح للتوصية حاليًا.",
             "disclaimer": "النسب تقديرية وغير مضمونة، ولا تنفذ أي صفقة تلقائيًا.",
         }
-
-    if buy_plan is not None:
-        outlook = _buy_limit_peak_change_outlook(analysis, buy_plan)
-        if outlook is not None:
-            buy_plan["probability_scenarios"] = outlook
-    if sell_plan is not None:
-        outlook = _sell_limit_trough_change_outlook(analysis, sell_plan)
-        if outlook is not None:
-            sell_plan["probability_scenarios"] = outlook
 
     result: dict[str, Any] = {
         "available": True,
@@ -880,7 +777,7 @@ ANALYSIS_SCHEMA = {
             "type": "string",
             "enum": [
                 "مثلث متماثل", "مثلث هابط", "مثلث صاعد", "وتد هابط", "وتد صاعد",
-                "قناة هابطة", "قناة صاعدة", "M", "W", "كسر وإعادة اختبار", "لا يوجد",
+                "قناة هابطة", "قناة صاعدة", "قمتان", "قاعان", "كسر وإعادة اختبار", "لا يوجد",
             ],
         },
         "pattern_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
@@ -948,7 +845,7 @@ MARKET_DECISION_SCHEMA = {
             "type": "string",
             "enum": [
                 "مثلث متماثل", "مثلث هابط", "مثلث صاعد", "وتد هابط", "وتد صاعد",
-                "قناة هابطة", "قناة صاعدة", "M", "W", "كسر وإعادة اختبار", "لا يوجد",
+                "قناة هابطة", "قناة صاعدة", "قمتان", "قاعان", "كسر وإعادة اختبار", "لا يوجد",
             ],
         },
         "pattern_confidence": {"type": "integer", "minimum": 0, "maximum": 100},
@@ -972,7 +869,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 7
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 6
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1386,9 +1283,8 @@ def _market_decision_prompt(
 9) اختر أقرب دعمين وأقرب مقاومتين حقيقيين من بيانات السوق، واجمع المستويات المتقاربة.
 10) اجعل النصوص الشرطية بلا أسعار رقمية داخل الجمل؛ الأسعار موجودة في الحقول الرقمية المنفصلة.
 11) entry قريب وواقعي، والوقف خلف أقرب إبطال محلي، وثلاثة أهداف مرتبة في جهة الصفقة.
-12) راجع صراحةً نموذج M ونموذج W والمثلثات والأوتاد والقنوات والكسر وإعادة الاختبار. أعد اسم النموذج بالحرف M أو W بدل قمتان أو قاعان، ولا تُرجع نموذجًا إلا إذا اكتملت بنيته على الشموع المغلقة، واكتب في memory_matches القواعد أو النماذج التي طابقتها فعلًا.
-13) أنشئ في النص الداخلي احتمال شراء واحتمال بيع مستقلين ولا تمنع أحدهما بسبب اتجاه الفريمات العليا؛ الاتجاه المخالف يخفض القوة فقط. واجهة الرسم الحالية قد تعرض القرار الأساسي وحده، بينما يبني الكود لاحقًا السيناريوهين رقميًا بصورة حتمية.
-14) pattern_lines وpattern_path نسبية لنافذة M5 المرفقة، ولا ترسم نموذجًا غير واضح.
+12) راجع صراحةً نماذج القمتين والقاعين والمثلثات والأوتاد والقنوات والكسر وإعادة الاختبار. لا تُرجع نموذجًا إلا إذا اكتملت بنيته على الشموع المغلقة، واكتب في memory_matches القواعد أو النماذج التي طابقتها فعلًا.
+13) pattern_lines وpattern_path نسبية لنافذة M5 المرفقة، ولا ترسم نموذجًا غير واضح.
 
 ملخص الفريمات الحسابي:
 {json.dumps(market_summary, ensure_ascii=False)}
@@ -1525,22 +1421,6 @@ def _bind_market_analysis_to_image(
             "price_projection_mode": "closed_m5_decision_projected_once_to_broker_axis",
         }
     )
-
-    if (
-        result.get("draw_mode") == "conditional"
-        and result.get("entry_activation_status") != "active"
-        and result.get("entry") is not None
-        and result.get("direction") in {"صاعد", "هابط"}
-    ):
-        side = "فوق" if result.get("direction") == "صاعد" else "تحت"
-        activation_reason = f"بانتظار إغلاق وثبات {side} {float(result['entry']):.1f}"
-        result["entry_activation_reason"] = activation_reason
-        result["confirmation"] = activation_reason
-        result["scenario"] = (
-            f"الاتجاه العام {result.get('higher_timeframe_direction') or 'غير واضح'} "
-            f"والحركة الحالية {result.get('current_movement') or 'غير واضح'}؛ "
-            f"{activation_reason}"
-        )[:92]
 
     if result.get("draw_mode") in {"conditional", "confirmed"} and result.get("stop_loss") is not None:
         result["invalidation_condition"] = (
@@ -1805,585 +1685,6 @@ def _build_confirmed_limit_swings(frames: Any, current: float) -> dict[str, list
         result[key] = deduped[:8]
     return result
 
-
-
-def _scalp_point_size() -> float:
-    """Return the broker-point size used for the educational +5/+10 targets.
-
-    Gold brokers do not all name a "point" the same way. SaleeM therefore
-    keeps the conversion configurable and always returns the final price too.
-    The default is 0.10 USD per point: five points = 0.50 USD and ten = 1.00.
-    """
-    try:
-        value = float(os.getenv("SALEEM_SCALP_POINT_SIZE", str(DEFAULT_SCALP_POINT_SIZE)))
-    except (TypeError, ValueError):
-        value = DEFAULT_SCALP_POINT_SIZE
-    return max(0.01, min(5.0, value))
-
-
-def _analysis_frame_direction(analysis: dict[str, Any], timeframe: str) -> str:
-    frames = analysis.get("frame_directions")
-    item = frames.get(timeframe) if isinstance(frames, dict) else None
-    if isinstance(item, dict):
-        return str(item.get("direction") or "غير واضح")
-    return str(item or "غير واضح")
-
-
-def _pattern_short_name(value: Any) -> str:
-    name = str(value or "لا يوجد")
-    return {"قمتان": "M", "قاعان": "W"}.get(name, name)
-
-
-def _structural_candidates(
-    analysis: dict[str, Any],
-    *,
-    kind: str,
-    reference_price: float,
-) -> list[dict[str, Any]]:
-    """Collect real support/resistance and confirmed swings for one side."""
-    candidates: list[dict[str, Any]] = []
-    if kind == "peak":
-        level_key, swing_key = "resistance_levels", "peaks"
-        valid = lambda price: price > reference_price
-        default_source = "مقاومة"
-    else:
-        level_key, swing_key = "support_levels", "troughs"
-        valid = lambda price: price < reference_price
-        default_source = "دعم"
-
-    for item in analysis.get(level_key) or []:
-        if not isinstance(item, dict):
-            continue
-        price = _number(item.get("price"))
-        if price is None or not valid(float(price)):
-            continue
-        candidates.append(
-            {
-                "price": round(float(price), 2),
-                "strength": max(0, min(100, int(item.get("strength") or 50))),
-                "touches": max(1, int(item.get("touches") or 1)),
-                "timeframe": "",
-                "source": default_source,
-            }
-        )
-
-    swings = analysis.get("confirmed_limit_swings")
-    if isinstance(swings, dict):
-        for item in swings.get(swing_key) or []:
-            if not isinstance(item, dict):
-                continue
-            price = _number(item.get("price"))
-            if price is None or not valid(float(price)):
-                continue
-            timeframe = str(item.get("timeframe") or "")
-            candidates.append(
-                {
-                    "price": round(float(price), 2),
-                    "strength": max(0, min(100, int(item.get("strength") or 55))),
-                    "touches": max(1, int(item.get("touches") or 1)),
-                    "timeframe": timeframe,
-                    "source": f"{'قمة' if kind == 'peak' else 'قاع'} مؤكد{(' ' + timeframe) if timeframe else ''}",
-                }
-            )
-
-    # Merge near-identical levels while preserving the strongest evidence.
-    point_size = _scalp_point_size()
-    tolerance = max(0.05, point_size * 0.75)
-    ordered = sorted(candidates, key=lambda item: abs(float(item["price"]) - reference_price))
-    merged: list[dict[str, Any]] = []
-    for item in ordered:
-        duplicate = next(
-            (existing for existing in merged if abs(float(existing["price"]) - float(item["price"])) <= tolerance),
-            None,
-        )
-        if duplicate is None:
-            merged.append(item)
-        elif int(item.get("strength") or 0) > int(duplicate.get("strength") or 0):
-            duplicate.update(item)
-    return merged
-
-
-def _most_probable_extreme(
-    analysis: dict[str, Any],
-    *,
-    kind: str,
-) -> dict[str, Any] | None:
-    """Choose the most plausible next peak/trough, balancing strength and distance."""
-    current = float(analysis.get("current_price") or analysis.get("market_last_close") or 0.0)
-    candles = _normalize_candles(analysis.get("candles"))
-    atr = max(0.05, _atr(candles)) if candles else 1.0
-    candidates = _structural_candidates(analysis, kind=kind, reference_price=current)
-    if not candidates:
-        return None
-
-    timeframe_bonus = {"H4": 10, "H1": 8, "M15": 5, "M5": 2, "": 0}
-    for item in candidates:
-        distance = abs(float(item["price"]) - current)
-        strength = int(item.get("strength") or 50)
-        touches = min(5, int(item.get("touches") or 1))
-        proximity_penalty = min(32.0, (distance / atr) * 5.5)
-        item["selection_score"] = round(
-            strength
-            + timeframe_bonus.get(str(item.get("timeframe") or ""), 0)
-            + touches * 1.2
-            - proximity_penalty,
-            2,
-        )
-        item["distance"] = round(distance, 2)
-    best = max(
-        candidates,
-        key=lambda item: (
-            float(item.get("selection_score") or 0.0),
-            -float(item.get("distance") or 0.0),
-        ),
-    )
-    return {
-        "price": round(float(best["price"]), 2),
-        "strength": int(best.get("strength") or 0),
-        "source": str(best.get("source") or ("قمة" if kind == "peak" else "قاع")),
-        "timeframe": str(best.get("timeframe") or ""),
-        "distance": round(float(best.get("distance") or 0.0), 2),
-    }
-
-
-def _scalp_targets(
-    analysis: dict[str, Any],
-    *,
-    direction: str,
-    entry: float,
-) -> dict[str, Any]:
-    """Build +5/+10 point targets and stop them at nearer real barriers."""
-    point_size = _scalp_point_size()
-    sign = 1.0 if direction == "صاعد" else -1.0
-    raw_quick = round(entry + sign * 5 * point_size, 2)
-    raw_extended = round(entry + sign * 10 * point_size, 2)
-    kind = "peak" if direction == "صاعد" else "trough"
-    candidates = _structural_candidates(analysis, kind=kind, reference_price=entry)
-    prices = sorted(
-        {round(float(item["price"]), 2) for item in candidates},
-        reverse=direction == "هابط",
-    )
-
-    def before_or_at(value: float, limit: float) -> bool:
-        return value <= limit if direction == "صاعد" else value >= limit
-
-    within_ten = [price for price in prices if before_or_at(price, raw_extended)]
-    quick = within_ten[0] if within_ten else raw_quick
-    quick_basis = "مستوى سوق قبل الهدف" if within_ten else "5 نقاط"
-
-    later_levels = [
-        price for price in within_ten
-        if (price > quick if direction == "صاعد" else price < quick)
-    ]
-    extended = later_levels[0] if later_levels else raw_extended
-    extended_basis = "المستوى التالي قبل 10 نقاط" if later_levels else "10 نقاط"
-
-    # Keep the extended target beyond the quick target after rounding.
-    minimum_step = max(0.01, point_size)
-    if direction == "صاعد" and extended <= quick:
-        extended = round(max(raw_extended, quick + minimum_step), 2)
-        extended_basis = "10 نقاط"
-    elif direction == "هابط" and extended >= quick:
-        extended = round(min(raw_extended, quick - minimum_step), 2)
-        extended_basis = "10 نقاط"
-
-    return {
-        "point_size": round(point_size, 3),
-        "quick_points": round(abs(quick - entry) / point_size, 1),
-        "extended_points": round(abs(extended - entry) / point_size, 1),
-        "quick_target": round(quick, 2),
-        "extended_target": round(extended, 2),
-        "quick_target_basis": quick_basis,
-        "extended_target_basis": extended_basis,
-        "raw_5_point_target": raw_quick,
-        "raw_10_point_target": raw_extended,
-    }
-
-
-def _dual_scenario_reasons(
-    analysis: dict[str, Any],
-    *,
-    direction: str,
-    entry: float,
-    entry_active: bool,
-    closed_confirmed: bool,
-) -> tuple[list[str], list[str]]:
-    side_label = "الشراء" if direction == "صاعد" else "البيع"
-    supporting: list[str] = []
-    blocking: list[str] = []
-    h4 = _analysis_frame_direction(analysis, "H4")
-    h1 = _analysis_frame_direction(analysis, "H1")
-    m15 = _analysis_frame_direction(analysis, "M15")
-    m5 = _analysis_frame_direction(analysis, "M5")
-    current_movement = str(analysis.get("current_movement") or "غير واضح")
-    desired = direction
-    opposite = "هابط" if desired == "صاعد" else "صاعد"
-
-    higher_support = sum(frame == desired for frame in (h4, h1))
-    higher_opposition = sum(frame == opposite for frame in (h4, h1))
-    lower_support = sum(frame == desired for frame in (m15, m5))
-
-    if higher_support == 2:
-        supporting.append(f"H4 وH1 يدعمان {side_label}")
-    elif higher_support == 1:
-        supporting.append(f"أحد الفريمين الكبيرين يدعم {side_label}")
-    if higher_opposition == 2:
-        blocking.append(f"{side_label} عكس اتجاه H4 وH1")
-    elif higher_opposition == 1:
-        blocking.append("يوجد تعارض مع أحد الفريمات الكبيرة")
-
-    if lower_support == 2:
-        supporting.append(f"M15 وM5 متوافقان على اتجاه {desired}")
-    elif lower_support == 1:
-        supporting.append(f"أحد فريمي التفعيل يدعم {side_label}")
-    else:
-        blocking.append("M15 وM5 لا يؤكدان السيناريو معًا")
-
-    if current_movement == desired:
-        supporting.append(f"الحركة الحالية {desired}")
-    elif current_movement == opposite:
-        blocking.append(f"الحركة الحالية {opposite} وتعاكس السيناريو")
-
-    pattern = _pattern_short_name(analysis.get("pattern_type"))
-    confidence = int(analysis.get("pattern_confidence") or 0)
-    pattern_bias = str(analysis.get("pattern_bias") or "محايد")
-    if confidence >= 60 and (
-        (direction == "صاعد" and pattern_bias in {"صاعد", "شراء"})
-        or (direction == "هابط" and pattern_bias in {"هابط", "بيع"})
-    ):
-        supporting.append(f"نموذج {pattern} يدعم السيناريو")
-    elif confidence >= 60 and pattern_bias not in {"محايد", "غير واضح"}:
-        blocking.append(f"نموذج {pattern} يميل للجهة المقابلة")
-
-    current = float(analysis.get("current_price") or 0.0)
-    candles = _normalize_candles(analysis.get("candles"))
-    atr = max(0.05, _atr(candles)) if candles else 1.0
-    if direction == "صاعد":
-        support = _nearest_level_price(analysis.get("support_levels"), current, side="support")
-        resistance = _nearest_level_price(analysis.get("resistance_levels"), current, side="resistance")
-        if support is not None and 0 <= current - support <= atr * 0.9:
-            supporting.append("السعر قريب من دعم صالح للارتداد")
-        if resistance is not None and 0 <= resistance - current <= atr * 0.65:
-            blocking.append("توجد مقاومة قريبة أمام الشراء")
-    else:
-        resistance = _nearest_level_price(analysis.get("resistance_levels"), current, side="resistance")
-        support = _nearest_level_price(analysis.get("support_levels"), current, side="support")
-        if resistance is not None and 0 <= resistance - current <= atr * 0.9:
-            supporting.append("السعر قريب من مقاومة صالحة للرفض")
-        if support is not None and 0 <= current - support <= atr * 0.65:
-            blocking.append("يوجد دعم قريب أمام البيع")
-
-    if not closed_confirmed:
-        blocking.append("لا توجد شمعة M5 مغلقة تؤكد الجهة بعد")
-    if not entry_active:
-        blocking.append("شرط التفعيل لم يكتمل بعد")
-
-    # Preserve order and keep the API concise.
-    supporting = list(dict.fromkeys(supporting))[:4]
-    blocking = list(dict.fromkeys(blocking))[:4]
-    if not supporting:
-        supporting = ["السيناريو قائم للمراقبة لكنه يحتاج دليلًا إضافيًا"]
-    return supporting, blocking
-
-
-def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, Any]:
-    direction = "صاعد" if side == "buy" else "هابط"
-    side_ar = "شراء" if side == "buy" else "بيع"
-    current = float(analysis.get("current_price") or analysis.get("market_last_close") or 0.0)
-    candles = _normalize_candles(analysis.get("candles"))
-    supports = [item for item in analysis.get("support_levels") or [] if isinstance(item, dict)]
-    resistances = [item for item in analysis.get("resistance_levels") or [] if isinstance(item, dict)]
-
-    # Build each side independently; never reuse the primary scenario's entry.
-    entry, entry_kind, confirmation = _nearest_entry({}, direction, current, supports, resistances)
-    confirmation = _short_confirmation(direction, entry_kind, confirmation)
-    cancel, cancel_reason = _validated_stop({}, direction, entry, candles, supports, resistances)
-    activation = _entry_activation_state(candles, direction, entry, entry_kind)
-    active = bool(activation.get("active"))
-    closed_confirmed = _closed_m5_confirmation(candles, direction)
-    m15 = _analysis_frame_direction(analysis, "M15")
-    m5 = _analysis_frame_direction(analysis, "M5")
-    lower_aligned = m15 == direction and m5 == direction
-    score = int(analysis.get("buy_probability") if side == "buy" else analysis.get("sell_probability") or 0)
-
-    market_active = str(analysis.get("market_status") or "active") == "active"
-    if (
-        market_active
-        and score >= DUAL_SCENARIO_CONFIRMED_PROBABILITY
-        and lower_aligned
-        and closed_confirmed
-        and active
-        and entry_kind != "مراقبة"
-    ):
-        state_code, state = "confirmed", "مؤكد"
-    else:
-        # بطاقات السيناريو المستقلة لا تستخدم حالة «مشروط»؛ ما لم يكتمل
-        # التفعيل فعليًا يبقى السيناريو ضمن المراقبة مع عرض شرطه بوضوح.
-        state_code, state = "watch", "مراقبة"
-
-    if not market_active:
-        waiting_for = str(analysis.get("market_status_label") or "عودة بيانات M5 الحديثة")
-    elif state_code == "confirmed":
-        waiting_for = "السيناريو متفعل على شمعة M5 مغلقة"
-    elif entry_kind == "اختراق" and direction == "صاعد":
-        waiting_for = f"إغلاق M5 فوق {entry:.2f} ثم ثبات أو إعادة اختبار"
-    elif entry_kind == "اختراق" and direction == "هابط":
-        waiting_for = f"إغلاق M5 تحت {entry:.2f} ثم إعادة اختبار فاشلة"
-    elif entry_kind == "إعادة اختبار" and direction == "صاعد":
-        waiting_for = f"رفض الدعم عند {entry:.2f} ثم إغلاق M5 صاعد"
-    elif entry_kind == "إعادة اختبار" and direction == "هابط":
-        waiting_for = f"رفض المقاومة عند {entry:.2f} ثم إغلاق M5 هابط"
-    else:
-        waiting_for = f"تكوّن مستوى تفعيل واضح لسيناريو {side_ar}"
-
-    targets = _scalp_targets(analysis, direction=direction, entry=entry)
-    supporting, blocking = _dual_scenario_reasons(
-        analysis,
-        direction=direction,
-        entry=entry,
-        entry_active=active,
-        closed_confirmed=closed_confirmed,
-    )
-    probable = _most_probable_extreme(analysis, kind="peak" if side == "buy" else "trough")
-    why_not_now = (
-        "اكتملت شروط السيناريو"
-        if state_code == "confirmed"
-        else "، ".join(blocking[:2]) if blocking else waiting_for
-    )
-
-    return {
-        "side": side,
-        "label": side_ar,
-        "state": state,
-        "state_code": state_code,
-        "score": max(5, min(95, score)),
-        "trigger_price": round(entry, 2),
-        "trigger_type": entry_kind,
-        "trigger_condition": confirmation,
-        "is_active": active,
-        "activation_status": str(activation.get("status") or "waiting"),
-        "activation_reason": str(activation.get("reason") or waiting_for),
-        "cancel_price": round(cancel, 2),
-        "cancel_reason": cancel_reason,
-        **targets,
-        "most_probable_peak" if side == "buy" else "most_probable_trough": probable,
-        "supporting_reasons": supporting,
-        "blocking_reasons": blocking,
-        "why_not_now": why_not_now,
-        "waiting_for": waiting_for,
-        "distance_to_trigger": round(abs(entry - current), 2),
-        "uses_closed_m5_confirmation": bool(closed_confirmed),
-        "lower_frames_aligned": bool(lower_aligned),
-    }
-
-
-def _compare_dual_scenarios(
-    buy_scenario: dict[str, Any],
-    sell_scenario: dict[str, Any],
-) -> dict[str, Any]:
-    state_rank = {"confirmed": 2, "watch": 1}
-    buy_rank = state_rank.get(str(buy_scenario.get("state_code")), 1)
-    sell_rank = state_rank.get(str(sell_scenario.get("state_code")), 1)
-    buy_score = int(buy_scenario.get("score") or 0)
-    sell_score = int(sell_scenario.get("score") or 0)
-    buy_distance = float(buy_scenario.get("distance_to_trigger") or 999.0)
-    sell_distance = float(sell_scenario.get("distance_to_trigger") or 999.0)
-
-    closest = "شراء" if buy_distance < sell_distance else "بيع" if sell_distance < buy_distance else "متساوي"
-    preferred = "wait"
-    preferred_ar = "انتظار"
-    chosen: dict[str, Any] | None = None
-
-    # لا نرفع أي سيناريو إلى قرار مباشر إلا إذا كان مؤكدًا فعليًا.
-    if buy_rank > sell_rank and str(buy_scenario.get("state_code")) == "confirmed":
-        chosen, preferred, preferred_ar = buy_scenario, "buy", "شراء"
-    elif sell_rank > buy_rank and str(sell_scenario.get("state_code")) == "confirmed":
-        chosen, preferred, preferred_ar = sell_scenario, "sell", "بيع"
-    elif buy_rank == sell_rank == 2:
-        if abs(buy_score - sell_score) >= 6:
-            if buy_score > sell_score:
-                chosen, preferred, preferred_ar = buy_scenario, "buy", "شراء"
-            else:
-                chosen, preferred, preferred_ar = sell_scenario, "sell", "بيع"
-        else:
-            # Two opposite confirmed scenarios are contradictory; never invent a side.
-            chosen = None
-
-    if chosen is None:
-        reason = (
-            "وضع المراقبة مفعل: يعرض SaleeM سيناريو الشراء وسيناريو البيع معًا "
-            "حتى يكتمل التفعيل على شمعة M5 مغلقة."
-        )
-        waiting_for = (
-            buy_scenario.get("waiting_for")
-            if closest == "شراء"
-            else sell_scenario.get("waiting_for")
-            if closest == "بيع"
-            else "انتظار أول شرط واضح على شمعة M5 مغلقة"
-        )
-        label = "القرار الآن: مراقبة"
-    else:
-        reason = (
-            f"سيناريو {preferred_ar} أقوى ({int(chosen.get('score') or 0)}٪) "
-            f"وحالته {chosen.get('state')}"
-        )
-        waiting_for = chosen.get("waiting_for")
-        label = f"الأقرب الآن: {preferred_ar}"
-
-    return {
-        "preferred": preferred,
-        "preferred_label": preferred_ar,
-        "label": label,
-        "reason": reason,
-        "waiting_for": waiting_for,
-        "closest_to_activation": closest,
-        "score_gap": abs(buy_score - sell_score),
-    }
-
-
-def _enrich_dual_scenarios(analysis: dict[str, Any]) -> dict[str, Any]:
-    """Attach independent buy/sell plans without changing the current renderer."""
-    result = copy.deepcopy(analysis)
-    # Normalize old cached labels defensively, although cache v7 invalidates them.
-    result["pattern_type"] = _pattern_short_name(result.get("pattern_type"))
-    buy_scenario = _build_side_scenario(result, side="buy")
-    sell_scenario = _build_side_scenario(result, side="sell")
-    result["buy_scenario_details"] = buy_scenario
-    result["sell_scenario_details"] = sell_scenario
-    result["dual_scenario_decision"] = _compare_dual_scenarios(buy_scenario, sell_scenario)
-    result["most_probable_peak"] = buy_scenario.get("most_probable_peak")
-    result["most_probable_trough"] = sell_scenario.get("most_probable_trough")
-    result["scalp_target_policy"] = {
-        "quick_points": 5,
-        "extended_points": 10,
-        "point_size": _scalp_point_size(),
-        "rule": "يُستخدم مستوى السوق الأقرب إذا اعترض طريق هدف 5 أو 10 نقاط",
-    }
-    result["dual_scenario_renderer_status"] = "cards-below-image-active"
-    return result
-
-
-
-def _current_m5_movement(candles: list[dict[str, Any]]) -> dict[str, Any]:
-    """Describe the latest CLOSED M5 movement independently from H4/H1.
-
-    The broader trend may remain bullish while the most recent closed candles
-    are falling. Keeping this field separate prevents the UI from presenting a
-    bullish forecast as if it were the current price movement.
-    """
-    valid: list[dict[str, float]] = []
-    for candle in candles[-8:]:
-        if not isinstance(candle, dict):
-            continue
-        values = [_number(candle.get(key)) for key in ("open", "high", "low", "close")]
-        if any(value is None for value in values):
-            continue
-        open_, high, low, close = [float(value) for value in values]
-        valid.append(
-            {
-                "open": open_,
-                "high": max(high, open_, close),
-                "low": min(low, open_, close),
-                "close": close,
-            }
-        )
-
-    if len(valid) < 3:
-        return {"direction": "غير واضح", "strength": "ضعيف", "score": 0.0}
-
-    atr = max(
-        0.01,
-        sum(max(0.01, item["high"] - item["low"]) for item in valid) / len(valid),
-    )
-    lookback = min(4, len(valid) - 1)
-    close_move = (valid[-1]["close"] - valid[-1 - lookback]["close"]) / atr
-    last_impulse = (valid[-1]["close"] - valid[-2]["close"]) / atr
-    recent = valid[-3:]
-    body_pressure = sum(item["close"] - item["open"] for item in recent) / (atr * len(recent))
-    score = _clip(close_move * 0.55 + last_impulse * 0.25 + body_pressure * 0.20, -3.0, 3.0)
-
-    if score >= 0.12:
-        direction = "صاعد"
-    elif score <= -0.12:
-        direction = "هابط"
-    else:
-        direction = "عرضي"
-
-    magnitude = abs(score)
-    if magnitude >= 0.95:
-        strength = "قوي"
-    elif magnitude >= 0.38:
-        strength = "متوسط"
-    else:
-        strength = "ضعيف"
-    return {
-        "direction": direction,
-        "strength": strength,
-        "score": round(score, 3),
-        "last_close": round(valid[-1]["close"], 3),
-    }
-
-
-def _entry_activation_state(
-    candles: list[dict[str, Any]],
-    direction: str,
-    entry: float,
-    entry_kind: str,
-) -> dict[str, Any]:
-    """Return whether a directional scenario has actually activated.
-
-    A conditional setup may be valid as a plan while price is still below a
-    bullish trigger (or above a bearish trigger). In that state targets remain
-    reference levels, but no directional path or risk/reward zone is drawn.
-    """
-    movement = _current_m5_movement(candles)
-    if not candles or direction not in {"صاعد", "هابط"}:
-        return {
-            "active": False,
-            "status": "waiting",
-            "reason": "بانتظار اتجاه واضح على شموع M5 المغلقة",
-            "buffer": 0.0,
-            "movement": movement,
-        }
-
-    last_close = float(_number(candles[-1].get("close")) or entry)
-    atr = max(0.01, _atr(candles))
-    buffer = max(0.05, min(0.45, atr * 0.08))
-    movement_direction = str(movement.get("direction") or "غير واضح")
-    candle_confirmation = _closed_m5_confirmation(candles, direction)
-
-    if direction == "صاعد":
-        if entry_kind == "إعادة اختبار":
-            correct_side = last_close >= entry - buffer
-        else:
-            correct_side = last_close > entry + buffer
-        active = bool(correct_side and movement_direction == "صاعد" and candle_confirmation)
-        reason = (
-            "تم تفعيل الصعود بإغلاق وثبات فوق مستوى الدخول"
-            if active
-            else f"بانتظار إغلاق وثبات فوق {entry:.1f}"
-        )
-    else:
-        if entry_kind == "إعادة اختبار":
-            correct_side = last_close <= entry + buffer
-        else:
-            correct_side = last_close < entry - buffer
-        active = bool(correct_side and movement_direction == "هابط" and candle_confirmation)
-        reason = (
-            "تم تفعيل الهبوط بإغلاق وثبات تحت مستوى الدخول"
-            if active
-            else f"بانتظار إغلاق وثبات تحت {entry:.1f}"
-        )
-
-    return {
-        "active": active,
-        "status": "active" if active else "waiting",
-        "reason": reason,
-        "buffer": round(buffer, 3),
-        "last_close": round(last_close, 3),
-        "movement": movement,
-        "closed_m5_confirmed": bool(candle_confirmation),
-    }
 
 def _closed_m5_confirmation(candles: list[dict[str, Any]], direction: str) -> bool:
     """Require actual closed-M5 continuation, sweep or rejection evidence."""
@@ -3351,25 +2652,6 @@ def _validate_analysis(
         and geometry_valid
     )
     price_action_confirmed = _closed_m5_confirmation(candles, direction)
-    activation = _entry_activation_state(candles, direction, entry, entry_kind)
-    current_movement = dict(activation.get("movement") or _current_m5_movement(candles))
-    entry_activated = bool(activation.get("active"))
-    movement_direction = str(current_movement.get("direction") or "غير واضح")
-    movement_opposes_direction = (
-        direction in {"صاعد", "هابط"}
-        and movement_direction in {"صاعد", "هابط"}
-        and movement_direction != direction
-    )
-
-    if h4_direction in {"صاعد", "هابط"} and h1_direction in {"صاعد", "هابط"}:
-        higher_timeframe_direction = h4_direction if h4_direction == h1_direction else "مختلط"
-    elif h1_direction in {"صاعد", "هابط"}:
-        higher_timeframe_direction = h1_direction
-    elif h4_direction in {"صاعد", "هابط"}:
-        higher_timeframe_direction = h4_direction
-    else:
-        higher_timeframe_direction = "غير واضح"
-
     higher_supportive = higher_aligned or (direction in {"صاعد", "هابط"} and (h4_direction == direction or h1_direction == direction))
     higher_both_opposed = (
         direction in {"صاعد", "هابط"}
@@ -3394,7 +2676,6 @@ def _validate_analysis(
         probability >= CONFIRMED_PROBABILITY
         and lower_aligned
         and price_action_confirmed
-        and entry_activated
         and context_acceptable
         and geometry_valid
         and not warnings
@@ -3408,10 +2689,6 @@ def _validate_analysis(
         draw_mode = "watch"
     elif lower_conflict:
         # تعارض M15 وM5 مع الجهة المختارة يلغي حالة مشروط بدل تكرارها.
-        draw_mode = "watch"
-    elif movement_opposes_direction and not entry_activated:
-        # إذا كانت الحركة الحالية تعاكس الجهة ولم يتفعّل الدخول بعد فلا نرفع
-        # النتيجة إلى شراء/بيع مشروط حفاظًا على مصداقية التحليل.
         draw_mode = "watch"
     elif confirmation_complete:
         draw_mode = "confirmed"
@@ -3428,12 +2705,6 @@ def _validate_analysis(
         missing_confirmation.append("توافق M15 وM5")
     if not price_action_confirmed:
         missing_confirmation.append("شمعة M5 مؤكدة")
-    if movement_opposes_direction and not entry_activated:
-        missing_confirmation.append("الحركة الحالية تعاكس الاتجاه")
-    if direction in {"صاعد", "هابط"} and not entry_activated:
-        missing_confirmation.append(
-            "إغلاق وثبات فوق الدخول" if direction == "صاعد" else "إغلاق وثبات تحت الدخول"
-        )
     if probability < CONFIRMED_PROBABILITY:
         missing_confirmation.append(f"قوة {CONFIRMED_PROBABILITY}٪ فأعلى")
     if not context_acceptable:
@@ -3454,7 +2725,7 @@ def _validate_analysis(
 
     if draw_mode == "watch":
         # المراقبة نقطة قرار محايدة: Entry يساوي السعر الحالي، ولا يوجد
-        # Cancel أو Stop ظاهر. لا نرسم مسارًا اتجاهيًا قبل وضوح الحركة.
+        # Cancel أو Stop ظاهر. يبدأ السهمان من هذا السعر نفسه.
         entry = round(current, 2)
         entry_kind = "مراقبة"
         confirmation = "انتظار توافق الفريمات وظهور شمعة تأكيد"
@@ -3462,14 +2733,6 @@ def _validate_analysis(
         entry = round(current, 2)
         entry_kind = "مراقبة"
         confirmation = market_activity["label"]
-    elif draw_mode == "conditional" and not entry_activated:
-        confirmation = str(activation.get("reason") or confirmation)
-
-    directional_path_enabled = bool(
-        draw_mode == "confirmed"
-        or (draw_mode == "conditional" and entry_activated)
-    )
-    show_targets_as_active = directional_path_enabled
 
     scenario = " ".join(str(data.get("scenario") or "").split())[:92]
     bullish_scenario = " ".join(str(data.get("bullish_scenario") or "").split())[:150]
@@ -3498,19 +2761,7 @@ def _validate_analysis(
         bearish_scenario = "بانتظار عودة شموع M5 الحديثة قبل تقييم سيناريو الهبوط"
         invalidation_condition = "لا يوجد سيناريو تنفيذي أثناء توقف السوق أو قدم البيانات"
     elif draw_mode == "watch":
-        if movement_opposes_direction and direction in {"صاعد", "هابط"}:
-            scenario = (
-                f"الاتجاه العام {higher_timeframe_direction} لكن الحركة الحالية {movement_direction}؛ "
-                f"{activation.get('reason') or 'بانتظار التفعيل'}"
-            )[:92]
-        else:
-            scenario = "إذا توافقت الفريمات وظهرت شمعة تأكيد فإن أقرب سيناريو يتفعّل"
-    elif draw_mode == "conditional" and not entry_activated:
-        movement_label = str(current_movement.get("direction") or "غير واضح")
-        scenario = (
-            f"الاتجاه العام {higher_timeframe_direction} والحركة الحالية {movement_label}؛ "
-            f"{activation.get('reason') or 'بانتظار تفعيل الدخول'}"
-        )[:92]
+        scenario = "إذا توافقت الفريمات وظهرت شمعة تأكيد فإن أقرب سيناريو يتفعّل"
     elif not scenario:
         scenario = "إذا تحقق شرط الدخول فإن السيناريو يستمر نحو الأهداف المحددة"
 
@@ -3530,15 +2781,6 @@ def _validate_analysis(
             "sell_probability": sell,
             "direction": direction,
             "analysis_direction": direction,
-            "higher_timeframe_direction": higher_timeframe_direction,
-            "current_movement": str(current_movement.get("direction") or "غير واضح"),
-            "current_movement_strength": str(current_movement.get("strength") or "ضعيف"),
-            "current_movement_score": float(current_movement.get("score") or 0.0),
-            "entry_activation_status": str(activation.get("status") or "waiting"),
-            "entry_activation_reason": str(activation.get("reason") or "بانتظار تفعيل الدخول"),
-            "entry_confirmation_buffer": float(activation.get("buffer") or 0.0),
-            "directional_path_enabled": directional_path_enabled,
-            "show_targets_as_active": show_targets_as_active,
             "trade_side": (
                 market_activity["label"]
                 if draw_mode == "inactive"
@@ -3617,7 +2859,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     """
     try:
         market_data = fetch_market_data()
-        context_candles = max(24, min(64, int(os.getenv("MARKET_CONTEXT_CANDLES", "32"))))
+        context_candles = max(24, min(80, int(os.getenv("MARKET_CONTEXT_CANDLES", "40"))))
         raw_market_context = compact_market_context(
             market_data,
             candles_per_frame=context_candles,
@@ -3694,13 +2936,12 @@ def _analyze(path: Path) -> dict[str, Any]:
             "provider_live_price": round(provider_live_price, 3),
         }
     )
-    projected = _bind_market_analysis_to_image(
+    return _bind_market_analysis_to_image(
         canonical,
         geometry,
         snapshot_key=snapshot_key,
         snapshot_reused=snapshot_reused,
     )
-    return _enrich_dual_scenarios(projected)
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:

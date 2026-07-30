@@ -128,6 +128,28 @@ body.is-analyzing .app-shell{display:grid;min-height:100vh;align-items:center;pa
 .trade-type-pill.buy{background:var(--green)}
 .trade-type-pill.sell{background:var(--red)}
 
+.scenarios-card{padding:17px}
+.scenario-decision-banner{display:grid;gap:6px;margin-bottom:12px;padding:12px 14px;border:1px solid #e3ede7;border-radius:15px;background:linear-gradient(180deg,#fbfefc 0,#f4fbf7 100%)}
+.scenario-decision-banner small{color:var(--muted);font-size:8px}
+.scenario-decision-banner strong{font-size:15px;color:#174f2d}
+.scenario-decision-banner p{margin:0;color:#4f6557;font-size:10px;line-height:1.8}
+.scenario-decision-banner span{color:#267b45;font-size:9px;line-height:1.7}
+.scenario-cards-grid{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+.scenario-plan{padding:13px;border:1px solid;border-radius:17px;background:#fff;box-shadow:0 8px 22px rgba(28,61,41,.06)}
+.scenario-plan.buy-plan{border-color:#b8e4c6;background:linear-gradient(180deg,#f5fff8 0,#fff 48%)}
+.scenario-plan.sell-plan{border-color:#f0c2c2;background:linear-gradient(180deg,#fff7f7 0,#fff 48%)}
+.scenario-plan-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:10px}
+.scenario-plan-header small{display:block;color:var(--muted);font-size:7px;margin-bottom:3px}
+.scenario-plan-header h3{margin:0;font-size:15px}
+.scenario-state{display:inline-flex;align-items:center;justify-content:center;min-width:60px;padding:6px 10px;border-radius:999px;color:#fff;font-size:9px;font-weight:700}
+.scenario-state.watch{background:var(--blue)}
+.scenario-state.confirmed{background:var(--green)}
+.scenario-rows{display:grid;gap:7px}
+.scenario-rows>div{display:grid;grid-template-columns:84px 1fr;gap:8px;align-items:start;min-height:48px;padding:9px 10px;border:1px solid #e6eee8;border-radius:12px;background:rgba(255,255,255,.82)}
+.scenario-rows span{font-size:8px;font-weight:700;color:#2d8d50}
+.scenario-rows b{font-size:10px;line-height:1.8;color:var(--ink)}
+.sell-plan .scenario-rows span{color:#b63b3b}
+
 .analysis-details,.summary-card{overflow:hidden}
 .analysis-details>summary,.summary-card>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;cursor:pointer;list-style:none}
 .analysis-details>summary::-webkit-details-marker,.summary-card>summary::-webkit-details-marker{display:none}
@@ -319,11 +341,14 @@ details[open] .details-arrow{transform:rotate(180deg)}
 .limit-unavailable small{color:#947d49;font-size:8px}
 
 @media(max-width:650px){
-  .limit-plans-grid{grid-template-columns:1fr}
+  .scenario-cards-grid,.limit-plans-grid{grid-template-columns:1fr}
 }
 @media(max-width:430px){
   .reading-summary-grid{grid-template-columns:1fr}
   .limit-probability-cases{grid-template-columns:1fr}
+  .scenarios-card{padding:14px}
+  .scenario-plan{padding:11px}
+  .scenario-rows>div{grid-template-columns:76px 1fr;min-height:44px;padding:8px}
   .limit-recommendations>summary{padding:14px}
   .limit-recommendations>summary b{font-size:12px}
   .limit-recommendations-content{padding:0 12px 13px}

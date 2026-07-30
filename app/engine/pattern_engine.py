@@ -112,14 +112,14 @@ def _double_pattern(
                 depth = (min(first_price, second_price) - neckline) / atr
                 confirmed = candles[-1]["close"] < neckline
                 bias = "هابط"
-                name = "قمتان"
+                name = "M"
                 evidence = "قمتان متقاربتان يفصل بينهما قاع واضح"
             else:
                 neckline = max(row["high"] for row in middle)
                 depth = (neckline - max(first_price, second_price)) / atr
                 confirmed = candles[-1]["close"] > neckline
                 bias = "صاعد"
-                name = "قاعان"
+                name = "W"
                 evidence = "قاعان متقاربان يفصل بينهما ارتداد واضح"
             if depth < 0.65:
                 continue
@@ -231,7 +231,7 @@ def review_market_patterns(frames: Any) -> dict[str, Any]:
     """
     candidates: list[PatternCandidate] = []
     checked = [
-        "قمتان", "قاعان", "مثلث متماثل", "مثلث صاعد", "مثلث هابط",
+        "M", "W", "مثلث متماثل", "مثلث صاعد", "مثلث هابط",
         "وتد صاعد", "وتد هابط", "قناة صاعدة", "قناة هابطة", "كسر وإعادة اختبار",
     ]
     for timeframe, minimum in (("M5", 26), ("M15", 24), ("H1", 24)):

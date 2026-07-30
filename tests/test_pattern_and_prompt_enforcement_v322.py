@@ -31,7 +31,7 @@ def test_closed_candle_pattern_review_detects_confirmed_double_top():
     review = review_market_patterns({"M5": rows, "M15": rows, "H1": rows})
 
     assert review["available"] is True
-    assert review["pattern_type"] == "قمتان"
+    assert review["pattern_type"] == "M"
     assert review["pattern_bias"] == "هابط"
     assert review["pattern_confidence"] >= 70
     assert len(review["checked_patterns"]) == 10
@@ -108,10 +108,10 @@ def test_market_reading_comment_changes_with_pattern_and_frame_evidence(monkeypa
     }
     without_pattern = _build_market_reading_comment({**base, "pattern_type": "لا يوجد"})
     with_pattern = _build_market_reading_comment(
-        {**base, "pattern_type": "قمتان", "pattern_confidence": 82}
+        {**base, "pattern_type": "M", "pattern_confidence": 82}
     )
 
     assert without_pattern != with_pattern
     assert "M15 وM5" in with_pattern
-    assert "قمتان" in with_pattern
+    assert "M" in with_pattern
     assert len(with_pattern) <= 220

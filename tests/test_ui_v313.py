@@ -1,3 +1,7 @@
+from fastapi.testclient import TestClient
+
+from app.main import app
+
 from pathlib import Path
 
 from app.engine.renderer import _header_pattern_lines
@@ -60,7 +64,70 @@ def test_pattern_card_never_returns_empty_or_dash_only():
     assert _header_pattern_lines("-") == ["غير مكتمل"]
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
     assert len(_header_pattern_lines("نموذج طويل يحتاج إلى سطرين")) <= 2
-"]
-    assert _header_pattern_lines("-") == ["غير مكتمل"]
-    assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
-    assert len(_header_pattern_lines("نموذج طويل يحتاج إلى سطرين")) <= 2
+
+
+client = TestClient(app)
+
+
+def test_result_page_renders_scenario_cards_below_image_without_conditional(monkeypatch):
+    sample_result = {
+        "result_url": "data:image/png;base64,ZmFrZQ==",
+        "draw_mode": "watch",
+        "direction": "صاعد",
+        "trade_probability": 61,
+        "higher_timeframe_direction": "صاعد",
+        "current_movement": "هابط",
+        "current_movement_strength": "ضعيف",
+        "entry_activation_reason": "بانتظار إغلاق واضح",
+        "confirmation": "بانتظار إغلاق واضح",
+        "market_reading_comment": "ملخص قراءة السوق.",
+        "breakout_summary": "لا يوجد كسر مؤكد.",
+        "analysis_last_closed_m5_time": "2026-07-30 12:00",
+        "pattern_type": "W",
+        "pattern_confidence": 70,
+        "scenario": "انتظار حتى يتضح الاتجاه",
+        "invalidation_condition": "عند كسر المستوى",
+        "limit_recommendations": {"available": False, "reason": "لا توجد قمة أو قاع صالح للتوصية حاليًا."},
+        "buy_scenario_details": {
+            "state": "مراقبة",
+            "trigger_condition": "إغلاق فوق 100.10",
+            "quick_target": 100.5,
+            "extended_target": 101.0,
+            "cancel_price": 99.5,
+            "cancel_reason": "إغلاق أسفل الدعم",
+            "most_probable_peak": {"price": 101.2},
+            "supporting_reasons": ["السعر عند دعم"],
+        },
+        "sell_scenario_details": {
+            "state": "مراقبة",
+            "trigger_condition": "إغلاق تحت 99.90",
+            "quick_target": 99.5,
+            "extended_target": 99.0,
+            "cancel_price": 100.6,
+            "cancel_reason": "إغلاق فوق المقاومة",
+            "most_probable_trough": {"price": 99.1},
+            "supporting_reasons": ["الزخم هابط"],
+        },
+        "dual_scenario_decision": {
+            "label": "القرار الآن: مراقبة",
+            "reason": "يظهر التطبيق سيناريو الشراء وسيناريو البيع معًا.",
+            "waiting_for": "انتظار أول شرط واضح على شمعة M5 مغلقة",
+        },
+    }
+
+    monkeypatch.setattr("app.main.analyze_chart_image", lambda *_args, **_kwargs: sample_result)
+    from io import BytesIO
+    from PIL import Image
+
+    payload = BytesIO()
+    Image.new("RGB", (240, 400), "white").save(payload, format="PNG")
+    response = client.post("/analyze", files={"image": ("chart.png", payload.getvalue(), "image/png")})
+    html = response.text
+
+    assert response.status_code == 200
+    assert "سيناريو الشراء وسيناريو البيع" in html
+    assert 'id="dual-scenarios-card"' in html
+    assert "سيناريو الشراء" in html and "سيناريو البيع" in html
+    assert "القرار الآن: مراقبة" in html
+    assert "شراء بشرط" not in html
+    assert "بيع بشرط" not in html
