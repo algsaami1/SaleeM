@@ -149,52 +149,32 @@
     {% set sell_plan = result.sell_scenario_details or {} %}
     {% set decision = result.dual_scenario_decision or {} %}
     <section class="card scenarios-card" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
-      <div class="section-heading compact-heading">
-        <span class="section-icon">⇅</span>
-        <div><small>أسفل الصورة — مستقل عن الرسم</small><h2 id="dual-scenarios-title">سيناريو الشراء وسيناريو البيع</h2></div>
-      </div>
-      <div class="scenario-decision-banner">
-        <div>
-          <small>القرار الحالي</small>
-          <strong>{{ decision.label or 'القرار الآن: مراقبة' }}</strong>
-        </div>
-        <p>{{ decision.reason or 'يظهر SaleeM احتمال الشراء واحتمال البيع معًا حتى يكتمل التفعيل.' }}</p>
-        <span>{{ decision.waiting_for or 'انتظار أول شرط واضح على شمعة M5 مغلقة.' }}</span>
+      <div class="scenario-section-topline">
+        <h2 id="dual-scenarios-title">سيناريو الشراء والبيع</h2>
+        <strong>{{ decision.label or 'القرار الآن: مراقبة' }}</strong>
       </div>
       <div class="scenario-cards-grid">
         <article class="scenario-plan buy-plan">
           <header class="scenario-plan-header">
-            <div>
-              <small>يبقى مستقلًا عن الصورة</small>
-              <h3>سيناريو الشراء</h3>
-            </div>
+            <h3>سيناريو الشراء</h3>
             <span class="scenario-state {{ 'confirmed' if buy_plan.state == 'مؤكد' else 'watch' }}">{{ buy_plan.state or 'مراقبة' }}</span>
           </header>
-          <div class="scenario-rows">
-            <div><span>التفعيل</span><b>{{ (buy_plan.trigger_condition or buy_plan.waiting_for or 'بانتظار شرط الشراء')|logic_text }}</b></div>
-            <div><span>+5 نقاط</span><b>{{ '%.2f'|format(buy_plan.quick_target) if buy_plan.quick_target is not none else '—' }}</b></div>
-            <div><span>+10 نقاط</span><b>{{ '%.2f'|format(buy_plan.extended_target) if buy_plan.extended_target is not none else '—' }}</b></div>
-            <div><span>الإلغاء</span><b>{{ '%.2f'|format(buy_plan.cancel_price) if buy_plan.cancel_price is not none else '—' }} — {{ buy_plan.cancel_reason or 'عند كسر مستوى الإبطال' }}</b></div>
-            <div><span>القمة الأرجح</span><b>{% if buy_plan.most_probable_peak and buy_plan.most_probable_peak.price is not none %}{{ '%.2f'|format(buy_plan.most_probable_peak.price) }}{% else %}لا توجد قمة واضحة{% endif %}</b></div>
-            <div><span>السبب</span><b>{{ (buy_plan.supporting_reasons or ['بانتظار تأكيد الشراء'])|join(' • ') }}</b></div>
+          <div class="scenario-rows compact-scenario-rows">
+            <div><span>التفعيل</span><b>{{ (buy_plan.display_activation or buy_plan.waiting_for or buy_plan.activation_reason or 'بانتظار شرط الشراء')|logic_text }}</b></div>
+            <div><span>الهدف الأرجح</span><b>{% if buy_plan.display_target is not none %}{{ '%.2f'|format(buy_plan.display_target) }}{% elif buy_plan.most_probable_peak and buy_plan.most_probable_peak.price is not none %}{{ '%.2f'|format(buy_plan.most_probable_peak.price) }}{% else %}لا توجد قمة واضحة{% endif %}</b></div>
+            <div><span>السبب</span><b>{{ buy_plan.display_reason or (buy_plan.supporting_reasons or ['بانتظار دليل شراء واضح'])|first }}</b></div>
           </div>
         </article>
 
         <article class="scenario-plan sell-plan">
           <header class="scenario-plan-header">
-            <div>
-              <small>يبقى مستقلًا عن الصورة</small>
-              <h3>سيناريو البيع</h3>
-            </div>
+            <h3>سيناريو البيع</h3>
             <span class="scenario-state {{ 'confirmed' if sell_plan.state == 'مؤكد' else 'watch' }}">{{ sell_plan.state or 'مراقبة' }}</span>
           </header>
-          <div class="scenario-rows">
-            <div><span>التفعيل</span><b>{{ (sell_plan.trigger_condition or sell_plan.waiting_for or 'بانتظار شرط البيع')|logic_text }}</b></div>
-            <div><span>+5 نقاط</span><b>{{ '%.2f'|format(sell_plan.quick_target) if sell_plan.quick_target is not none else '—' }}</b></div>
-            <div><span>+10 نقاط</span><b>{{ '%.2f'|format(sell_plan.extended_target) if sell_plan.extended_target is not none else '—' }}</b></div>
-            <div><span>الإلغاء</span><b>{{ '%.2f'|format(sell_plan.cancel_price) if sell_plan.cancel_price is not none else '—' }} — {{ sell_plan.cancel_reason or 'عند كسر مستوى الإبطال' }}</b></div>
-            <div><span>القاع الأرجح</span><b>{% if sell_plan.most_probable_trough and sell_plan.most_probable_trough.price is not none %}{{ '%.2f'|format(sell_plan.most_probable_trough.price) }}{% else %}لا يوجد قاع واضح{% endif %}</b></div>
-            <div><span>السبب</span><b>{{ (sell_plan.supporting_reasons or ['بانتظار تأكيد البيع'])|join(' • ') }}</b></div>
+          <div class="scenario-rows compact-scenario-rows">
+            <div><span>التفعيل</span><b>{{ (sell_plan.display_activation or sell_plan.waiting_for or sell_plan.activation_reason or 'بانتظار شرط البيع')|logic_text }}</b></div>
+            <div><span>الهدف الأرجح</span><b>{% if sell_plan.display_target is not none %}{{ '%.2f'|format(sell_plan.display_target) }}{% elif sell_plan.most_probable_trough and sell_plan.most_probable_trough.price is not none %}{{ '%.2f'|format(sell_plan.most_probable_trough.price) }}{% else %}لا يوجد قاع واضح{% endif %}</b></div>
+            <div><span>السبب</span><b>{{ sell_plan.display_reason or (sell_plan.supporting_reasons or ['بانتظار دليل بيع واضح'])|first }}</b></div>
           </div>
         </article>
       </div>

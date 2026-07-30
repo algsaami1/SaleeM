@@ -97,6 +97,9 @@ def test_result_page_renders_scenario_cards_below_image_without_conditional(monk
             "cancel_reason": "إغلاق أسفل الدعم",
             "most_probable_peak": {"price": 101.2},
             "supporting_reasons": ["السعر عند دعم"],
+            "display_activation": "إغلاق M5 فوق 100.10",
+            "display_target": 101.2,
+            "display_reason": "السعر عند دعم",
         },
         "sell_scenario_details": {
             "state": "مراقبة",
@@ -107,6 +110,9 @@ def test_result_page_renders_scenario_cards_below_image_without_conditional(monk
             "cancel_reason": "إغلاق فوق المقاومة",
             "most_probable_trough": {"price": 99.1},
             "supporting_reasons": ["الزخم هابط"],
+            "display_activation": "إغلاق M5 تحت 99.90",
+            "display_target": 99.1,
+            "display_reason": "الزخم هابط",
         },
         "dual_scenario_decision": {
             "label": "القرار الآن: مراقبة",
@@ -125,9 +131,15 @@ def test_result_page_renders_scenario_cards_below_image_without_conditional(monk
     html = response.text
 
     assert response.status_code == 200
-    assert "سيناريو الشراء وسيناريو البيع" in html
+    assert "سيناريو الشراء والبيع" in html
     assert 'id="dual-scenarios-card"' in html
     assert "سيناريو الشراء" in html and "سيناريو البيع" in html
     assert "القرار الآن: مراقبة" in html
+    assert "التفعيل" in html
+    assert "الهدف الأرجح" in html
+    assert "السبب" in html
+    assert "+5 نقاط" not in html
+    assert "+10 نقاط" not in html
+    assert "يبقى مستقلًا عن الصورة" not in html
     assert "شراء بشرط" not in html
     assert "بيع بشرط" not in html
