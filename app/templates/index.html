@@ -150,83 +150,92 @@
     {% set buy_plan = result.buy_scenario_details or {} %}
     {% set sell_plan = result.sell_scenario_details or {} %}
     {% set decision = result.dual_scenario_decision or {} %}
-    <section class="card recommendation-type-card" id="recommendation-type-card" aria-labelledby="recommendation-type-title">
-      <div class="smart-section-heading">
-        <span class="smart-section-icon" aria-hidden="true">◎</span>
-        <div><small>الخلاصة السريعة</small><h2 id="recommendation-type-title">نوع التوصية</h2></div>
+    {% set action = result.action_summary or {} %}
+    {% set action_code = action.get('code', trade_type_class) %}
+    {% set action_primary = action.get('primary_side', 'wait') %}
+    {% set action_title = action.get('title', state_label) %}
+    {% set action_badge = action.get('badge', 'بانتظار التفعيل') %}
+    {% set action_instruction = action.get('instruction', (decision.waiting_for if decision else result.entry_activation_reason) or result.entry_activation_reason or 'انتظر إغلاق شمعة التفعيل') %}
+    {% set action_reason = action.get('reason', (decision.reason if decision else result.market_reading_comment) or result.market_reading_comment) %}
+    {% set action_trigger = action.get('trigger') %}
+    {% set action_target = action.get('target') %}
+    {% set action_cancel = action.get('cancel') %}
+    {% set action_strength = action.get('strength', result.trade_probability) %}
+    {% set action_confirmed = action.get('is_confirmed', false) %}
+
+    <section class="card smart-result-card result-{{ action_code }}" id="recommendation-type-card" aria-labelledby="recommendation-type-title">
+      <div class="smart-result-head">
+        <div class="smart-result-icon" aria-hidden="true">{% if action_primary == 'buy' %}↗{% elif action_primary == 'sell' %}↘{% elif action_code in ['no_trade','inactive'] %}✋{% else %}◉{% endif %}</div>
+        <div class="smart-result-title"><small>الخلاصة التي تحتاجها الآن</small><h2 id="recommendation-type-title">{{ action_title }}</h2><span>{{ action_badge }}</span></div>
+        <div class="smart-result-strength"><b>{% if action_code == 'inactive' %}—{% else %}{{ action_strength }}٪{% endif %}</b><small>قوة القراءة</small></div>
       </div>
-      <div class="recommendation-type-grid" aria-label="نوع نتيجة التحليل">
-        <div class="recommendation-option buy{% if trade_type_class == 'buy' %} active{% endif %}"><span aria-hidden="true">↗</span><b>شراء</b><small>{% if trade_type_class == 'buy' %}مؤكد{% else %}غير مفعّل{% endif %}</small></div>
-        <div class="recommendation-option sell{% if trade_type_class == 'sell' %} active{% endif %}"><span aria-hidden="true">↘</span><b>بيع</b><small>{% if trade_type_class == 'sell' %}مؤكد{% else %}غير مفعّل{% endif %}</small></div>
-        <div class="recommendation-option watch{% if trade_type_class == 'watch' %} active{% endif %}"><span aria-hidden="true">◉</span><b>مراقبة</b><small>{% if trade_type_class == 'watch' %}الحالة الحالية{% else %}بانتظارها{% endif %}</small></div>
-        <div class="recommendation-option inactive{% if trade_type_class == 'inactive' %} active{% endif %}"><span aria-hidden="true">✋</span><b>عدم دخول</b><small>{% if trade_type_class == 'inactive' %}السوق غير جاهز{% else %}عند غياب الشروط{% endif %}</small></div>
+
+      <div class="smart-action-line">
+        <span aria-hidden="true">✓</span>
+        <div><small>ماذا أفعل الآن؟</small><b>{{ action_instruction }}</b></div>
       </div>
-      <div class="recommendation-decision-line">
-        <span class="decision-symbol" aria-hidden="true">✓</span>
-        <div><small>القرار الآن</small><b>{{ (decision.label if decision else state_label) or state_label }}</b><p>{{ (decision.waiting_for if decision else result.entry_activation_reason) or result.entry_activation_reason or 'انتظار إغلاق شمعة التفعيل' }}</p></div>
-        <strong class="recommendation-strength">{% if result.draw_mode == 'inactive' %}—{% else %}{{ result.trade_probability }}٪{% endif %}<small>القوة</small></strong>
+
+      <div class="smart-result-levels">
+        <div><span>التفعيل</span><b>{% if action_trigger is not none %}{{ '%.2f'|format(action_trigger) }}{% else %}بعد تأكيد M5{% endif %}</b></div>
+        <div><span>الهدف الأرجح</span><b>{% if action_target is not none %}{{ '%.2f'|format(action_target) }}{% else %}بعد التفعيل{% endif %}</b></div>
+        <div><span>الإلغاء</span><b>{% if action_cancel is not none %}{{ '%.2f'|format(action_cancel) }}{% else %}لا صفقة قبل التفعيل{% endif %}</b></div>
       </div>
+
+      <p class="smart-result-reason"><span aria-hidden="true">ⓘ</span><b>السبب الأهم:</b> {{ action_reason }}</p>
     </section>
 
-    <section class="card scenarios-card" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
+    <section class="card scenarios-card compact-dual-card" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
       <div class="scenario-section-topline">
-        <h2 id="dual-scenarios-title"><span aria-hidden="true">⇄</span> سيناريو الشراء والبيع</h2>
-        <strong>{{ decision.label or 'القرار الآن: مراقبة' }}</strong>
+        <div><small>الخطة البديلة قبل الدخول</small><h2 id="dual-scenarios-title"><span aria-hidden="true">⇄</span> سيناريو الشراء والبيع</h2></div>
+        <strong>{{ decision.label or "لا دخول دون إغلاق M5" }}</strong>
       </div>
       <div class="scenario-cards-grid">
-        <article class="scenario-plan buy-plan">
+        <article class="scenario-plan buy-plan{% if action_primary == 'buy' %} preferred{% endif %}">
           <header class="scenario-plan-header">
-            <h3><span aria-hidden="true">↗</span> سيناريو الشراء</h3>
-            <span class="scenario-state {{ 'confirmed' if buy_plan.state == 'مؤكد' else 'watch' }}">{{ buy_plan.state or 'مراقبة' }}</span>
+            <h3><span aria-hidden="true">↗</span> الشراء</h3>
+            <span class="scenario-state {{ 'confirmed' if buy_plan.state == 'مؤكد' else 'watch' }}">{% if action_primary == 'buy' and not action_confirmed %}الأقرب{% else %}{{ buy_plan.state or 'مراقبة' }}{% endif %}</span>
           </header>
           <div class="scenario-rows compact-scenario-rows">
-            <div><span><i aria-hidden="true">◈</i> شرط التفعيل</span><b>{{ (buy_plan.display_activation or buy_plan.waiting_for or buy_plan.activation_reason or 'بانتظار شرط الشراء')|logic_text }}</b></div>
-            <div><span><i aria-hidden="true">◎</i> الهدف الأرجح</span><b>{% if buy_plan.display_target is not none %}{{ '%.2f'|format(buy_plan.display_target) }}{% elif buy_plan.most_probable_peak and buy_plan.most_probable_peak.price is not none %}{{ '%.2f'|format(buy_plan.most_probable_peak.price) }}{% else %}لا توجد قمة واضحة{% endif %}</b></div>
-            <div><span><i aria-hidden="true">ⓘ</i> السبب</span><b>{{ buy_plan.display_reason or (buy_plan.supporting_reasons or ['بانتظار دليل شراء واضح'])|first }}</b></div>
+            <div><span>شرط التفعيل</span><b>{{ (buy_plan.display_activation or buy_plan.waiting_for or 'بانتظار شرط الشراء')|logic_text }}</b></div>
+            <div><span>الهدف</span><b>{% if buy_plan.display_target is not none %}{{ '%.2f'|format(buy_plan.display_target) }}{% else %}لا توجد قمة واضحة{% endif %}</b></div>
+            <div><span>السبب</span><b>{{ buy_plan.display_reason or (buy_plan.supporting_reasons or ['لا يوجد دليل شراء كافٍ'])|first }}</b></div>
           </div>
         </article>
 
-        <article class="scenario-plan sell-plan">
+        <article class="scenario-plan sell-plan{% if action_primary == 'sell' %} preferred{% endif %}">
           <header class="scenario-plan-header">
-            <h3><span aria-hidden="true">↘</span> سيناريو البيع</h3>
-            <span class="scenario-state {{ 'confirmed' if sell_plan.state == 'مؤكد' else 'watch' }}">{{ sell_plan.state or 'مراقبة' }}</span>
+            <h3><span aria-hidden="true">↘</span> البيع</h3>
+            <span class="scenario-state {{ 'confirmed' if sell_plan.state == 'مؤكد' else 'watch' }}">{% if action_primary == 'sell' and not action_confirmed %}الأقرب{% else %}{{ sell_plan.state or 'مراقبة' }}{% endif %}</span>
           </header>
           <div class="scenario-rows compact-scenario-rows">
-            <div><span><i aria-hidden="true">◈</i> شرط التفعيل</span><b>{{ (sell_plan.display_activation or sell_plan.waiting_for or sell_plan.activation_reason or 'بانتظار شرط البيع')|logic_text }}</b></div>
-            <div><span><i aria-hidden="true">◎</i> الهدف الأرجح</span><b>{% if sell_plan.display_target is not none %}{{ '%.2f'|format(sell_plan.display_target) }}{% elif sell_plan.most_probable_trough and sell_plan.most_probable_trough.price is not none %}{{ '%.2f'|format(sell_plan.most_probable_trough.price) }}{% else %}لا يوجد قاع واضح{% endif %}</b></div>
-            <div><span><i aria-hidden="true">ⓘ</i> السبب</span><b>{{ sell_plan.display_reason or (sell_plan.supporting_reasons or ['بانتظار دليل بيع واضح'])|first }}</b></div>
+            <div><span>شرط التفعيل</span><b>{{ (sell_plan.display_activation or sell_plan.waiting_for or 'بانتظار شرط البيع')|logic_text }}</b></div>
+            <div><span>الهدف</span><b>{% if sell_plan.display_target is not none %}{{ '%.2f'|format(sell_plan.display_target) }}{% else %}لا يوجد قاع واضح{% endif %}</b></div>
+            <div><span>السبب</span><b>{{ sell_plan.display_reason or (sell_plan.supporting_reasons or ['لا يوجد دليل بيع كافٍ'])|first }}</b></div>
           </div>
         </article>
       </div>
-    </section>
-
-    <section class="card reading-card" id="reading-card" aria-labelledby="reading-title">
-      <div class="smart-section-heading">
-        <span class="smart-section-icon" aria-hidden="true">▥</span>
-        <div><small>الخلاصة العملية</small><h2 id="reading-title">قراءة التحليل</h2></div>
-      </div>
-      <div class="reading-table">
-        <div><span><i aria-hidden="true">↑</i> الاتجاه</span><b>{{ result.higher_timeframe_direction or result.direction }}</b></div>
-        <div><span><i aria-hidden="true">〰</i> الحركة الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
-        <div><span><i aria-hidden="true">◉</i> الحالة</span><b>{{ state_label }}</b></div>
-        <div class="reading-decision"><span><i aria-hidden="true">✓</i> القرار</span><b>{{ (decision.waiting_for if decision else result.entry_activation_reason) or result.entry_activation_reason or 'انتظار تأكيد واضح' }}</b></div>
-      </div>
-      <p class="reading-comment"><strong>اكتملت قراءة الصورة</strong><br>{{ result.market_reading_comment or 'تمت قراءة بنية السوق والسيولة وتحديد أقرب المستويات المؤثرة.' }}</p>
-      {% if result.analysis_last_closed_m5_time %}<p class="analysis-refresh-time">آخر مراجعة: شمعة M5 المغلقة {{ result.analysis_last_closed_m5_time }}</p>{% endif %}
-      {% if result.axis_warning and not result.axis_validation_passed %}<p class="axis-fallback-detail"><b>ملاحظة قراءة الصورة:</b> {{ result.axis_warning }}</p>{% endif %}
     </section>
 
     {% set explanation = result.result_explanation or {} %}
     <details class="card intelligent-details why-result-card" id="analysis-notes-card">
       <summary>
-        <span class="details-title"><i aria-hidden="true">?</i><span><b>لماذا ظهرت النتيجة؟</b><small>ملخص النتيجة التفصيلي — أهم النقاط فقط ثم الأسباب والنماذج والسيولة والأخبار والعوامل المعارضة</small></span></span>
+        <span class="details-title"><i aria-hidden="true">?</i><span><b>لماذا ظهرت النتيجة؟</b><small>ملخص النتيجة — أهم النقاط فقط، وافتح للتفاصيل الفنية</small></span></span>
         <span class="details-arrow" aria-hidden="true">⌄</span>
       </summary>
       <div class="intelligent-details-content">
         <div class="explanation-lead">
           <span aria-hidden="true">✓</span>
-          <div><b>الخلاصة</b><p>{{ explanation.summary or result.market_reading_comment }}</p></div>
+          <div><b>الخلاصة</b><p>اكتملت قراءة الصورة. {{ explanation.summary or result.market_reading_comment }}</p></div>
         </div>
+
+        <section class="quick-reading-panel" id="reading-card" aria-label="قراءة التحليل">
+          <div class="quick-reading-grid">
+            <div><span>الاتجاه العام</span><b>{{ result.higher_timeframe_direction or result.direction }}</b></div>
+            <div><span>حركة M5 الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
+            <div><span>حالة القرار</span><b>{{ action_title }}</b></div>
+            <div><span>المطلوب الآن</span><b>{{ action_instruction }}</b></div>
+          </div>
+        </section>
 
         <section class="explanation-block">
           <h3><span aria-hidden="true">H</span> اتجاه الفريمات</h3>
@@ -277,7 +286,7 @@
 
     <details class="card limit-recommendations" id="limit-recommendations-card">
       <summary>
-        <span class="details-title"><i aria-hidden="true">L</i><span><b>توصية الصفقة — Limit قريبة</b><small>Buy Limit وSell Limit من قمة أو قاع مؤكد فقط — ثابتة حتى الإلغاء</small></span></span>
+        <span class="details-title"><i aria-hidden="true">L</i><span><b>توصية الصفقة — Buy Limit وSell Limit</b><small>تظهر فقط من قمة أو قاع مؤكد — ثابتة حتى الإلغاء</small></span></span>
         <span class="details-arrow" aria-hidden="true">⌄</span>
       </summary>
       {% set recommendations = result.limit_recommendations %}

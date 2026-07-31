@@ -1453,7 +1453,7 @@ def _extract_chart_geometry(path: Path) -> dict[str, Any]:
         schema=GEOMETRY_SCHEMA,
         schema_name="saleem_chart_geometry_only",
         image_path=path,
-        max_output_tokens=2200,
+        max_output_tokens=1400,
     )
     geometry["image_axis_labels"] = _normalize_axis_labels(geometry.get("image_axis_labels"))
     return geometry
@@ -1525,7 +1525,7 @@ def _get_market_decision(
             prompt=_market_decision_prompt(market_context, market_summary),
             schema=MARKET_DECISION_SCHEMA,
             schema_name="saleem_market_snapshot_decision",
-            max_output_tokens=max(2500, min(7000, int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "5000")))),
+            max_output_tokens=max(2600, min(5200, int(os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "3900")))),
         )
         _write_cached_market_decision(snapshot_key, decision)
         return decision, snapshot_key, False
@@ -2015,7 +2015,13 @@ def _most_probable_extreme(
 ) -> dict[str, Any] | None:
     """Choose the most plausible next peak/trough, balancing strength and distance."""
     current = float(analysis.get("current_price") or analysis.get("market_last_close") or 0.0)
-    candles = _normalize_candles(analysis.get("candles"))
+    try:
+        candles = _normalize_candles(analysis.get("candles"))
+    except RuntimeError:
+        candles = [
+            item for item in (analysis.get("candles") or [])
+            if isinstance(item, dict) and all(_number(item.get(key)) is not None for key in ("open", "high", "low", "close"))
+        ]
     atr = max(0.05, _atr(candles)) if candles else 1.0
     candidates = _structural_candidates(analysis, kind=kind, reference_price=current)
     if not candidates:
@@ -2385,6 +2391,166 @@ def _compare_dual_scenarios(
         "waiting_for": waiting_for,
         "closest_to_activation": closest,
         "score_gap": abs(buy_score - sell_score),
+    }
+
+
+def _scenario_priority(analysis: dict[str, Any], scenario: dict[str, Any], *, side: str) -> float:
+    """Rank a watch scenario without turning it into a confirmed trade.
+
+    The rank rewards real multi-timeframe agreement and proximity to the
+    trigger, then leaves the UI in monitoring until a closed M5 candle
+    actually activates the setup.
+    """
+    direction = "صاعد" if side == "buy" else "هابط"
+    score = float(scenario.get("score") or 0)
+    try:
+        candles = _normalize_candles(analysis.get("candles"))
+    except RuntimeError:
+        candles = [
+            item for item in (analysis.get("candles") or [])
+            if isinstance(item, dict) and all(_number(item.get(key)) is not None for key in ("open", "high", "low", "close"))
+        ]
+    atr = max(0.05, _atr(candles)) if candles else 1.0
+    distance = float(scenario.get("distance_to_trigger") or 0.0)
+    proximity_penalty = min(16.0, distance / atr * 4.0)
+
+    h4 = _analysis_frame_direction(analysis, "H4")
+    h1 = _analysis_frame_direction(analysis, "H1")
+    m15 = _analysis_frame_direction(analysis, "M15")
+    m5 = _analysis_frame_direction(analysis, "M5")
+
+    higher_bonus = 8.0 if h4 == h1 == direction else 4.0 if direction in {h4, h1} else 0.0
+    lower_bonus = 8.0 if m15 == m5 == direction else 3.0 if direction in {m15, m5} else 0.0
+    activation_bonus = 10.0 if bool(scenario.get("is_active")) else 0.0
+    return round(score + higher_bonus + lower_bonus + activation_bonus - proximity_penalty, 2)
+
+
+def _build_action_summary(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Build one concise, deterministic answer for the result page.
+
+    The user sees one action first. Detailed frames, liquidity, patterns and
+    news remain available in collapsed panels, so the page is useful without
+    becoming noisy.
+    """
+    buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+    sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+    market_active = str(analysis.get("market_status") or "active") == "active"
+
+    if not market_active or str(analysis.get("draw_mode") or "") == "inactive":
+        return {
+            "code": "inactive",
+            "title": "لا دخول الآن",
+            "badge": "السوق غير جاهز",
+            "instruction": str(analysis.get("market_status_label") or "انتظر عودة بيانات M5 الحديثة"),
+            "reason": "لا يصدر SaleeM قرارًا من بيانات قديمة أو سوق غير نشط.",
+            "trigger": None,
+            "target": None,
+            "cancel": None,
+            "strength": 0,
+            "primary_side": "wait",
+            "is_confirmed": False,
+        }
+
+    buy_confirmed = str(buy.get("state_code")) == "confirmed"
+    sell_confirmed = str(sell.get("state_code")) == "confirmed"
+    buy_score = int(buy.get("score") or 0)
+    sell_score = int(sell.get("score") or 0)
+
+    chosen: dict[str, Any] | None = None
+    side = "wait"
+    confirmed = False
+    if buy_confirmed and not sell_confirmed:
+        chosen, side, confirmed = buy, "buy", True
+    elif sell_confirmed and not buy_confirmed:
+        chosen, side, confirmed = sell, "sell", True
+    elif buy_confirmed and sell_confirmed and abs(buy_score - sell_score) >= 8:
+        chosen, side, confirmed = (buy, "buy", True) if buy_score > sell_score else (sell, "sell", True)
+
+    if chosen is None:
+        buy_rank = _scenario_priority(analysis, buy, side="buy")
+        sell_rank = _scenario_priority(analysis, sell, side="sell")
+        rank_gap = abs(buy_rank - sell_rank)
+        strongest_score = max(buy_score, sell_score)
+
+        # Very weak or contradictory readings produce a direct no-trade answer.
+        if strongest_score < 50 or (rank_gap < 7 and not bool(buy.get("lower_frames_aligned")) and not bool(sell.get("lower_frames_aligned"))):
+            buy_trigger = _number(buy.get("trigger_price"))
+            sell_trigger = _number(sell.get("trigger_price"))
+            if buy_trigger is not None and sell_trigger is not None:
+                instruction = f"لا تدخل؛ انتظر إغلاق M5 فوق {buy_trigger:.2f} للشراء أو تحت {sell_trigger:.2f} للبيع"
+            else:
+                instruction = "لا تدخل حتى يظهر تفعيل واضح على شمعة M5 مغلقة"
+            return {
+                "code": "no_trade",
+                "title": "عدم دخول الآن",
+                "badge": "الشروط غير مكتملة",
+                "instruction": instruction,
+                "reason": "قوة الاتجاه أو توافق الفريمات غير كافيين لقرار آمن وواضح.",
+                "trigger": None,
+                "target": None,
+                "cancel": None,
+                "strength": strongest_score,
+                "primary_side": "wait",
+                "is_confirmed": False,
+                "buy_rank": buy_rank,
+                "sell_rank": sell_rank,
+            }
+
+        if rank_gap >= 7:
+            chosen, side = (buy, "buy") if buy_rank > sell_rank else (sell, "sell")
+        else:
+            buy_trigger = _number(buy.get("trigger_price"))
+            sell_trigger = _number(sell.get("trigger_price"))
+            instruction = "انتظر أول إغلاق M5 واضح عند أحد مستويي التفعيل"
+            if buy_trigger is not None and sell_trigger is not None:
+                instruction = f"شراء فوق {buy_trigger:.2f} أو بيع تحت {sell_trigger:.2f} بعد إغلاق M5"
+            return {
+                "code": "watch",
+                "title": "مراقبة",
+                "badge": "لا أفضلية واضحة",
+                "instruction": instruction,
+                "reason": "سيناريو الشراء والبيع متقاربان؛ لا يتم تحويل التعادل إلى صفقة.",
+                "trigger": None,
+                "target": None,
+                "cancel": None,
+                "strength": strongest_score,
+                "primary_side": "wait",
+                "is_confirmed": False,
+                "buy_rank": buy_rank,
+                "sell_rank": sell_rank,
+            }
+
+    side_ar = "شراء" if side == "buy" else "بيع"
+    code = side if confirmed else "watch_" + side
+    trigger = _number(chosen.get("trigger_price"))
+    target = _number(chosen.get("display_target"))
+    cancel = _number(chosen.get("cancel_price"))
+    activation_close = _number(chosen.get("activation_candle_close"))
+
+    if confirmed:
+        title = f"{side_ar} مؤكد"
+        badge = "مفعّل بإغلاق M5"
+        if activation_close is not None:
+            instruction = f"السيناريو متفعل من إغلاق M5 عند {activation_close:.2f}; راقب الثبات ولا تطارد السعر بعيدًا عن التفعيل"
+        else:
+            instruction = str(chosen.get("activation_reason") or f"تم تفعيل سيناريو {side_ar}")
+    else:
+        title = f"مراقبة {side_ar}"
+        badge = "الأقرب للتفعيل"
+        instruction = str(chosen.get("display_activation") or chosen.get("waiting_for") or f"انتظار تفعيل {side_ar}")
+
+    return {
+        "code": code,
+        "title": title,
+        "badge": badge,
+        "instruction": instruction,
+        "reason": str(chosen.get("display_reason") or "بانتظار دليل فني أوضح"),
+        "trigger": round(float(trigger), 2) if trigger is not None else None,
+        "target": round(float(target), 2) if target is not None else None,
+        "cancel": round(float(cancel), 2) if cancel is not None else None,
+        "strength": int(chosen.get("score") or 0),
+        "primary_side": side,
+        "is_confirmed": confirmed,
     }
 
 
@@ -3871,6 +4037,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
     analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
+    analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
     # The smart crop is used only to help read prices. The final image always uses

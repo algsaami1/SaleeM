@@ -14,7 +14,7 @@ def test_health():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "3.31.0"
+    assert payload["version"] == "3.32.0"
     assert "owner_email" not in payload
     assert "owner_email_configured" in payload
     assert "smtp_configured" in payload
