@@ -148,6 +148,111 @@ def _market_reason_factors(analysis: dict[str, Any]) -> list[str]:
     return unique[:4]
 
 
+def _build_result_explanation(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Build a detailed but non-repetitive explanation for the result page.
+
+    The quick cards remain short. This structure powers the collapsed
+    "لماذا ظهرت النتيجة؟" panel with frames, structure, momentum, liquidity,
+    zones, patterns, confirmation, opposing factors and available news data.
+    No news or market event is invented when it is absent from the inputs.
+    """
+    direction = str(analysis.get("higher_timeframe_direction") or analysis.get("direction") or "غير واضح")
+    current_movement = str(analysis.get("current_movement") or "غير واضح")
+    movement_strength = str(analysis.get("current_movement_strength") or "ضعيف")
+    frames_raw = analysis.get("frame_directions") if isinstance(analysis.get("frame_directions"), dict) else {}
+
+    frames: list[dict[str, str]] = []
+    for timeframe in ("H4", "H1", "M15", "M5"):
+        raw = frames_raw.get(timeframe)
+        if isinstance(raw, dict):
+            frame_direction = str(raw.get("direction") or "غير واضح")
+            detail = str(raw.get("reason") or raw.get("label") or "").strip()
+        else:
+            frame_direction = str(raw or "غير واضح")
+            detail = ""
+        frames.append({"timeframe": timeframe, "direction": frame_direction, "detail": detail[:120]})
+
+    pattern = str(analysis.get("pattern_type") or "لا يوجد")
+    pattern_confidence = max(0, min(100, int(analysis.get("pattern_confidence") or 0)))
+    pattern_timeframe = str(analysis.get("pattern_timeframe") or "M5")
+    if pattern == "لا يوجد" or pattern_confidence < 60:
+        pattern_text = "لا يوجد نموذج مكتمل وواضح على الشموع المغلقة حاليًا."
+    else:
+        pattern_text = f"النموذج الأقرب: {pattern} على {pattern_timeframe} بثقة {pattern_confidence}٪."
+
+    zones = detect_market_zone_presence(analysis)
+    zone_parts: list[str] = []
+    if zones.get("order_block"):
+        zone_parts.append("منطقة أوامر")
+    if zones.get("fvg"):
+        zone_parts.append("فجوة سعرية")
+    zone_text = " و".join(zone_parts) if zone_parts else "لا توجد منطقة أوامر أو فجوة سعرية قوية ظاهرة في النطاق الحالي."
+
+    supports = [item for item in (analysis.get("support_levels") or []) if isinstance(item, dict)]
+    resistances = [item for item in (analysis.get("resistance_levels") or []) if isinstance(item, dict)]
+    nearest_support = _number(supports[0].get("price")) if supports else None
+    nearest_resistance = _number(resistances[0].get("price")) if resistances else None
+    level_parts: list[str] = []
+    if nearest_support is not None:
+        level_parts.append(f"الدعم الأقرب {nearest_support:.2f}")
+    if nearest_resistance is not None:
+        level_parts.append(f"المقاومة الأقرب {nearest_resistance:.2f}")
+    levels_text = "، ".join(level_parts) if level_parts else "لم تتوفر مستويات مؤكدة كافية ضمن النطاق المقروء."
+
+    peak = analysis.get("most_probable_peak") if isinstance(analysis.get("most_probable_peak"), dict) else {}
+    trough = analysis.get("most_probable_trough") if isinstance(analysis.get("most_probable_trough"), dict) else {}
+    peak_price = _number(peak.get("price"))
+    trough_price = _number(trough.get("price"))
+    if direction == "صاعد":
+        liquidity_text = "السيولة المرجحة أعلى القمم الأخيرة"
+        if peak_price is not None:
+            liquidity_text += f" قرب {peak_price:.2f}"
+    elif direction == "هابط":
+        liquidity_text = "السيولة المرجحة أسفل القيعان الأخيرة"
+        if trough_price is not None:
+            liquidity_text += f" قرب {trough_price:.2f}"
+    else:
+        liquidity_text = "السيولة موزعة عند طرفي النطاق، لذلك لا توجد جهة مكتملة التأكيد."
+
+    confirmation = str(analysis.get("confirmation_explanation") or analysis.get("confirmation") or "بانتظار تأكيد واضح على شمعة M5 مغلقة")
+    invalidation = str(analysis.get("invalidation_condition") or "يُلغى السيناريو عند كسر البنية المقابلة")
+    decision = analysis.get("dual_scenario_decision") if isinstance(analysis.get("dual_scenario_decision"), dict) else {}
+    decision_reason = str(decision.get("reason") or analysis.get("scenario") or "تتم مراقبة السيناريوهين حتى اكتمال التفعيل")
+    waiting_for = str(decision.get("waiting_for") or analysis.get("entry_activation_reason") or "إغلاق شمعة التفعيل")
+
+    warnings = [str(item) for item in (analysis.get("market_data_warnings") or []) if str(item).strip()]
+    opposition_parts = [confirmation, f"الإلغاء: {invalidation}"]
+    if warnings:
+        opposition_parts.append("تنبيه البيانات: " + "، ".join(warnings[:2]))
+
+    macro_note = str(analysis.get("macro_note") or "لا تتوفر بيانات أخبار مؤكدة ضمن مدخلات هذا التحليل.")
+    if not macro_note.strip():
+        macro_note = "لا تتوفر بيانات أخبار مؤكدة ضمن مدخلات هذا التحليل."
+
+    technical_reasons = _market_reason_factors(analysis)
+    if not technical_reasons:
+        technical_reasons = ["القرار مبني على توافق الفريمات والبنية ومستويات السوق المتاحة"]
+
+    return {
+        "summary": str(analysis.get("market_reading_comment") or "تمت مراجعة الاتجاه والبنية والزخم والسيولة قبل تحديد النتيجة."),
+        "decision_reason": decision_reason,
+        "waiting_for": waiting_for,
+        "frames": frames,
+        "structure": f"الاتجاه العام {direction}، والحركة الحالية {current_movement} بقوة {movement_strength}.",
+        "momentum": f"الزخم الحالي {movement_strength}، واتجاه حركة M5 الأخيرة {current_movement}.",
+        "liquidity": liquidity_text,
+        "zones": zone_text,
+        "levels": levels_text,
+        "pattern": pattern_text,
+        "pattern_review": str(analysis.get("pattern_review_summary") or pattern_text),
+        "confirmation": confirmation,
+        "opposition": opposition_parts,
+        "technical_reasons": technical_reasons,
+        "news": macro_note,
+        "news_available": not ("لا تتوفر" in macro_note or "غير متوفر" in macro_note),
+    }
+
+
 def _build_market_reading_comment(analysis: dict[str, Any]) -> str:
     """Short user-friendly explanation without crowding the UI."""
     direction = str(analysis.get("direction") or "غير واضح")
@@ -3766,6 +3871,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
     analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
+    analysis["result_explanation"] = _build_result_explanation(analysis)
 
     # The smart crop is used only to help read prices. The final image always uses
     # the original upload so the fixed production layout remains identical.

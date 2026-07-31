@@ -216,3 +216,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+*.bak
+*.tmp
+*.zip
+.DS_Store
