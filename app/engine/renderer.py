@@ -3196,6 +3196,21 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
     if draw_mode == "inactive":
         return draw_mode, []
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
+
+    # أثناء المراقبة لا نعرض Entry أو أهدافًا وهمية. نعرض فقط خطي القرار
+    # المستقلين، وكل بطاقة مرتبطة بسعرها الحقيقي على المحور اليميني.
+    if draw_mode == "watch":
+        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+        buy_trigger = _number(buy.get("trigger_price"))
+        sell_trigger = _number(sell.get("trigger_price"))
+        if buy_trigger is not None and _is_visible_price(buy_trigger, price_min, price_max):
+            items.append(("شراء بعد إغلاق", buy_trigger, _price_y(buy_trigger, price_min, price_max), TP1_CARD))
+        if sell_trigger is not None and _is_visible_price(sell_trigger, price_min, price_max):
+            items.append(("بيع بعد إغلاق", sell_trigger, _price_y(sell_trigger, price_min, price_max), STOP_CARD))
+        return draw_mode, items
+
     if direction not in {"صاعد", "هابط"}:
         return draw_mode, []
 
@@ -3205,8 +3220,6 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
         return draw_mode, []
 
     entry_y = _price_y(entry, price_min, price_max)
-    if draw_mode == "watch":
-        return draw_mode, [("Entry", entry, entry_y, ENTRY_CARD)]
 
     items = [("Entry", entry, entry_y, ENTRY_CARD)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
@@ -3242,7 +3255,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     draw_mode, trade_items = _trade_display_items(analysis, price_min, price_max)
     level_items = _level_display_items(analysis, price_min, price_max)
-    extreme_items = _extreme_display_items(analysis, price_min, price_max)
+    extreme_items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
 
     if trade_items and direction in {"صاعد", "هابط"}:
         trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
