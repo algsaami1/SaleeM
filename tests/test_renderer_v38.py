@@ -560,14 +560,12 @@ def test_header_pattern_uses_two_lines_for_long_break_retest_name():
     assert _header_pattern_lines("كسر وإعادة اختبار") == ["كسر", "إعادة اختبار"]
 
 
-def test_watch_mode_exposes_two_close_decision_cards_without_entry_or_targets():
+def test_watch_mode_exposes_entry_only_without_cancel():
     analysis = _analysis("صاعد")
     analysis["draw_mode"] = "watch"
-    analysis["buy_scenario_details"] = {"trigger_price": analysis["current_price"] + 2}
-    analysis["sell_scenario_details"] = {"trigger_price": analysis["current_price"] - 2}
     mode, items = _trade_display_items(analysis, analysis["current_price"] - 20, analysis["current_price"] + 20)
     assert mode == "watch"
-    assert [item[0] for item in items] == ["شراء بعد إغلاق", "بيع بعد إغلاق"]
+    assert [item[0] for item in items] == ["Entry"]
 
 
 def test_conditional_mode_keeps_entry_cancel_and_three_targets():

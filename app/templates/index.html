@@ -161,14 +161,13 @@
     {% set action_target = action.get('target') %}
     {% set action_cancel = action.get('cancel') %}
     {% set action_strength = action.get('strength', result.trade_probability) %}
-    {% set action_score10 = ((action_strength|int + 5) // 10) %}
     {% set action_confirmed = action.get('is_confirmed', false) %}
 
     <section class="card smart-result-card result-{{ action_code }}" id="recommendation-type-card" aria-labelledby="recommendation-type-title">
       <div class="smart-result-head">
         <div class="smart-result-icon" aria-hidden="true">{% if action_primary == 'buy' %}↗{% elif action_primary == 'sell' %}↘{% elif action_code in ['no_trade','inactive'] %}✋{% else %}◉{% endif %}</div>
         <div class="smart-result-title"><small>الخلاصة التي تحتاجها الآن</small><h2 id="recommendation-type-title">{{ action_title }}</h2><span>{{ action_badge }}</span></div>
-        <div class="smart-result-strength"><b>{% if action_code == 'inactive' %}—{% else %}{{ action_score10 }}/10{% endif %}</b><small>درجة توافق الشروط</small></div>
+        <div class="smart-result-strength"><b>{% if action_code == 'inactive' %}—{% else %}{{ action_strength }}٪{% endif %}</b><small>قوة القراءة</small></div>
       </div>
 
       <div class="smart-action-line">

@@ -3546,13 +3546,12 @@ def _simple_swing_points(candles: list[dict[str, Any]], *, window: int = 2) -> t
 
 
 def _reference_style_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    panel = (26, 28, 452, 120)
-    draw.rounded_rectangle(panel, radius=18, fill=(5, 17, 32, 208), outline=(255, 255, 255, 28), width=1)
-    draw.text((50, 54), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
-    draw.text((50, 90), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(186, 198, 216, 255), anchor="la")
-    note = "Overlay on uploaded chart"
-    draw.text((430, 90), note, font=F_TRADE_LATIN, fill=(113, 134, 167, 255), anchor="ra")
-
+    # Smaller badge so the chart remains the main focus.
+    panel = (24, 26, 338, 106)
+    draw.rounded_rectangle(panel, radius=18, fill=(6, 18, 34, 208), outline=(255, 255, 255, 95), width=1)
+    draw.text((48, 60), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
+    draw.text((48, 86), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(205, 214, 228, 255), anchor="la")
+    draw.text((322, 86), "Overlay on uploaded chart", font=F_TRADE_LATIN, fill=(150, 164, 189, 255), anchor="ra")
 
 def _candle_slot_geometry(candles: list[dict[str, Any]]) -> tuple[float, int]:
     count = max(1, len(candles))
@@ -3573,32 +3572,35 @@ def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analys
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
-    zone_right = CHART[2] - 16
+    zone_right = CHART[2] - 14
+    zone_left_min = CHART[0] + 180
 
     ob = _nearest_detected_order_block(analysis, candles, float(focal_price), float(atr))
     if ob is not None:
         index, low, high, _strength = ob
         y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
         center_y = (y1 + y2) // 2
-        height = max(56, min(112, y2 - y1 + 20))
+        height = max(84, min(140, y2 - y1 + 34))
         y1, y2 = center_y - height // 2, center_y + height // 2
-        x1 = max(CHART[0] + 120, int(CHART[0] + slot * max(0, index - 0.35)))
-        x2 = max(x1 + 240, min(zone_right, x1 + 420))
-        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(54, 67, 88, 132), outline=(164, 174, 194, 120), width=2)
-        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_TRADE_LATIN, fill=WHITE, anchor="mm")
+        x1 = max(zone_left_min, int(CHART[0] + slot * max(0, index - 2.4)))
+        desired_width = int((CHART[2] - CHART[0]) * 0.40)
+        x2 = min(zone_right, x1 + max(300, desired_width))
+        if x2 - x1 < 280:
+            x1 = max(zone_left_min, x2 - 280)
+        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(76, 88, 108, 136), outline=(172, 180, 195, 120), width=2)
+        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_TITLE_LATIN, fill=WHITE, anchor="mm")
 
     fvg = _nearest_detected_fvg(candles, float(focal_price), float(atr))
     if fvg is not None:
         index, low, high = fvg
         y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
         center_y = (y1 + y2) // 2
-        x1 = max(CHART[0] + 90, int(CHART[0] + slot * max(0, index - 0.2)))
-        x2 = min(zone_right - 140, x1 + 180)
-        _dash_line(ld, (x1, center_y), (x2, center_y), WHITE, width=2, dash=10, gap=6)
-        ld.text((x2 + 14, center_y), "FVG", font=F_TRADE_LATIN, fill=WHITE, anchor="lm")
+        x1 = max(zone_left_min - 10, int(CHART[0] + slot * max(0, index - 0.4)))
+        x2 = min(zone_right - 120, x1 + 200)
+        _dash_line(ld, (x1, center_y), (x2, center_y), WHITE, width=2, dash=11, gap=6)
+        ld.text((x2 + 12, center_y), "FVG", font=F_TITLE_LATIN, fill=WHITE, anchor="lm")
 
     image.alpha_composite(layer)
-
 
 def _structure_line(draw: ImageDraw.ImageDraw, x: int, y: int, label: str, *, point_fill=(182, 190, 205, 255)) -> None:
     x2 = min(CHART[2] - 90, x + 150)
@@ -3615,28 +3617,35 @@ def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, An
     slot, _candle_right = _candle_slot_geometry(candles)
     direction = _reference_direction(analysis)
 
+    def place_label(idx: int, price: float, label: str, width: int = 170) -> None:
+        x = int(CHART[0] + slot * (idx + 0.5))
+        y = _price_y(price, price_min, price_max)
+        x2 = min(CHART[2] - 100, x + width)
+        draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=(188, 194, 205, 235))
+        _dash_line(draw, (x + 10, y), (x2, y), WHITE, width=2, dash=8, gap=5)
+        draw.text((x2 + 8, y), label, font=F_TITLE_LATIN, fill=WHITE, anchor="lm")
+
     recent_end = len(candles) - 2
     if direction == "هابط":
         high_idx, high_price = highs[-1] if highs else (max(2, recent_end - 6), max(float(c['high']) for c in candles[-8:]))
         low_idx, low_price = lows[-1] if lows else (max(3, recent_end - 3), min(float(c['low']) for c in candles[-6:]))
-        choch_idx, choch_price = lows[-2] if len(lows) >= 2 else (max(1, high_idx - 2), (high_price + low_price) / 2)
-        idm_idx = max(1, min(len(candles) - 2, (choch_idx + low_idx) // 2))
-        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
-        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
-        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
-        _structure_line(draw, int(CHART[0] + slot * (low_idx + 0.5)), _price_y(low_price, price_min, price_max), "BOS")
-        draw.text((CHART[0] + 40, CHART[3] - 132), "BEARISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
+        choch_idx, choch_price = lows[-2] if len(lows) >= 2 else (max(1, high_idx - 3), (high_price + low_price) / 2)
+        idm_idx = max(1, min(len(candles) - 2, (choch_idx + low_idx) // 2 + 1))
+        idm_price = (float(candles[idm_idx]['high']) + float(candles[idm_idx]['low'])) / 2
+        place_label(choch_idx, choch_price, "CHOCH", 150)
+        place_label(idm_idx, idm_price, "IDM", 150)
+        place_label(low_idx, low_price, "BOS", 190)
+        draw.text((CHART[0] + 40, CHART[3] - 110), "BEARISH\nDISPLACEMENT", font=F_TITLE_LATIN, fill=WHITE, anchor="la", spacing=4)
     else:
         low_idx, low_price = lows[-1] if lows else (max(2, recent_end - 6), min(float(c['low']) for c in candles[-8:]))
         high_idx, high_price = highs[-1] if highs else (max(3, recent_end - 3), max(float(c['high']) for c in candles[-6:]))
-        choch_idx, choch_price = highs[-2] if len(highs) >= 2 else (max(1, low_idx - 2), (high_price + low_price) / 2)
-        idm_idx = max(1, min(len(candles) - 2, (choch_idx + high_idx) // 2))
-        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
-        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
-        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
-        _structure_line(draw, int(CHART[0] + slot * (high_idx + 0.5)), _price_y(high_price, price_min, price_max), "BOS")
-        draw.text((CHART[0] + 40, CHART[3] - 132), "BULLISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
-
+        choch_idx, choch_price = highs[-2] if len(highs) >= 2 else (max(1, low_idx - 3), (high_price + low_price) / 2)
+        idm_idx = max(1, min(len(candles) - 2, (choch_idx + high_idx) // 2 + 1))
+        idm_price = (float(candles[idm_idx]['high']) + float(candles[idm_idx]['low'])) / 2
+        place_label(choch_idx, choch_price, "CHOCH", 150)
+        place_label(idm_idx, idm_price, "IDM", 150)
+        place_label(high_idx, high_price, "BOS", 190)
+        draw.text((CHART[0] + 40, CHART[3] - 110), "BULLISH\nDISPLACEMENT", font=F_TITLE_LATIN, fill=WHITE, anchor="la", spacing=4)
 
 def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
     current = _number(analysis.get("current_price"))
@@ -3653,70 +3662,80 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
         return
     direction = _reference_direction(analysis, entry=entry, target=primary_target, stop=stop)
     span = max(0.5, price_max - price_min)
+    risk_distance = abs(float(stop) - float(entry)) if stop is not None else span * 0.07
+    if risk_distance < span * 0.02:
+        risk_distance = span * 0.045
     if stop is None:
-        stop = entry - span * 0.08 if direction == "صاعد" else entry + span * 0.08
-    if primary_target is None:
-        primary_target = entry + span * 0.18 if direction == "صاعد" else entry - span * 0.18
-    targets = [value for value in (t1, t2, t3) if value is not None]
-    if not targets:
-        step = span * 0.06
-        if direction == "صاعد":
-            targets = [entry + step, entry + step * 2, primary_target]
-        else:
-            targets = [entry - step, entry - step * 2, primary_target]
+        stop = entry - risk_distance if direction == "صاعد" else entry + risk_distance
+    # Use a larger visual box close to the reference even if the raw targets are tight.
+    if primary_target is None or abs(float(primary_target) - float(entry)) < risk_distance * 1.15:
+        primary_target = entry + risk_distance * 1.55 if direction == "صاعد" else entry - risk_distance * 1.55
 
-    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.76)
+    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.60)
     zone_right = CHART[2] - 16
     entry_y = _price_y(float(entry), price_min, price_max)
     stop_y = _price_y(float(stop), price_min, price_max)
     target_y = _price_y(float(primary_target), price_min, price_max)
+    min_visual = 140
+    if abs(stop_y - entry_y) < 70:
+        stop_y = entry_y - min_visual if direction == 'هابط' else entry_y + min_visual
+    if abs(target_y - entry_y) < 170:
+        target_y = entry_y + 300 if direction == 'هابط' else entry_y - 300
+    # Clamp within chart area.
+    stop_y = max(CHART[1] + 28, min(CHART[3] - 28, stop_y))
+    target_y = max(CHART[1] + 28, min(CHART[3] - 28, target_y))
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
     if direction == "هابط":
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 166))
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 168))
     else:
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 168))
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 166))
     image.alpha_composite(layer)
 
-    draw.text((zone_left + 18, entry_y - 12), "ENTRY", font=F_TRADE_LATIN, fill=WHITE, anchor="ls")
-    draw.line((zone_left + 8, entry_y, zone_right - 8, entry_y), fill=WHITE, width=2)
+    draw.text((zone_left + 22, entry_y - 10), "ENTRY", font=F_TITLE_LATIN, fill=WHITE, anchor="ls")
+    _dash_line(draw, (zone_left - 36, entry_y), (zone_right - 8, entry_y), WHITE, width=2, dash=8, gap=5)
 
-    mid1_x = zone_left + 64
-    mid2_x = zone_left + 118
-    end_x = zone_right - 26
+    mid1_x = zone_left + 92
+    mid2_x = zone_left + 176
+    end_x = zone_right - 18
     if direction == "هابط":
-        p1 = (zone_left + 8, entry_y)
-        p2 = (mid1_x, entry_y + max(12, abs(target_y - entry_y) * 0.18))
-        p3 = (mid2_x, entry_y + max(22, abs(target_y - entry_y) * 0.56))
+        p1 = (zone_left + 12, entry_y)
+        p2 = (mid1_x, entry_y + 48)
+        p3 = (mid2_x, entry_y + 160)
         p4 = (end_x, target_y)
     else:
-        p1 = (zone_left + 8, entry_y)
-        p2 = (mid1_x, entry_y - max(12, abs(target_y - entry_y) * 0.18))
-        p3 = (mid2_x, entry_y - max(22, abs(target_y - entry_y) * 0.56))
+        p1 = (zone_left + 12, entry_y)
+        p2 = (mid1_x, entry_y - 48)
+        p3 = (mid2_x, entry_y - 160)
         p4 = (end_x, target_y)
-    points = _bezier_points(p1, p2, p3, p4, steps=24)
-    for a, b in zip(points[::2], points[1::2]):
+    points = _bezier_points(p1, p2, p3, p4, steps=26)
+    for a, b in zip(points[:-1], points[1:]):
         _dash_line(draw, a, b, WHITE, width=2, dash=7, gap=5)
 
-    for idx, value in enumerate(targets[:3], start=1):
-        y = _price_y(float(value), price_min, price_max)
-        _dash_line(draw, (zone_left - 40, y), (zone_right - 8, y), (214, 230, 216, 210), width=1, dash=8, gap=6)
-        draw.text((zone_right - 6, y - 3), f"TP{idx}", font=F_TRADE_LATIN, fill=WHITE, anchor="rs")
+    # Structured TP guide lines with stronger spacing.
+    if direction == 'هابط':
+        tp_levels = [entry_y + (target_y - entry_y) * ratio for ratio in (0.25, 0.52, 1.0)]
+    else:
+        tp_levels = [entry_y + (target_y - entry_y) * ratio for ratio in (0.25, 0.52, 1.0)]
+    for idx, y in enumerate(tp_levels, start=1):
+        y = int(round(y))
+        _dash_line(draw, (zone_left - 38, y), (zone_right - 8, y), (228, 234, 240, 220), width=1, dash=8, gap=6)
+        draw.text((zone_right - 6, y - 4), f"TP{idx}", font=F_TITLE_LATIN, fill=WHITE, anchor="rs")
 
-    rr = abs(float(primary_target) - float(entry)) / max(0.01, abs(float(stop) - float(entry)))
-    draw.text((zone_left + 8, max(CHART[1] + 24, min(CHART[3] - 24, target_y + (36 if direction == 'هابط' else -36)))), f"RR {rr:.1f}", font=F_TRADE_LATIN, fill=WHITE, anchor="la")
-
+    rr = abs(target_y - entry_y) / max(1.0, abs(stop_y - entry_y))
+    rr_x = zone_left + 6
+    rr_y = target_y + 42 if direction == 'هابط' else target_y - 42
+    rr_y = max(CHART[1] + 22, min(CHART[3] - 22, rr_y))
+    draw.text((rr_x, rr_y), f"RR {rr:.1f}", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """Render a simpler educational overlay directly on the uploaded chart.
+    """Render an educational overlay directly on the uploaded chart.
 
-    This mode intentionally keeps the user's own chart screenshot as the main
-    background and adds lightweight visual layers inspired by educational
-    social-media chart examples: ORDER BLOCK, FVG, BOS, CHOCH, IDM, ENTRY,
-    and a simple risk/reward box.
+    The uploaded screenshot remains the main background while SaleeM adds a
+    simplified smart-money-style visual layer inspired by the user reference.
     """
     image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(image)
@@ -3724,7 +3743,6 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     candles = _valid_renderer_candles(analysis)
     price_min, price_max = _price_range(analysis)
     prepared_background, detected_green_line_y, _visible_candles = _prepare_chart_background(chart_background_path)
-    using_chart_background = prepared_background is not None
     current_reference_y = detected_green_line_y
     if current_reference_y is None:
         current_reference_y = _analysis_current_reference_y(analysis)
@@ -3744,12 +3762,12 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
         if candles:
             _draw_candles(draw, candles, price_min, price_max)
 
-    # Soften non-chart areas for a social-media style composition.
+    # More subtle framing so the uploaded chart fills the composition.
     dim = Image.new("RGBA", image.size, (0, 0, 0, 0))
     dd = ImageDraw.Draw(dim)
-    dd.rectangle((0, 0, WIDTH, CHART[1] - 1), fill=(0, 0, 0, 155))
-    dd.rectangle((0, CHART[3] + 1, WIDTH, HEIGHT), fill=(0, 0, 0, 132))
-    dd.rectangle((CHART[2] + 1, CHART[1], WIDTH, CHART[3]), fill=(0, 0, 0, 66))
+    dd.rectangle((0, 0, WIDTH, CHART[1] - 1), fill=(0, 0, 0, 88))
+    dd.rectangle((0, CHART[3] + 1, WIDTH, HEIGHT), fill=(0, 0, 0, 76))
+    dd.rectangle((CHART[2] + 1, CHART[1], WIDTH, CHART[3]), fill=(0, 0, 0, 24))
     image.alpha_composite(dim)
     draw = ImageDraw.Draw(image)
 
@@ -3762,3 +3780,4 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
     return output.getvalue()
+

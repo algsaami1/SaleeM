@@ -2235,29 +2235,14 @@ def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, An
     score = int(analysis.get("buy_probability") if side == "buy" else analysis.get("sell_probability") or 0)
 
     market_active = str(analysis.get("market_status") or "active") == "active"
-
-    # بوابة جودة موحدة: لا تتحول المراقبة إلى شراء/بيع إلا بعد اكتمال
-    # الشروط التنفيذية الأساسية ونجاح 5 شروط من أصل 6 على الأقل.
-    h4 = _analysis_frame_direction(analysis, "H4")
-    h1 = _analysis_frame_direction(analysis, "H1")
-    higher_not_opposed = not (h4 == h1 and h4 not in {direction, "غير واضح"})
-    targets_preview = _scalp_targets(analysis, direction=direction, entry=entry)
-    extended_preview = _number(targets_preview.get("extended_target"))
-    risk = abs(entry - cancel)
-    reward = abs(float(extended_preview) - entry) if extended_preview is not None else 0.0
-    rr = reward / risk if risk > 0 else 0.0
-    confirmation_checks = {
-        "higher_frames": bool(higher_not_opposed),
-        "lower_frames": bool(lower_aligned),
-        "closed_m5": bool(closed_confirmed),
-        "trigger_active": bool(active and entry_kind != "مراقبة"),
-        "score": bool(score >= DUAL_SCENARIO_CONFIRMED_PROBABILITY),
-        "risk_reward": bool(rr >= 1.30),
-    }
-    confirmation_count = sum(confirmation_checks.values())
-    mandatory_ok = all(confirmation_checks[key] for key in ("closed_m5", "trigger_active", "risk_reward"))
-
-    if market_active and mandatory_ok and confirmation_count >= 5:
+    if (
+        market_active
+        and score >= DUAL_SCENARIO_CONFIRMED_PROBABILITY
+        and lower_aligned
+        and closed_confirmed
+        and active
+        and entry_kind != "مراقبة"
+    ):
         state_code, state = "confirmed", "مؤكد"
     else:
         # بطاقات السيناريو المستقلة لا تستخدم حالة «مشروط»؛ ما لم يكتمل
@@ -2279,7 +2264,7 @@ def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, An
     else:
         waiting_for = f"تكوّن مستوى تفعيل واضح لسيناريو {side_ar}"
 
-    targets = targets_preview
+    targets = _scalp_targets(analysis, direction=direction, entry=entry)
     supporting, blocking = _dual_scenario_reasons(
         analysis,
         direction=direction,
@@ -2342,10 +2327,6 @@ def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, An
         "distance_to_trigger": round(abs(entry - current), 2),
         "uses_closed_m5_confirmation": bool(closed_confirmed),
         "lower_frames_aligned": bool(lower_aligned),
-        "confirmation_checks": confirmation_checks,
-        "confirmation_count": confirmation_count,
-        "confirmation_total": 6,
-        "risk_reward": round(rr, 2),
     }
 
 
