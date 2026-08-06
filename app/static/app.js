@@ -10,6 +10,8 @@
   const analyzeButton = document.getElementById('analyze-button');
   const steps = processingCard ? [...processingCard.querySelectorAll('.steps span')] : [];
   const resultImage = document.getElementById('result-image');
+  const chartPanViewport = document.getElementById('chart-pan-viewport');
+  const chartPanHint = document.getElementById('chart-pan-hint');
   const saveImageButton = document.getElementById('save-image-button');
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
@@ -47,6 +49,63 @@
   const systemCodePanel = document.getElementById('system-code-panel');
   const systemStatusRefresh = document.getElementById('system-status-refresh');
   const systemStatusMessage = document.getElementById('system-status-message');
+
+
+  const initializeLandscapeResultViewer = () => {
+    if (!chartPanViewport || !resultImage) return;
+
+    const scrollToLatest = () => {
+      window.requestAnimationFrame(() => {
+        chartPanViewport.scrollLeft = Math.max(
+          0,
+          chartPanViewport.scrollWidth - chartPanViewport.clientWidth,
+        );
+      });
+    };
+
+    if (resultImage.complete) scrollToLatest();
+    else resultImage.addEventListener('load', scrollToLatest, { once: true });
+    window.setTimeout(scrollToLatest, 120);
+
+    let hintHidden = false;
+    const hideHint = () => {
+      if (hintHidden) return;
+      hintHidden = true;
+      chartPanHint?.classList.add('hidden');
+    };
+    chartPanViewport.addEventListener('touchstart', hideHint, { passive: true });
+    chartPanViewport.addEventListener('scroll', hideHint, { passive: true, once: true });
+    window.setTimeout(hideHint, 2600);
+
+    // Native touch scrolling is used on iPhone. Mouse dragging is added only
+    // for desktop browsers so the same viewer remains intuitive everywhere.
+    let dragging = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    chartPanViewport.addEventListener('pointerdown', (event) => {
+      if (event.pointerType !== 'mouse') return;
+      dragging = true;
+      startX = event.clientX;
+      startScrollLeft = chartPanViewport.scrollLeft;
+      chartPanViewport.classList.add('dragging');
+      chartPanViewport.setPointerCapture?.(event.pointerId);
+      hideHint();
+    });
+    chartPanViewport.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      chartPanViewport.scrollLeft = startScrollLeft - (event.clientX - startX);
+    });
+    const stopDragging = (event) => {
+      if (!dragging) return;
+      dragging = false;
+      chartPanViewport.classList.remove('dragging');
+      chartPanViewport.releasePointerCapture?.(event.pointerId);
+    };
+    chartPanViewport.addEventListener('pointerup', stopDragging);
+    chartPanViewport.addEventListener('pointercancel', stopDragging);
+  };
+
+  initializeLandscapeResultViewer();
 
 
   const updateFileName = () => {

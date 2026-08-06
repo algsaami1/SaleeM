@@ -122,8 +122,13 @@
       </a>
     </div>
 
-    <section class="card result-card" id="result-card">
-      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب المعاد رسمه من بيانات السوق مع السيناريو الفني">
+    <section class="card result-card landscape-result-card" id="result-card">
+      <div class="chart-pan-shell">
+        <div class="chart-pan-viewport" id="chart-pan-viewport" role="region" aria-label="صورة نتيجة عرضية قابلة للسحب يمينًا ويسارًا" tabindex="0">
+          <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب العرضي مع السيناريو الفني" draggable="false">
+        </div>
+        <div class="chart-pan-hint" id="chart-pan-hint" aria-hidden="true"><span>↔</span> اسحب الشارت يمينًا ويسارًا</div>
+      </div>
 
       <div class="result-actions" aria-label="خيارات صورة النتيجة">
         <button class="result-action save-button" id="save-image-button" type="button">

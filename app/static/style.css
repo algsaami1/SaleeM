@@ -551,3 +551,89 @@ details[open]>.details-arrow,details[open]>summary .details-arrow{transform:rota
   .compact-dual-card .scenario-rows span{font-size:7px}
   .compact-dual-card .scenario-rows b{font-size:7.5px;line-height:1.55}
 }
+
+
+/* v3.37.0 — عرض نتيجة الشارت مثل الفيديو: صورة عرضية داخل نافذة قابلة للسحب */
+.landscape-result-card{
+  padding:0;
+  overflow:visible;
+  background:transparent;
+  border:0;
+  box-shadow:none;
+}
+.chart-pan-shell{
+  position:relative;
+  width:100vw;
+  margin-inline:calc(50% - 50vw);
+  overflow:hidden;
+  background:#02070d;
+  border-block:1px solid rgba(135,155,178,.25);
+}
+.chart-pan-viewport{
+  direction:ltr;
+  width:100vw;
+  height:70svh;
+  min-height:430px;
+  max-height:760px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-x;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+  cursor:grab;
+  background:#000;
+}
+.chart-pan-viewport::-webkit-scrollbar{display:none}
+.chart-pan-viewport.dragging{cursor:grabbing}
+.chart-pan-viewport #result-image{
+  display:block;
+  width:auto;
+  max-width:none;
+  height:100%;
+  margin:0;
+  border:0;
+  border-radius:0;
+  background:#000;
+  object-fit:contain;
+  user-select:none;
+  -webkit-user-drag:none;
+  pointer-events:none;
+}
+.chart-pan-hint{
+  position:absolute;
+  left:50%;
+  bottom:16px;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  gap:7px;
+  transform:translateX(-50%);
+  padding:8px 13px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;
+  background:rgba(0,0,0,.72);
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+  white-space:nowrap;
+  pointer-events:none;
+  transition:opacity .28s ease,transform .28s ease;
+  backdrop-filter:blur(8px);
+}
+.chart-pan-hint span{font-size:17px;line-height:1}
+.chart-pan-hint.hidden{opacity:0;transform:translate(-50%,8px)}
+.landscape-result-card .result-actions,
+.landscape-result-card .result-action-status,
+.landscape-result-card .image-meta-line{
+  width:min(620px,calc(100% - 22px));
+  margin-inline:auto;
+}
+.landscape-result-card .result-actions{margin-top:12px}
+
+@media (max-height:650px){
+  .chart-pan-viewport{height:76svh;min-height:360px}
+}
+@media (orientation:landscape){
+  .chart-pan-viewport{height:84svh;max-height:none}
+}

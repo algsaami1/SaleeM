@@ -19,8 +19,8 @@ except ImportError:  # pragma: no cover
     get_display = None
 
 # صورة عمودية مناسبة للهاتف، لكن جميع الإحداثيات داخلية وقابلة للتغيير.
-WIDTH = 1320
-HEIGHT = 2868
+WIDTH = 2868
+HEIGHT = 1320
 
 # لوحة ألوان قريبة من التصميم المرجعي.
 BG = (3, 17, 35, 255)
@@ -76,8 +76,8 @@ TROUGH_CARD = (8, 145, 178, 255)
 # الجزء الظاهر يأخذ أقصى يمين المصدر (بما فيه محور الأسعار الأصلي)،
 # ويُحذف تلقائيًا 209 بكسل من اليسار وقرابة 312 بكسل من الأعلى والأسفل.
 # المساحة اليمنى المتبقية 209 بكسل مخصصة للمحور الإضافي، وباقي المساحات سوداء.
-CHART_CARD = (0, 320, 1320, 2563)
-CHART = (0, 320, 930, 2563)
+CHART_CARD = (0, 0, 2868, 1320)
+CHART = (120, 32, 2585, 1190)
 PRICE_AXIS_X = 1125
 NOTES = (0, 2868, 0, 2868)
 TOP_SUMMARY_PANEL = (10, 12, WIDTH - 10, CHART[1] - 14)
@@ -87,8 +87,8 @@ BOTTOM_CARDS_Y2 = HEIGHT - 174
 # شموع السيناريو لها عمود ثابت، لكن مواضعها الرأسية تتبع الأسعار الحقيقية.
 PROJECTION_X1 = 675
 PROJECTION_X2 = 902
-SOURCE_VISIBLE_WIDTH = 1111
-SOURCE_VISIBLE_HEIGHT = 2243
+SOURCE_VISIBLE_WIDTH = 2868
+SOURCE_VISIBLE_HEIGHT = 1320
 SOURCE_AXIS_VISIBLE_WIDTH = SOURCE_VISIBLE_WIDTH - CHART[2]
 SALEEM_AXIS_EXTRA_WIDTH = WIDTH - SOURCE_VISIBLE_WIDTH
 DUPLICATED_AXIS_LEFT_PADDING = 8
@@ -104,8 +104,8 @@ TOP_PRICE_TOP_PADDING_RATIO = 0.02
 # النتيجة يجب أن تبقى متطابقة على مختلف أجهزة الآيفون. لذلك لا نعتمد
 # على قص ثابت بالبكسل من الصورة المرفوعة، بل نستخرج الجزء المطلوب بنِسَب
 # مشتقة من صورة مرجعية، ثم نعيد تطبيعه إلى نفس نافذة العرض النهائية.
-REFERENCE_SCREENSHOT_WIDTH = 1320
-REFERENCE_SCREENSHOT_HEIGHT = 2868
+REFERENCE_SCREENSHOT_WIDTH = 2868
+REFERENCE_SCREENSHOT_HEIGHT = 1320
 VISIBLE_WIDTH_RATIO = SOURCE_VISIBLE_WIDTH / REFERENCE_SCREENSHOT_WIDTH
 VISIBLE_HEIGHT_RATIO = SOURCE_VISIBLE_HEIGHT / REFERENCE_SCREENSHOT_HEIGHT
 FULL_SCREEN_ASPECT = REFERENCE_SCREENSHOT_WIDTH / REFERENCE_SCREENSHOT_HEIGHT
@@ -1075,13 +1075,13 @@ def _anchored_price_range(
 
 
 def _source_background_box() -> tuple[int, int, int, int]:
-    """Exact native-size viewport kept from the uploaded iPhone screenshot."""
-    return 0, CHART[1], SOURCE_VISIBLE_WIDTH, CHART[1] + SOURCE_VISIBLE_HEIGHT
+    """Use the full uploaded landscape screenshot as the background canvas."""
+    return 0, 0, SOURCE_VISIBLE_WIDTH, SOURCE_VISIBLE_HEIGHT
 
 
 def _saleem_axis_box() -> tuple[int, int, int, int]:
-    """Black/right strip reserved for the additional synchronized axis."""
-    return SOURCE_VISIBLE_WIDTH, CHART[1], WIDTH, CHART[3]
+    """Right margin box; in landscape mode we do not duplicate a second axis."""
+    return CHART[2], 0, WIDTH, HEIGHT
 
 
 def _background_visible_box() -> tuple[int, int, int, int]:
@@ -3547,15 +3547,15 @@ def _simple_swing_points(candles: list[dict[str, Any]], *, window: int = 2) -> t
 
 def _reference_style_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
     # Smaller badge so the chart remains the main focus.
-    panel = (24, 26, 338, 106)
+    panel = (26, 16, 430, 74)
     draw.rounded_rectangle(panel, radius=18, fill=(6, 18, 34, 208), outline=(255, 255, 255, 95), width=1)
-    draw.text((48, 60), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
-    draw.text((48, 86), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(205, 214, 228, 255), anchor="la")
-    draw.text((322, 86), "Overlay on uploaded chart", font=F_TRADE_LATIN, fill=(150, 164, 189, 255), anchor="ra")
+    draw.text((46, 30), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
+    draw.text((46, 56), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(205, 214, 228, 255), anchor="la")
+    draw.text((414, 56), "Landscape overlay", font=F_TRADE_LATIN, fill=(150, 164, 189, 255), anchor="ra")
 
 def _candle_slot_geometry(candles: list[dict[str, Any]]) -> tuple[float, int]:
     count = max(1, len(candles))
-    candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.70)
+    candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.86)
     slot = (candle_right - CHART[0]) / count
     return slot, candle_right
 
@@ -3765,9 +3765,8 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     # More subtle framing so the uploaded chart fills the composition.
     dim = Image.new("RGBA", image.size, (0, 0, 0, 0))
     dd = ImageDraw.Draw(dim)
-    dd.rectangle((0, 0, WIDTH, CHART[1] - 1), fill=(0, 0, 0, 88))
-    dd.rectangle((0, CHART[3] + 1, WIDTH, HEIGHT), fill=(0, 0, 0, 76))
-    dd.rectangle((CHART[2] + 1, CHART[1], WIDTH, CHART[3]), fill=(0, 0, 0, 24))
+    dd.rectangle((0, 0, WIDTH, 90), fill=(0, 0, 0, 28))
+    dd.rectangle((CHART[2] + 1, CHART[1], WIDTH, CHART[3]), fill=(0, 0, 0, 14))
     image.alpha_composite(dim)
     draw = ImageDraw.Draw(image)
 
@@ -3776,6 +3775,10 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     draw = ImageDraw.Draw(image)
     _reference_style_structure(draw, analysis, price_min, price_max)
     _reference_style_trade_overlay(image, draw, analysis, price_min, price_max)
+
+    output = io.BytesIO()
+    image.convert("RGB").save(output, format="PNG", optimize=True)
+    return output.getvalue()
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
