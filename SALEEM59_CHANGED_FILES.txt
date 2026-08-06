@@ -53,3 +53,9 @@ SaleeM 3.32.0 — نتيجة واحدة واضحة وتحليل أسرع
 - tests/test_smart_action_summary_v332.py
 - tests/test_health.py
 - tests/test_system_status_panel_v325.py
+
+=== v3.38.0 ===
+- Added visible support and resistance lines to the smart-money overlay.
+- Moved support/resistance price labels to right-axis cards (R1/R2/S1/S2).
+- Kept Entry/Stop/TP cards on the right axis with collision-safe vertical spacing.
+- Reduced structure-label reach so CHOCH/IDM/BOS stay clearer beside the right-axis cards.

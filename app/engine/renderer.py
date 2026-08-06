@@ -3620,7 +3620,7 @@ def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, An
     def place_label(idx: int, price: float, label: str, width: int = 170) -> None:
         x = int(CHART[0] + slot * (idx + 0.5))
         y = _price_y(price, price_min, price_max)
-        x2 = min(CHART[2] - 100, x + width)
+        x2 = min(CHART[2] - 240, x + width)
         draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=(188, 194, 205, 235))
         _dash_line(draw, (x + 10, y), (x2, y), WHITE, width=2, dash=8, gap=5)
         draw.text((x2 + 8, y), label, font=F_TITLE_LATIN, fill=WHITE, anchor="lm")
@@ -3634,7 +3634,7 @@ def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, An
         idm_price = (float(candles[idm_idx]['high']) + float(candles[idm_idx]['low'])) / 2
         place_label(choch_idx, choch_price, "CHOCH", 150)
         place_label(idm_idx, idm_price, "IDM", 150)
-        place_label(low_idx, low_price, "BOS", 190)
+        place_label(low_idx, low_price, "BOS", 170)
         draw.text((CHART[0] + 40, CHART[3] - 110), "BEARISH\nDISPLACEMENT", font=F_TITLE_LATIN, fill=WHITE, anchor="la", spacing=4)
     else:
         low_idx, low_price = lows[-1] if lows else (max(2, recent_end - 6), min(float(c['low']) for c in candles[-8:]))
@@ -3644,8 +3644,53 @@ def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, An
         idm_price = (float(candles[idm_idx]['high']) + float(candles[idm_idx]['low'])) / 2
         place_label(choch_idx, choch_price, "CHOCH", 150)
         place_label(idm_idx, idm_price, "IDM", 150)
-        place_label(high_idx, high_price, "BOS", 190)
+        place_label(high_idx, high_price, "BOS", 170)
         draw.text((CHART[0] + 40, CHART[3] - 110), "BULLISH\nDISPLACEMENT", font=F_TITLE_LATIN, fill=WHITE, anchor="la", spacing=4)
+
+
+def _reference_style_level_items(
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> list[tuple[str, float, int, tuple[int, int, int, int]]]:
+    """Return support/resistance levels as right-axis cards."""
+    items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+    specs = (
+        ("resistance_levels", "R", RESISTANCE_FILL),
+        ("support_levels", "S", SUPPORT_FILL),
+    )
+    for key, prefix, color in specs:
+        levels = list(analysis.get(key) or [])[:2]
+        for rank, level in enumerate(levels, start=1):
+            price = _number(level.get("price"))
+            if price is None or not (price_min <= price <= price_max):
+                continue
+            items.append((f"{prefix}{rank}", float(price), _price_y(float(price), price_min, price_max), color))
+    return items
+
+
+def _reference_style_draw_levels(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    price_min: float,
+    price_max: float,
+) -> None:
+    """Draw support/resistance lines directly on the chart."""
+    left, _top, right, _bottom = CHART
+    specs = (
+        ("resistance_levels", RESISTANCE_DARK),
+        ("support_levels", SUPPORT_DARK),
+    )
+    for key, color in specs:
+        levels = list(analysis.get(key) or [])[:2]
+        for level in levels:
+            price = _number(level.get("price"))
+            if price is None or not (price_min <= price <= price_max):
+                continue
+            strength = max(0, min(100, int(level.get("strength") or 50)))
+            exact_y = _price_y(float(price), price_min, price_max)
+            draw.line((left + 18, exact_y, right - 4, exact_y), fill=color, width=_strength_width(strength))
+
 
 def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
     current = _number(analysis.get("current_price"))
@@ -3667,12 +3712,11 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
         risk_distance = span * 0.045
     if stop is None:
         stop = entry - risk_distance if direction == "صاعد" else entry + risk_distance
-    # Use a larger visual box close to the reference even if the raw targets are tight.
     if primary_target is None or abs(float(primary_target) - float(entry)) < risk_distance * 1.15:
         primary_target = entry + risk_distance * 1.55 if direction == "صاعد" else entry - risk_distance * 1.55
 
-    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.60)
-    zone_right = CHART[2] - 16
+    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.64)
+    zone_right = CHART[2] - 22
     entry_y = _price_y(float(entry), price_min, price_max)
     stop_y = _price_y(float(stop), price_min, price_max)
     target_y = _price_y(float(primary_target), price_min, price_max)
@@ -3681,22 +3725,21 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
         stop_y = entry_y - min_visual if direction == 'هابط' else entry_y + min_visual
     if abs(target_y - entry_y) < 170:
         target_y = entry_y + 300 if direction == 'هابط' else entry_y - 300
-    # Clamp within chart area.
     stop_y = max(CHART[1] + 28, min(CHART[3] - 28, stop_y))
     target_y = max(CHART[1] + 28, min(CHART[3] - 28, target_y))
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
     if direction == "هابط":
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 166))
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 168))
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 160))
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 156))
     else:
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 168))
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 166))
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(10, 112, 79, 156))
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(177, 68, 54, 160))
     image.alpha_composite(layer)
 
-    draw.text((zone_left + 22, entry_y - 10), "ENTRY", font=F_TITLE_LATIN, fill=WHITE, anchor="ls")
-    _dash_line(draw, (zone_left - 36, entry_y), (zone_right - 8, entry_y), WHITE, width=2, dash=8, gap=5)
+    draw.text((zone_left + 18, entry_y - 8), "ENTRY", font=F_TITLE_LATIN, fill=WHITE, anchor="ls")
+    _dash_line(draw, (zone_left - 28, entry_y), (zone_right - 8, entry_y), WHITE, width=2, dash=8, gap=5)
 
     mid1_x = zone_left + 92
     mid2_x = zone_left + 176
@@ -3715,21 +3758,41 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
     for a, b in zip(points[:-1], points[1:]):
         _dash_line(draw, a, b, WHITE, width=2, dash=7, gap=5)
 
-    # Structured TP guide lines with stronger spacing.
-    if direction == 'هابط':
-        tp_levels = [entry_y + (target_y - entry_y) * ratio for ratio in (0.25, 0.52, 1.0)]
-    else:
-        tp_levels = [entry_y + (target_y - entry_y) * ratio for ratio in (0.25, 0.52, 1.0)]
-    for idx, y in enumerate(tp_levels, start=1):
-        y = int(round(y))
-        _dash_line(draw, (zone_left - 38, y), (zone_right - 8, y), (228, 234, 240, 220), width=1, dash=8, gap=6)
-        draw.text((zone_right - 6, y - 4), f"TP{idx}", font=F_TITLE_LATIN, fill=WHITE, anchor="rs")
+    tp_prices: list[float] = []
+    for candidate in (t1, t2, t3):
+        if candidate is not None and price_min <= float(candidate) <= price_max:
+            tp_prices.append(float(candidate))
+    if len(tp_prices) < 3:
+        tp_prices = [entry + (primary_target - entry) * ratio for ratio in (0.25, 0.52, 1.0)]
+
+    tp_items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+    target_colors = (TP1_CARD, TP2_CARD, TP3_CARD)
+    for idx, price in enumerate(tp_prices[:3], start=1):
+        y = _price_y(float(price), price_min, price_max)
+        _dash_line(draw, (zone_left - 28, y), (zone_right - 8, y), (228, 234, 240, 220), width=1, dash=8, gap=6)
+        draw.text((zone_right - 8, y - 4), f"TP{idx}", font=F_TITLE_LATIN, fill=WHITE, anchor="rs")
+        tp_items.append((f"TP{idx}", float(price), y, target_colors[idx - 1]))
 
     rr = abs(target_y - entry_y) / max(1.0, abs(stop_y - entry_y))
     rr_x = zone_left + 6
     rr_y = target_y + 42 if direction == 'هابط' else target_y - 42
     rr_y = max(CHART[1] + 22, min(CHART[3] - 22, rr_y))
     draw.text((rr_x, rr_y), f"RR {rr:.1f}", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
+
+    right_items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    if stop is not None:
+        stop_label = "Cancel" if draw_mode == "conditional" else "Stop"
+        stop_color = CANCEL_CARD if draw_mode == "conditional" else STOP_CARD
+        right_items.append((stop_label, float(stop), _price_y(float(stop), price_min, price_max), stop_color))
+    right_items.append(("Entry", float(entry), entry_y, ENTRY_CARD))
+    right_items.extend(tp_items)
+    right_items.extend(_reference_style_level_items(analysis, price_min, price_max))
+
+    centers = _resolve_axis_card_centers(right_items)
+    for index, (label, price, exact_y, color) in enumerate(right_items):
+        _draw_trade_axis_card(draw, label=label, price=price, exact_y=exact_y, card_y=centers.get(index, exact_y), color=color)
+
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
     """Render an educational overlay directly on the uploaded chart.
@@ -3773,12 +3836,9 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     _reference_style_header(draw, analysis)
     _reference_style_zones(image, draw, analysis, price_min, price_max)
     draw = ImageDraw.Draw(image)
+    _reference_style_draw_levels(draw, analysis, price_min, price_max)
     _reference_style_structure(draw, analysis, price_min, price_max)
     _reference_style_trade_overlay(image, draw, analysis, price_min, price_max)
-
-    output = io.BytesIO()
-    image.convert("RGB").save(output, format="PNG", optimize=True)
-    return output.getvalue()
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
