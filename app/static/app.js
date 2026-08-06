@@ -10,8 +10,6 @@
   const analyzeButton = document.getElementById('analyze-button');
   const steps = processingCard ? [...processingCard.querySelectorAll('.steps span')] : [];
   const resultImage = document.getElementById('result-image');
-  const chartPanViewport = document.getElementById('chart-pan-viewport');
-  const chartPanHint = document.getElementById('chart-pan-hint');
   const saveImageButton = document.getElementById('save-image-button');
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
@@ -49,63 +47,6 @@
   const systemCodePanel = document.getElementById('system-code-panel');
   const systemStatusRefresh = document.getElementById('system-status-refresh');
   const systemStatusMessage = document.getElementById('system-status-message');
-
-
-  const initializeLandscapeResultViewer = () => {
-    if (!chartPanViewport || !resultImage) return;
-
-    const scrollToLatest = () => {
-      window.requestAnimationFrame(() => {
-        chartPanViewport.scrollLeft = Math.max(
-          0,
-          chartPanViewport.scrollWidth - chartPanViewport.clientWidth,
-        );
-      });
-    };
-
-    if (resultImage.complete) scrollToLatest();
-    else resultImage.addEventListener('load', scrollToLatest, { once: true });
-    window.setTimeout(scrollToLatest, 120);
-
-    let hintHidden = false;
-    const hideHint = () => {
-      if (hintHidden) return;
-      hintHidden = true;
-      chartPanHint?.classList.add('hidden');
-    };
-    chartPanViewport.addEventListener('touchstart', hideHint, { passive: true });
-    chartPanViewport.addEventListener('scroll', hideHint, { passive: true, once: true });
-    window.setTimeout(hideHint, 2600);
-
-    // Native touch scrolling is used on iPhone. Mouse dragging is added only
-    // for desktop browsers so the same viewer remains intuitive everywhere.
-    let dragging = false;
-    let startX = 0;
-    let startScrollLeft = 0;
-    chartPanViewport.addEventListener('pointerdown', (event) => {
-      if (event.pointerType !== 'mouse') return;
-      dragging = true;
-      startX = event.clientX;
-      startScrollLeft = chartPanViewport.scrollLeft;
-      chartPanViewport.classList.add('dragging');
-      chartPanViewport.setPointerCapture?.(event.pointerId);
-      hideHint();
-    });
-    chartPanViewport.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
-      chartPanViewport.scrollLeft = startScrollLeft - (event.clientX - startX);
-    });
-    const stopDragging = (event) => {
-      if (!dragging) return;
-      dragging = false;
-      chartPanViewport.classList.remove('dragging');
-      chartPanViewport.releasePointerCapture?.(event.pointerId);
-    };
-    chartPanViewport.addEventListener('pointerup', stopDragging);
-    chartPanViewport.addEventListener('pointercancel', stopDragging);
-  };
-
-  initializeLandscapeResultViewer();
 
 
   const updateFileName = () => {
@@ -534,6 +475,61 @@
       if (systemStatusMessage) systemStatusMessage.textContent = 'تم تحديث البيانات.';
     } catch (error) {
       if (systemStatusMessage) systemStatusMessage.textContent = error.message || 'تعذر تحديث البيانات.';
+    } finally {
+      if (systemStatusRefresh) systemStatusRefresh.disabled = false;
+    }
+  };
+
+  systemStatusLauncher?.addEventListener('click', () => {
+    if (typeof systemStatusModal?.showModal === 'function') systemStatusModal.showModal();
+    else systemStatusModal?.setAttribute('open', '');
+    loadSystemStatus();
+  });
+
+  const closeSystemStatus = () => {
+    if (typeof systemStatusModal?.close === 'function') systemStatusModal.close();
+    else systemStatusModal?.removeAttribute('open');
+  };
+
+  systemStatusClose?.addEventListener('click', closeSystemStatus);
+  systemStatusModal?.addEventListener('click', (event) => {
+    if (event.target === systemStatusModal) closeSystemStatus();
+  });
+
+  systemStatusRefresh?.addEventListener('click', loadSystemStatus);
+
+  notesForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const message = feedbackNotes?.value.trim() || '';
+    if (!message) {
+      if (notesStatus) notesStatus.textContent = 'اكتب ملاحظاتك أو اقتراحاتك أولًا.';
+      feedbackNotes?.focus();
+      return;
+    }
+
+    const submitButton = notesForm.querySelector('button[type="submit"]');
+    if (notesStatus) notesStatus.textContent = 'جاري إرسال الملاحظات...';
+    if (submitButton) submitButton.disabled = true;
+
+    try {
+      const response = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.detail || 'تعذر إرسال الملاحظات.');
+      if (notesStatus) notesStatus.textContent = payload.message || 'تم إرسال الملاحظات.';
+      if (feedbackNotes) feedbackNotes.value = '';
+      if (feedbackCount) feedbackCount.textContent = '0';
+    } catch (error) {
+      if (notesStatus) notesStatus.textContent = error.message || 'تعذر إرسال الملاحظات والاقتراحات.';
+    } finally {
+      if (submitButton) submitButton.disabled = false;
+    }
+  });
+})();
+textContent = error.message || 'تعذر تحديث البيانات.';
     } finally {
       if (systemStatusRefresh) systemStatusRefresh.disabled = false;
     }
