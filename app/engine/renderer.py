@@ -3196,21 +3196,6 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
     if draw_mode == "inactive":
         return draw_mode, []
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
-
-    # أثناء المراقبة لا نعرض Entry أو أهدافًا وهمية. نعرض فقط خطي القرار
-    # المستقلين، وكل بطاقة مرتبطة بسعرها الحقيقي على المحور اليميني.
-    if draw_mode == "watch":
-        items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
-        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
-        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
-        buy_trigger = _number(buy.get("trigger_price"))
-        sell_trigger = _number(sell.get("trigger_price"))
-        if buy_trigger is not None and _is_visible_price(buy_trigger, price_min, price_max):
-            items.append(("شراء بعد إغلاق", buy_trigger, _price_y(buy_trigger, price_min, price_max), TP1_CARD))
-        if sell_trigger is not None and _is_visible_price(sell_trigger, price_min, price_max):
-            items.append(("بيع بعد إغلاق", sell_trigger, _price_y(sell_trigger, price_min, price_max), STOP_CARD))
-        return draw_mode, items
-
     if direction not in {"صاعد", "هابط"}:
         return draw_mode, []
 
@@ -3220,6 +3205,8 @@ def _trade_display_items(analysis: dict[str, Any], price_min: float, price_max: 
         return draw_mode, []
 
     entry_y = _price_y(entry, price_min, price_max)
+    if draw_mode == "watch":
+        return draw_mode, [("Entry", entry, entry_y, ENTRY_CARD)]
 
     items = [("Entry", entry, entry_y, ENTRY_CARD)]
     if stop is not None and _is_visible_price(stop, price_min, price_max):
@@ -3255,7 +3242,7 @@ def _draw_trade(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[st
     direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "غير واضح")
     draw_mode, trade_items = _trade_display_items(analysis, price_min, price_max)
     level_items = _level_display_items(analysis, price_min, price_max)
-    extreme_items: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+    extreme_items = _extreme_display_items(analysis, price_min, price_max)
 
     if trade_items and direction in {"صاعد", "هابط"}:
         trade_line_left = min(right - 165, max(candle_right + 8, int(CHART[0] + (right - CHART[0]) * 0.58)))
@@ -3510,13 +3497,231 @@ def _draw_buttons(draw: ImageDraw.ImageDraw) -> None:
     draw.line((896, 1837, 932, 1837), fill=WHITE, width=3)
 
 
+
+
+def _reference_direction(analysis: dict[str, Any], entry: float | None = None, target: float | None = None, stop: float | None = None) -> str:
+    direction = str(analysis.get("analysis_direction") or analysis.get("direction") or "").strip()
+    if direction in {"صاعد", "هابط"}:
+        return direction
+    if entry is not None and target is not None:
+        return "صاعد" if target > entry else "هابط"
+    if entry is not None and stop is not None:
+        return "صاعد" if stop < entry else "هابط"
+    candles = [c for c in (analysis.get("candles") or []) if isinstance(c, dict)]
+    if len(candles) >= 2:
+        first = _number(candles[max(0, len(candles) - 8)].get("close"))
+        last = _number(candles[-1].get("close"))
+        if first is not None and last is not None and last != first:
+            return "صاعد" if last > first else "هابط"
+    return "هابط"
+
+
+def _valid_renderer_candles(analysis: dict[str, Any]) -> list[dict[str, Any]]:
+    items = []
+    for candle in analysis.get("candles") or []:
+        if not isinstance(candle, dict):
+            continue
+        if all(_number(candle.get(key)) is not None for key in ("open", "high", "low", "close")):
+            items.append(candle)
+    return items
+
+
+def _simple_swing_points(candles: list[dict[str, Any]], *, window: int = 2) -> tuple[list[tuple[int, float]], list[tuple[int, float]]]:
+    highs: list[tuple[int, float]] = []
+    lows: list[tuple[int, float]] = []
+    if len(candles) < window * 2 + 1:
+        return highs, lows
+    for i in range(window, len(candles) - window):
+        high = float(candles[i]["high"])
+        low = float(candles[i]["low"])
+        prev_highs = [float(candles[j]["high"]) for j in range(i - window, i)]
+        next_highs = [float(candles[j]["high"]) for j in range(i + 1, i + window + 1)]
+        prev_lows = [float(candles[j]["low"]) for j in range(i - window, i)]
+        next_lows = [float(candles[j]["low"]) for j in range(i + 1, i + window + 1)]
+        if high >= max(prev_highs + next_highs):
+            highs.append((i, high))
+        if low <= min(prev_lows + next_lows):
+            lows.append((i, low))
+    return highs, lows
+
+
+def _reference_style_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    panel = (26, 28, 452, 120)
+    draw.rounded_rectangle(panel, radius=18, fill=(5, 17, 32, 208), outline=(255, 255, 255, 28), width=1)
+    draw.text((50, 54), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
+    draw.text((50, 90), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(186, 198, 216, 255), anchor="la")
+    note = "Overlay on uploaded chart"
+    draw.text((430, 90), note, font=F_TRADE_LATIN, fill=(113, 134, 167, 255), anchor="ra")
+
+
+def _candle_slot_geometry(candles: list[dict[str, Any]]) -> tuple[float, int]:
+    count = max(1, len(candles))
+    candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.70)
+    slot = (candle_right - CHART[0]) / count
+    return slot, candle_right
+
+
+def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    candles = _valid_renderer_candles(analysis)
+    if not candles:
+        return
+    slot, candle_right = _candle_slot_geometry(candles)
+    entry = _number(analysis.get("entry"))
+    current = _number(analysis.get("current_price"))
+    focal_price = entry if entry is not None else (current if current is not None else float(candles[-1]["close"]))
+    atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles]) if candles else 0.5
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    zone_right = CHART[2] - 16
+
+    ob = _nearest_detected_order_block(analysis, candles, float(focal_price), float(atr))
+    if ob is not None:
+        index, low, high, _strength = ob
+        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+        center_y = (y1 + y2) // 2
+        height = max(56, min(112, y2 - y1 + 20))
+        y1, y2 = center_y - height // 2, center_y + height // 2
+        x1 = max(CHART[0] + 120, int(CHART[0] + slot * max(0, index - 0.35)))
+        x2 = max(x1 + 240, min(zone_right, x1 + 420))
+        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(54, 67, 88, 132), outline=(164, 174, 194, 120), width=2)
+        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_TRADE_LATIN, fill=WHITE, anchor="mm")
+
+    fvg = _nearest_detected_fvg(candles, float(focal_price), float(atr))
+    if fvg is not None:
+        index, low, high = fvg
+        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+        center_y = (y1 + y2) // 2
+        x1 = max(CHART[0] + 90, int(CHART[0] + slot * max(0, index - 0.2)))
+        x2 = min(zone_right - 140, x1 + 180)
+        _dash_line(ld, (x1, center_y), (x2, center_y), WHITE, width=2, dash=10, gap=6)
+        ld.text((x2 + 14, center_y), "FVG", font=F_TRADE_LATIN, fill=WHITE, anchor="lm")
+
+    image.alpha_composite(layer)
+
+
+def _structure_line(draw: ImageDraw.ImageDraw, x: int, y: int, label: str, *, point_fill=(182, 190, 205, 255)) -> None:
+    x2 = min(CHART[2] - 90, x + 150)
+    draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=point_fill)
+    _dash_line(draw, (x + 8, y), (x2, y), WHITE, width=2, dash=8, gap=5)
+    draw.text((x2 + 8, y), label, font=F_TRADE_LATIN, fill=WHITE, anchor="lm")
+
+
+def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    candles = _valid_renderer_candles(analysis)
+    if len(candles) < 6:
+        return
+    highs, lows = _simple_swing_points(candles)
+    slot, _candle_right = _candle_slot_geometry(candles)
+    direction = _reference_direction(analysis)
+
+    recent_end = len(candles) - 2
+    if direction == "هابط":
+        high_idx, high_price = highs[-1] if highs else (max(2, recent_end - 6), max(float(c['high']) for c in candles[-8:]))
+        low_idx, low_price = lows[-1] if lows else (max(3, recent_end - 3), min(float(c['low']) for c in candles[-6:]))
+        choch_idx, choch_price = lows[-2] if len(lows) >= 2 else (max(1, high_idx - 2), (high_price + low_price) / 2)
+        idm_idx = max(1, min(len(candles) - 2, (choch_idx + low_idx) // 2))
+        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
+        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
+        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
+        _structure_line(draw, int(CHART[0] + slot * (low_idx + 0.5)), _price_y(low_price, price_min, price_max), "BOS")
+        draw.text((CHART[0] + 40, CHART[3] - 132), "BEARISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
+    else:
+        low_idx, low_price = lows[-1] if lows else (max(2, recent_end - 6), min(float(c['low']) for c in candles[-8:]))
+        high_idx, high_price = highs[-1] if highs else (max(3, recent_end - 3), max(float(c['high']) for c in candles[-6:]))
+        choch_idx, choch_price = highs[-2] if len(highs) >= 2 else (max(1, low_idx - 2), (high_price + low_price) / 2)
+        idm_idx = max(1, min(len(candles) - 2, (choch_idx + high_idx) // 2))
+        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
+        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
+        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
+        _structure_line(draw, int(CHART[0] + slot * (high_idx + 0.5)), _price_y(high_price, price_min, price_max), "BOS")
+        draw.text((CHART[0] + 40, CHART[3] - 132), "BULLISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
+
+
+def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    current = _number(analysis.get("current_price"))
+    entry = _number(analysis.get("entry"))
+    stop = _number(analysis.get("stop_loss"))
+    t1 = _number(analysis.get("target_1"))
+    t2 = _number(analysis.get("target_2"))
+    t3 = _number(analysis.get("target_3"))
+    primary_target = t3 or t2 or t1
+
+    if entry is None:
+        entry = current
+    if entry is None:
+        return
+    direction = _reference_direction(analysis, entry=entry, target=primary_target, stop=stop)
+    span = max(0.5, price_max - price_min)
+    if stop is None:
+        stop = entry - span * 0.08 if direction == "صاعد" else entry + span * 0.08
+    if primary_target is None:
+        primary_target = entry + span * 0.18 if direction == "صاعد" else entry - span * 0.18
+    targets = [value for value in (t1, t2, t3) if value is not None]
+    if not targets:
+        step = span * 0.06
+        if direction == "صاعد":
+            targets = [entry + step, entry + step * 2, primary_target]
+        else:
+            targets = [entry - step, entry - step * 2, primary_target]
+
+    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.76)
+    zone_right = CHART[2] - 16
+    entry_y = _price_y(float(entry), price_min, price_max)
+    stop_y = _price_y(float(stop), price_min, price_max)
+    target_y = _price_y(float(primary_target), price_min, price_max)
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    if direction == "هابط":
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
+    else:
+        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
+        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
+    image.alpha_composite(layer)
+
+    draw.text((zone_left + 18, entry_y - 12), "ENTRY", font=F_TRADE_LATIN, fill=WHITE, anchor="ls")
+    draw.line((zone_left + 8, entry_y, zone_right - 8, entry_y), fill=WHITE, width=2)
+
+    mid1_x = zone_left + 64
+    mid2_x = zone_left + 118
+    end_x = zone_right - 26
+    if direction == "هابط":
+        p1 = (zone_left + 8, entry_y)
+        p2 = (mid1_x, entry_y + max(12, abs(target_y - entry_y) * 0.18))
+        p3 = (mid2_x, entry_y + max(22, abs(target_y - entry_y) * 0.56))
+        p4 = (end_x, target_y)
+    else:
+        p1 = (zone_left + 8, entry_y)
+        p2 = (mid1_x, entry_y - max(12, abs(target_y - entry_y) * 0.18))
+        p3 = (mid2_x, entry_y - max(22, abs(target_y - entry_y) * 0.56))
+        p4 = (end_x, target_y)
+    points = _bezier_points(p1, p2, p3, p4, steps=24)
+    for a, b in zip(points[::2], points[1::2]):
+        _dash_line(draw, a, b, WHITE, width=2, dash=7, gap=5)
+
+    for idx, value in enumerate(targets[:3], start=1):
+        y = _price_y(float(value), price_min, price_max)
+        _dash_line(draw, (zone_left - 40, y), (zone_right - 8, y), (214, 230, 216, 210), width=1, dash=8, gap=6)
+        draw.text((zone_right - 6, y - 3), f"TP{idx}", font=F_TRADE_LATIN, fill=WHITE, anchor="rs")
+
+    rr = abs(float(primary_target) - float(entry)) / max(0.01, abs(float(stop) - float(entry)))
+    draw.text((zone_left + 8, max(CHART[1] + 24, min(CHART[3] - 24, target_y + (36 if direction == 'هابط' else -36)))), f"RR {rr:.1f}", font=F_TRADE_LATIN, fill=WHITE, anchor="la")
+
+
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
+    """Render a simpler educational overlay directly on the uploaded chart.
+
+    This mode intentionally keeps the user's own chart screenshot as the main
+    background and adds lightweight visual layers inspired by educational
+    social-media chart examples: ORDER BLOCK, FVG, BOS, CHOCH, IDM, ENTRY,
+    and a simple risk/reward box.
+    """
     image = Image.new("RGBA", (WIDTH, HEIGHT), BG)
     draw = ImageDraw.Draw(image)
 
-    # صورة الشارت المرفوعة تبقى في حجمها ومكانها دون إعادة رسم أو تحريك؛
-    # التعديلات التالية طبقات مستقلة حولها وفوقها فقط.
-    candles = analysis.get("candles") or []
+    candles = _valid_renderer_candles(analysis)
     price_min, price_max = _price_range(analysis)
     prepared_background, detected_green_line_y, _visible_candles = _prepare_chart_background(chart_background_path)
     using_chart_background = prepared_background is not None
@@ -3524,53 +3729,35 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if current_reference_y is None:
         current_reference_y = _analysis_current_reference_y(analysis)
 
-    # محور الصورة هو المرجع الأول. أعلى رقم كامل والرقم الذي يليه مباشرة
-    # يحددان الخطوة السعرية والمسافة الرأسية، بينما أدنى رقم كامل يحدد نهاية
-    # السلسلة. جميع الشموع والخطوط تستخدم التحويل الحسابي نفسه.
     dynamic_axis_range = _dynamic_image_axis_range(analysis, current_reference_y)
     if dynamic_axis_range is not None:
         price_min, price_max = dynamic_axis_range
+    current_reference_y = _axis_checked_current_reference_y(analysis, price_min, price_max, current_reference_y)
 
-    # Mandatory single-axis binding: even when exact OCR calibration is not
-    # available, the current price and every overlay are projected through the
-    # same final price->Y transform. The detected pixel line is only an anchor
-    # used while building that transform, never a second independent scale.
-    current_reference_y = _axis_checked_current_reference_y(
-        analysis,
-        price_min,
-        price_max,
-        current_reference_y,
-    )
-    analysis["price_axis_binding"] = "original_chart_single_transform"
-    analysis["price_axis_overlap_policy"] = "true_line_fixed_axis_cards_separated_with_connectors"
-    analysis["price_card_alignment"] = "exact_when_clear_displaced_only_on_overlap"
-
-    analysis["_using_chart_background"] = using_chart_background
-    _draw_grid(draw, analysis, price_min, price_max, background_mode=using_chart_background)
-    top_price_box = None
     if prepared_background is not None:
-        _paste_prepared_chart_background(image, prepared_background)
+        cleaned_background = _hide_top_trade_controls(prepared_background)
+        visible_left, visible_top, _visible_right, _visible_bottom = _source_background_box()
+        image.alpha_composite(cleaned_background, (visible_left, visible_top))
         draw = ImageDraw.Draw(image)
-    _draw_header(draw, analysis)
-    count = max(1, len(candles))
-    candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.68)
-    slot = (candle_right - CHART[0]) / count
-    _draw_trade_risk_reward_zones(image, analysis, price_min, price_max, candle_right)
-    _draw_market_zones(image, draw, analysis, candles, slot, candle_right, price_min, price_max)
+    else:
+        _draw_grid(draw, analysis, price_min, price_max, background_mode=False)
+        if candles:
+            _draw_candles(draw, candles, price_min, price_max)
+
+    # Soften non-chart areas for a social-media style composition.
+    dim = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    dd = ImageDraw.Draw(dim)
+    dd.rectangle((0, 0, WIDTH, CHART[1] - 1), fill=(0, 0, 0, 155))
+    dd.rectangle((0, CHART[3] + 1, WIDTH, HEIGHT), fill=(0, 0, 0, 132))
+    dd.rectangle((CHART[2] + 1, CHART[1], WIDTH, CHART[3]), fill=(0, 0, 0, 66))
+    image.alpha_composite(dim)
     draw = ImageDraw.Draw(image)
-    if not using_chart_background:
-        _draw_candles(draw, candles, price_min, price_max)
-    current_value = _number(analysis.get("current_price"))
-    current_axis_y = None
-    if current_value is not None:
-        current_axis_y = int(max(CHART[1] + 1, min(CHART[3] - 1, current_reference_y if current_reference_y is not None else _price_y(current_value, price_min, price_max))))
-    _draw_right_price_axis(draw, analysis, price_min, price_max, current_y=current_axis_y, top_price_box=top_price_box)
-    _draw_current_price(draw, analysis, price_min, price_max, y_override=current_reference_y, top_price_box=top_price_box)
-    _draw_levels(draw, analysis, price_min, price_max)
-    _draw_trade(image, draw, analysis, price_min, price_max, candle_right)
+
+    _reference_style_header(draw, analysis)
+    _reference_style_zones(image, draw, analysis, price_min, price_max)
     draw = ImageDraw.Draw(image)
-    _draw_bottom_summary(draw, analysis)
-    _draw_session_footer(draw, analysis)
+    _reference_style_structure(draw, analysis, price_min, price_max)
+    _reference_style_trade_overlay(image, draw, analysis, price_min, price_max)
 
     output = io.BytesIO()
     image.convert("RGB").save(output, format="PNG", optimize=True)
