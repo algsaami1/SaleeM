@@ -4565,11 +4565,282 @@ def _render_scrollable_chart(analysis: dict[str, Any]) -> bytes:
     return out.getvalue()
 
 
-def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """Render only the wide chart canvas.
+def _native_source_price_ratio(analysis: dict[str, Any], price: float) -> float | None:
+    """Map a price directly onto the uploaded screenshot's own Y ratio."""
+    model = _exact_image_axis_model(analysis)
+    if model is not None:
+        slope = float(model.get("slope") or 0.0)
+        intercept = float(model.get("intercept") or 0.0)
+        if slope > 0:
+            ratio = (intercept - float(price)) / slope
+            if -0.12 <= ratio <= 1.12:
+                return max(0.0, min(1.0, ratio))
 
-    Price-linked objects live inside this image so they pan together. Status,
-    instructions and metric cards are rendered by the app UI and remain fixed.
+    step = _image_axis_step_model(analysis)
+    if step is not None:
+        price_step = float(step.get("price_step") or 0.0)
+        ratio_step = float(step.get("ratio_step") or 0.0)
+        if price_step > 0 and ratio_step > 0:
+            intervals = (float(step["top_price"]) - float(price)) / price_step
+            ratio = float(step["top_ratio"]) + intervals * ratio_step
+            if -0.12 <= ratio <= 1.12:
+                return max(0.0, min(1.0, ratio))
+
+    points = _image_axis_points(analysis)
+    if len(points) >= 2:
+        top_price, top_ratio = points[0]
+        bottom_price, bottom_ratio = points[-1]
+        delta = top_price - bottom_price
+        if delta > 0.01 and bottom_ratio > top_ratio:
+            fraction = (top_price - float(price)) / delta
+            ratio = top_ratio + fraction * (bottom_ratio - top_ratio)
+            if -0.12 <= ratio <= 1.12:
+                return max(0.0, min(1.0, ratio))
+    return None
+
+
+def _native_y(analysis: dict[str, Any], price: float, height: int) -> int | None:
+    ratio = _native_source_price_ratio(analysis, float(price))
+    if ratio is None:
+        return None
+    return max(1, min(height - 2, int(round(ratio * max(1, height - 1)))))
+
+
+def _native_tag(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    text: str,
+    *,
+    fill: tuple[int, int, int, int],
+    font,
+    pad_x: int,
+    pad_y: int,
+) -> tuple[int, int, int, int]:
+    """Small flat label; deliberately avoids the old protruding card style."""
+    box = draw.textbbox((0, 0), text, font=font)
+    tw = max(1, box[2] - box[0])
+    th = max(1, box[3] - box[1])
+    left = x
+    top = y - th // 2 - pad_y
+    right = x + tw + pad_x * 2
+    bottom = y + th // 2 + pad_y
+    draw.rounded_rectangle((left, top, right, bottom), radius=max(3, pad_y + 1), fill=fill)
+    draw.text((left + pad_x, y), text, font=font, fill=(248, 250, 252, 245), anchor="lm")
+    return (left, top, right, bottom)
+
+
+def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return
+    left = int(width * 0.035)
+    right = int(width * 0.855)
+    pad_x = max(4, int(width * 0.004))
+    pad_y = max(2, int(height * 0.003))
+    specs = (
+        ("resistance_levels", "R", (226, 50, 60, 190), lambda p: p > current),
+        ("support_levels", "S", (38, 112, 230, 190), lambda p: p < current),
+    )
+    for key, prefix, color, side_ok in specs:
+        rank = 0
+        for item in analysis.get(key) or []:
+            price = _number(item.get("price")) if isinstance(item, dict) else None
+            if price is None or not side_ok(float(price)):
+                continue
+            y = _native_y(analysis, float(price), height)
+            if y is None or y < int(height * 0.03) or y > int(height * 0.97):
+                continue
+            rank += 1
+            draw.line((left, y, right, y), fill=color, width=max(1, int(height * 0.0022)))
+            _native_tag(
+                draw,
+                left + max(3, int(width * 0.006)),
+                y,
+                f"{prefix}{rank} {_fmt_axis_price(float(price))}",
+                fill=(color[0], color[1], color[2], 160),
+                font=font,
+                pad_x=pad_x,
+                pad_y=pad_y,
+            )
+            if rank >= 2:
+                break
+
+
+def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    candles = _valid_renderer_candles(analysis)
+    if not candles:
+        return
+    current = _number(analysis.get("current_price"))
+    entry = _number(analysis.get("entry"))
+    focal = float(entry if entry is not None else (current if current is not None else candles[-1]["close"]))
+    atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles])
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+
+    ob = _nearest_detected_order_block(analysis, candles, focal, float(atr))
+    if ob is not None:
+        _index, low, high, _strength = ob
+        y1 = _native_y(analysis, float(high), height)
+        y2 = _native_y(analysis, float(low), height)
+        if y1 is not None and y2 is not None:
+            y1, y2 = sorted((y1, y2))
+            x1, x2 = int(width * 0.42), int(width * 0.66)
+            min_h = max(8, int(height * 0.018))
+            if y2 - y1 < min_h:
+                c = (y1 + y2) // 2
+                y1, y2 = c - min_h // 2, c + min_h // 2
+            draw.rectangle((x1, y1, x2, y2), fill=(39, 112, 220, 38), outline=(39, 112, 220, 120), width=1)
+            draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=font, fill=(28, 77, 146, 210), anchor="mm")
+
+    fvg = _nearest_detected_fvg(candles, focal, float(atr))
+    if fvg is not None:
+        _index, low, high = fvg
+        y1 = _native_y(analysis, float(high), height)
+        y2 = _native_y(analysis, float(low), height)
+        if y1 is not None and y2 is not None:
+            y1, y2 = sorted((y1, y2))
+            x1, x2 = int(width * 0.25), int(width * 0.50)
+            min_h = max(7, int(height * 0.014))
+            if y2 - y1 < min_h:
+                c = (y1 + y2) // 2
+                y1, y2 = c - min_h // 2, c + min_h // 2
+            draw.rectangle((x1, y1, x2, y2), fill=(232, 147, 45, 30), outline=(218, 133, 35, 105), width=1)
+            draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=font, fill=(145, 82, 22, 210), anchor="mm")
+    image.alpha_composite(layer)
+
+
+def _native_draw_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    candles = _valid_renderer_candles(analysis)
+    if len(candles) < 8:
+        return
+    highs, lows = _simple_swing_points(candles, window=2)
+    direction = _reference_direction(analysis)
+    recent_floor = max(0, len(candles) - 18)
+    highs = [p for p in highs if p[0] >= recent_floor]
+    lows = [p for p in lows if p[0] >= recent_floor]
+    items: list[tuple[int, float, str]] = []
+    if direction == "هابط":
+        if lows:
+            items.append((*lows[-1], "BOS"))
+        if len(lows) >= 2:
+            items.append((*lows[-2], "CHOCH"))
+        if highs:
+            items.append((*highs[-1], "IDM"))
+    else:
+        if highs:
+            items.append((*highs[-1], "BOS"))
+        if len(highs) >= 2:
+            items.append((*highs[-2], "CHOCH"))
+        if lows:
+            items.append((*lows[-1], "IDM"))
+
+    plot_left, plot_right = int(width * 0.06), int(width * 0.79)
+    visible_span = max(1, len(candles) - 1)
+    for idx, price, label in items[:3]:
+        y = _native_y(analysis, float(price), height)
+        if y is None:
+            continue
+        x = int(plot_left + (idx / visible_span) * (plot_right - plot_left))
+        lead = max(36, int(width * 0.075))
+        x2 = max(plot_left, x - lead)
+        dot = max(3, int(height * 0.006))
+        draw.ellipse((x-dot, y-dot, x+dot, y+dot), fill=(246, 248, 251, 215), outline=(46, 55, 67, 220), width=1)
+        _dash_line(draw, (x-dot-2, y), (x2, y), (50, 58, 69, 185), width=max(1, int(height * 0.002)), dash=max(4, int(width * 0.008)), gap=max(3, int(width * 0.005)))
+        draw.text((x2 - max(4, int(width * 0.005)), y), label, font=font, fill=(31, 38, 47, 220), anchor="rm")
+
+
+def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    code = str(action.get("code") or analysis.get("draw_mode") or "watch")
+    side = str(action.get("primary_side") or "wait")
+    confirmed = bool(action.get("is_confirmed")) or code in {"buy", "sell", "confirmed"}
+    if code in {"inactive", "no_trade", "watch"} or side == "wait":
+        return
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    left, right = int(width * 0.64), int(width * 0.82)
+    line_left = int(width * 0.55)
+    pad_x = max(4, int(width * 0.004))
+    pad_y = max(2, int(height * 0.003))
+
+    if not confirmed:
+        trigger = _number(action.get("trigger"))
+        cancel = _number(action.get("cancel"))
+        if trigger is None:
+            return
+        y = _native_y(analysis, float(trigger), height)
+        if y is not None:
+            _dash_line(draw, (line_left, y), (right, y), (226, 142, 38, 195), width=max(1, int(height * 0.002)), dash=8, gap=5)
+            _native_tag(draw, left, y, "ACTIVATE", fill=(185, 111, 25, 165), font=font, pad_x=pad_x, pad_y=pad_y)
+        if cancel is not None:
+            cy = _native_y(analysis, float(cancel), height)
+            if cy is not None:
+                _dash_line(draw, (line_left, cy), (right, cy), (204, 66, 66, 150), width=1, dash=7, gap=5)
+        image.alpha_composite(layer)
+        return
+
+    entry = _number(analysis.get("entry")) or _number(analysis.get("current_price"))
+    stop = _number(analysis.get("stop_loss"))
+    targets = [_number(analysis.get(k)) for k in ("target_1", "target_2", "target_3")]
+    targets = [float(v) for v in targets if v is not None]
+    if entry is None or stop is None or not targets:
+        return
+    ey = _native_y(analysis, float(entry), height)
+    sy = _native_y(analysis, float(stop), height)
+    tys = [(value, _native_y(analysis, value, height)) for value in targets]
+    tys = [(value, y) for value, y in tys if y is not None]
+    if ey is None or sy is None or not tys:
+        return
+    far_y = tys[-1][1]
+    draw.rectangle((left, min(ey, far_y), right, max(ey, far_y)), fill=(17, 162, 98, 38))
+    draw.rectangle((left, min(ey, sy), right, max(ey, sy)), fill=(213, 61, 67, 38))
+    levels = [("ENTRY", ey, (18, 150, 103, 180)), ("SL", sy, (198, 50, 56, 180))]
+    levels += [(f"TP{i}", y, (18, 166, 92, 175)) for i, (_value, y) in enumerate(tys[:3], start=1)]
+    for label, y, color in levels:
+        _dash_line(draw, (line_left, y), (right, y), color, width=max(1, int(height * 0.002)), dash=8, gap=5)
+        _native_tag(draw, right - max(54, int(width * 0.075)), y, label, fill=color, font=font, pad_x=pad_x, pad_y=pad_y)
+    image.alpha_composite(layer)
+
+
+def _render_uploaded_chart_with_overlays(
+    analysis: dict[str, Any],
+    chart_background_path: str | os.PathLike[str] | None,
+) -> bytes:
+    """Preserve the exact uploaded landscape screenshot and add only light overlays."""
+    if chart_background_path:
+        try:
+            with Image.open(chart_background_path) as source:
+                image = source.convert("RGBA").copy()
+        except Exception:
+            image = None
+    else:
+        image = None
+    if image is None:
+        return _render_scrollable_chart(analysis)
+
+    width, height = image.size
+    font_size = max(9, min(14, int(round(height * 0.015))))
+    font = _font(font_size, True, True)
+    draw = ImageDraw.Draw(image)
+    _native_draw_sr(draw, analysis, width, height, font)
+    _native_draw_zones(image, analysis, width, height, font)
+    draw = ImageDraw.Draw(image)
+    _native_draw_structure(draw, analysis, width, height, font)
+    _native_draw_trade(image, analysis, width, height, font)
+
+    out = io.BytesIO()
+    image.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
+    """Use the user's uploaded chart itself as the pannable chart canvas.
+
+    The fixed application UI stays outside this image. Only price-linked chart
+    drawings are added here, so panning moves the screenshot and every overlay
+    together without recreating the candles or price axis.
     """
-    return _render_scrollable_chart(analysis)
+    return _render_uploaded_chart_with_overlays(analysis, chart_background_path)
 

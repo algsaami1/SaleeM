@@ -127,7 +127,7 @@
     {% set action_trigger = action.get('trigger') %}
     {% set action_target = action.get('target') %}
     {% set action_cancel = action.get('cancel') %}
-    {% set action_strength = action.get('strength', result.trade_probability) %}
+    {% set action_strength = action.get('strength') or result.trade_probability or result.pattern_confidence or 0 %}
     {% set action_confirmed = action.get('is_confirmed', false) %}
     {% set explanation = result.result_explanation or {} %}
     {% set peak = result.most_probable_peak or {} %}

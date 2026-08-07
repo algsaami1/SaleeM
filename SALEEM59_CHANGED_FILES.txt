@@ -1,3 +1,10 @@
+SaleeM v3.44.0 — Preserve uploaded chart + flatter fixed cards
+- The result chart now uses the exact uploaded landscape screenshot as its base; candles and the source price axis are not regenerated.
+- Axis geometry is extracted from the original landscape upload instead of converting it to the old portrait canonical viewport.
+- S/R, zones, structure and valid trade guidance are lightweight overlays inside the pannable chart.
+- Fixed information cards use flatter backgrounds, softer borders and smaller radii; the recommendation tile no longer looks like a raised button.
+- Market-strength display falls back to the analysis probability when action strength is zero/missing.
+
 SaleeM v3.43.0 — Fixed professional interface + pannable chart
 
 Modified:
@@ -14,19 +21,7 @@ Behavior:
 - Status, instructions, market metrics and recommendation cards remain fixed in the application interface.
 - Result chart is a wide 2200x1050 chart canvas designed for horizontal panning.
 - The app initially opens the chart at the latest/right-hand section.
- BOS/CHOCH/IDM are secondary; IDM is hidden when it would overlap important labels.
-8) Kept the portrait-only workflow and Reset Vertical Scale requirement.
-
-=== v3.41.1 ===
-- Corrected IDM placement to use the latest real internal counter-trend swing before BOS.
-- BOS / CHOCH / IDM are always shown when structure data is available.
-- Increased structure marker circle size slightly and strengthened the line/text for readability.
-- Structure side-lines automatically reverse direction when the preferred side is crowded or overlaps the right-side trade area.
-
-
-=== v3.41.3 ===
-- Corrected BOS / CHOCH / IDM visual placement for the portrait result.
-- BOS/CHOCH/IDM markers are clamped inside the chart and can no longer be clipped at the top/bottom.
+amped inside the chart and can no longer be clipped at the top/bottom.
 - Structure leader lines now score both text and line congestion and flip to the opposite side when crowded.
 - Increased structure anchor-circle size slightly while keeping labels secondary/small.
 - IDM now uses only a real recent internal swing in the 8–12 candle window before BOS; if no valid swing exists, IDM is omitted instead of using an old distant level.

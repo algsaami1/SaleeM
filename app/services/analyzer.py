@@ -887,29 +887,25 @@ def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
 
 
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
-    """Create the same clean chart viewport used by the final renderer.
+    """Keep a landscape upload as the literal chart source.
 
-    Geometry extraction and final rendering must see identical pixels. This
-    prevents the AI geometry reader from using the broker toolbar while the
-    renderer uses another crop, which previously shifted every price line.
+    v3.44 stops converting the user's landscape screenshot into the old
+    portrait canonical viewport. Geometry extraction, axis calibration and
+    final rendering now inspect the same original pixels, so the chart shown
+    in the result is the chart the user actually uploaded.
     """
-    meta: dict[str, Any] = {"used_smart_crop": False}
-    prepared, viewport_meta = prepare_chart_viewport_image(image_path)
-    if prepared is None:
-        return image_path, meta
+    meta: dict[str, Any] = {
+        "used_smart_crop": False,
+        "chart_viewport_prepared": False,
+        "source_chart_preserved": True,
+        "smart_crop_mode": "original_landscape",
+    }
     try:
-        crop_path = image_path.with_name(f"{image_path.stem}_chartviewport.png")
-        prepared.save(crop_path)
+        with Image.open(image_path) as source:
+            meta["source_chart_size"] = [int(source.width), int(source.height)]
     except Exception:
-        return image_path, meta
-
-    meta.update(viewport_meta)
-    meta.update({
-        "used_smart_crop": True,
-        "smart_crop_mode": "canonical_chart_viewport",
-        "smart_crop_size": [prepared.width, prepared.height],
-    })
-    return crop_path, meta
+        pass
+    return image_path, meta
 
 NUM_NULL = {"type": ["number", "null"]}
 POINT = {
@@ -4049,5 +4045,8 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         "symbol": "XAUUSD",
         "timeframe": "M5",
         "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
+        "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
+    }
+get('candles') or [])} شمعة من بيانات السوق",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
     }
