@@ -14,7 +14,7 @@ def test_health():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "3.41.2"
+    assert payload["version"] == "3.42.0"
     assert "owner_email" not in payload
     assert "owner_email_configured" in payload
     assert "smtp_configured" in payload
@@ -48,7 +48,7 @@ def test_axis_failure_requests_autoscale_only_after_failed_analysis(monkeypatch)
 
     monkeypatch.setattr("app.main.analyze_chart_image", fail_axis)
     payload = io.BytesIO()
-    Image.new("RGB", (240, 400), "white").save(payload, format="PNG")
+    Image.new("RGB", (640, 360), "white").save(payload, format="PNG")
     response = client.post(
         "/analyze",
         files={"image": ("chart.png", payload.getvalue(), "image/png")},

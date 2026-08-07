@@ -126,7 +126,7 @@ def test_result_page_renders_scenario_cards_below_image_without_conditional(monk
     from PIL import Image
 
     payload = BytesIO()
-    Image.new("RGB", (240, 400), "white").save(payload, format="PNG")
+    Image.new("RGB", (640, 360), "white").save(payload, format="PNG")
     response = client.post("/analyze", files={"image": ("chart.png", payload.getvalue(), "image/png")})
     html = response.text
 

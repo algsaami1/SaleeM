@@ -1,18 +1,20 @@
-SaleeM v3.41.0 – trader-first portrait result
+SaleeM v3.43.0 — Fixed professional interface + pannable chart
 
-Modified files:
+Modified:
 - app/__init__.py
 - app/main.py
+- app/templates/index.html
+- app/static/style.css
+- app/static/app.js
 - app/engine/renderer.py
 
-Key changes:
-1) Added a large top decision card that answers: enter now, wait for activation, or do not enter.
-2) Shows Entry, Stop, TP1 and reading strength in the top card.
-3) Uses a compact scenario zone near the latest candles instead of covering the chart.
-4) Added 5 projected candles along the expected path.
-5) Shows Entry/Stop/TP prices as colored text aligned on the spare right margin.
-6) Support/resistance remain thin background lines with compact aligned prices.
-7) BOS/CHOCH/IDM are secondary; IDM is hidden when it would overlap important labels.
+Behavior:
+- Only the chart canvas moves horizontally.
+- Candles and all price-linked drawings live inside the chart image and move with it.
+- Status, instructions, market metrics and recommendation cards remain fixed in the application interface.
+- Result chart is a wide 2200x1050 chart canvas designed for horizontal panning.
+- The app initially opens the chart at the latest/right-hand section.
+ BOS/CHOCH/IDM are secondary; IDM is hidden when it would overlap important labels.
 8) Kept the portrait-only workflow and Reset Vertical Scale requirement.
 
 === v3.41.1 ===

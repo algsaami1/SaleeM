@@ -528,48 +528,44 @@
       if (submitButton) submitButton.disabled = false;
     }
   });
+
+  // v3.43: only the chart moves. All analysis cards stay fixed in the app UI.
+  const chartPanViewport = document.getElementById('chart-pan-viewport');
+  const chartPanHint = document.getElementById('chart-pan-hint');
+  if (chartPanViewport && resultImage) {
+    const scrollToLatest = () => {
+      chartPanViewport.scrollLeft = chartPanViewport.scrollWidth;
+    };
+    if (resultImage.complete) scrollToLatest();
+    else resultImage.addEventListener('load', scrollToLatest, { once: true });
+
+    let dragging = false;
+    let startX = 0;
+    let startScroll = 0;
+    chartPanViewport.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'touch') return;
+      dragging = true;
+      startX = event.clientX;
+      startScroll = chartPanViewport.scrollLeft;
+      chartPanViewport.classList.add('dragging');
+      chartPanViewport.setPointerCapture?.(event.pointerId);
+    });
+    chartPanViewport.addEventListener('pointermove', (event) => {
+      if (!dragging) return;
+      chartPanViewport.scrollLeft = startScroll - (event.clientX - startX);
+    });
+    const endPan = () => {
+      dragging = false;
+      chartPanViewport.classList.remove('dragging');
+    };
+    chartPanViewport.addEventListener('pointerup', endPan);
+    chartPanViewport.addEventListener('pointercancel', endPan);
+    chartPanViewport.addEventListener('scroll', () => chartPanHint?.classList.add('hidden'), { once: true });
+    window.setTimeout(() => chartPanHint?.classList.add('hidden'), 4200);
+  }
+
 })();
-textContent = error.message || 'تعذر تحديث البيانات.';
-    } finally {
-      if (systemStatusRefresh) systemStatusRefresh.disabled = false;
-    }
-  };
-
-  systemStatusLauncher?.addEventListener('click', () => {
-    if (typeof systemStatusModal?.showModal === 'function') systemStatusModal.showModal();
-    else systemStatusModal?.setAttribute('open', '');
-    loadSystemStatus();
-  });
-
-  const closeSystemStatus = () => {
-    if (typeof systemStatusModal?.close === 'function') systemStatusModal.close();
-    else systemStatusModal?.removeAttribute('open');
-  };
-
-  systemStatusClose?.addEventListener('click', closeSystemStatus);
-  systemStatusModal?.addEventListener('click', (event) => {
-    if (event.target === systemStatusModal) closeSystemStatus();
-  });
-
-  systemStatusRefresh?.addEventListener('click', loadSystemStatus);
-
-  notesForm?.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const message = feedbackNotes?.value.trim() || '';
-    if (!message) {
-      if (notesStatus) notesStatus.textContent = 'اكتب ملاحظاتك أو اقتراحاتك أولًا.';
-      feedbackNotes?.focus();
-      return;
-    }
-
-    const submitButton = notesForm.querySelector('button[type="submit"]');
-    if (notesStatus) notesStatus.textContent = 'جاري إرسال الملاحظات...';
-    if (submitButton) submitButton.disabled = true;
-
-    try {
-      const response = await fetch('/api/notes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+t-Type': 'application/json' },
         body: JSON.stringify({ message }),
       });
       const payload = await response.json();

@@ -4330,12 +4330,246 @@ def _render_professional_dashboard(analysis: dict[str, Any]) -> bytes:
     _dash_draw_nav(draw)
     out=io.BytesIO(); image.convert('RGB').save(out,format='PNG',optimize=True); return out.getvalue()
 
-def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """Render the final SaleeM professional trading dashboard.
+SCROLL_CHART_WIDTH = 2200
+SCROLL_CHART_HEIGHT = 1050
+SCROLL_PLOT = (54, 68, 1990, 940)
+SCROLL_AXIS_X = 2015
 
-    The uploaded landscape screenshot is used by the analyzer as the image/axis
-    reference. The final result is a clean, stable dashboard generated from the
-    synchronized market data and extracted price context.
+
+def _scroll_price_y(price: float, price_min: float, price_max: float) -> int:
+    top, bottom = SCROLL_PLOT[1], SCROLL_PLOT[3]
+    ratio = (price_max - float(price)) / max(0.0001, price_max - price_min)
+    return int(round(top + ratio * (bottom - top)))
+
+
+def _scroll_chart_range(analysis: dict[str, Any], candles: list[dict[str, Any]]) -> tuple[float, float]:
+    values: list[float] = []
+    for candle in candles:
+        for key in ('high', 'low'):
+            value = _number(candle.get(key))
+            if value is not None:
+                values.append(float(value))
+    for key in ('current_price', 'entry', 'stop_loss', 'target_1', 'target_2', 'target_3'):
+        value = _number(analysis.get(key))
+        if value is not None:
+            values.append(float(value))
+    for key in ('support_levels', 'resistance_levels'):
+        for level in list(analysis.get(key) or [])[:2]:
+            value = _number(level.get('price'))
+            if value is not None:
+                values.append(float(value))
+    if not values:
+        return 0.0, 1.0
+    lo, hi = min(values), max(values)
+    span = max(2.0, hi - lo)
+    return lo - span * 0.08, hi + span * 0.08
+
+
+def _scroll_x_for_index(index: int, count: int) -> int:
+    left, _, right, _ = SCROLL_PLOT
+    usable = right - left - 70
+    slot = usable / max(1, count)
+    return int(left + 32 + (index + 0.5) * slot)
+
+
+def _scroll_draw_axis(draw: ImageDraw.ImageDraw, price_min: float, price_max: float) -> None:
+    left, top, right, bottom = SCROLL_PLOT
+    draw.rectangle((left, top, right, bottom), fill=(250, 252, 255, 255), outline=(196, 205, 217, 255), width=2)
+    for i in range(1, 10):
+        x = int(left + (right - left) * i / 10)
+        draw.line((x, top, x, bottom), fill=(220, 226, 234, 210), width=1)
+    for i in range(1, 9):
+        y = int(top + (bottom - top) * i / 9)
+        draw.line((left, y, right, y), fill=(220, 226, 234, 220), width=1)
+    for i in range(10):
+        ratio = i / 9
+        price = price_max - (price_max - price_min) * ratio
+        y = int(top + (bottom - top) * ratio)
+        draw.line((right, y, right + 10, y), fill=(135, 145, 158, 255), width=1)
+        draw.text((SCROLL_AXIS_X, y), _fmt_axis_price(price), font=_font(24, False, True), fill=(50, 57, 66, 255), anchor='lm')
+
+
+def _scroll_draw_candles(draw: ImageDraw.ImageDraw, candles: list[dict[str, Any]], price_min: float, price_max: float) -> None:
+    count = len(candles)
+    if not count:
+        return
+    slot = (SCROLL_PLOT[2] - SCROLL_PLOT[0] - 70) / max(1, count)
+    body_w = max(7, min(20, int(slot * 0.56)))
+    for index, candle in enumerate(candles):
+        o = _number(candle.get('open')); h = _number(candle.get('high')); l = _number(candle.get('low')); c = _number(candle.get('close'))
+        if None in (o, h, l, c):
+            continue
+        x = _scroll_x_for_index(index, count)
+        yo = _scroll_price_y(float(o), price_min, price_max)
+        yh = _scroll_price_y(float(h), price_min, price_max)
+        yl = _scroll_price_y(float(l), price_min, price_max)
+        yc = _scroll_price_y(float(c), price_min, price_max)
+        color = (25, 167, 122, 255) if c >= o else (231, 53, 55, 255)
+        draw.line((x, yh, x, yl), fill=(46, 56, 64, 230), width=2)
+        top, bottom = sorted((yo, yc)); bottom = max(bottom, top + 5)
+        draw.rectangle((x - body_w // 2, top, x + body_w // 2, bottom), fill=color, outline=(35, 42, 49, 255), width=1)
+
+
+def _scroll_draw_price_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    current = _number(analysis.get('current_price'))
+    plot_left, _, plot_right, _ = SCROLL_PLOT
+    specs = [('resistance_levels', 'R', (229, 51, 61, 255), True), ('support_levels', 'S', (35, 113, 235, 255), False)]
+    for key, prefix, color, is_resistance in specs:
+        rank = 0
+        for level in list(analysis.get(key) or []):
+            price = _number(level.get('price'))
+            if price is None or not (price_min <= price <= price_max):
+                continue
+            if current is not None:
+                if is_resistance and price <= current:
+                    continue
+                if not is_resistance and price >= current:
+                    continue
+            rank += 1
+            if rank > 2:
+                break
+            y = _scroll_price_y(price, price_min, price_max)
+            draw.line((plot_left, y, plot_right, y), fill=color, width=2)
+            label = f'{prefix}{rank} {_fmt_axis_price(price)}'
+            bbox = draw.textbbox((0, 0), label, font=_font(22, True, True))
+            w = bbox[2] - bbox[0] + 24
+            x1 = plot_right - w - 5
+            draw.rounded_rectangle((x1, y - 20, plot_right - 4, y + 20), radius=7, fill=color)
+            draw.text((plot_right - 14, y), label, font=_font(22, True, True), fill=WHITE, anchor='rm')
+    if current is not None and price_min <= current <= price_max:
+        y = _scroll_price_y(current, price_min, price_max)
+        _dash_line(draw, (plot_left, y), (plot_right, y), (31, 177, 150, 255), width=2, dash=9, gap=6)
+        draw.rounded_rectangle((plot_right - 146, y - 27, plot_right - 4, y + 27), radius=7, fill=(28, 164, 135, 255))
+        draw.text((plot_right - 16, y), _fmt_axis_price(current), font=_font(23, True, True), fill=WHITE, anchor='rm')
+
+
+def _scroll_draw_zones(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], price_min: float, price_max: float) -> None:
+    if len(candles) < 8:
+        return
+    current = _number(analysis.get('current_price'))
+    direction = str(analysis.get('direction') or '')
+    anchor = max(0, len(candles) - 11)
+    c = candles[anchor]
+    high = _number(c.get('high')); low = _number(c.get('low'))
+    if high is not None and low is not None:
+        y1 = _scroll_price_y(high, price_min, price_max); y2 = _scroll_price_y(low, price_min, price_max)
+        left = _scroll_x_for_index(max(0, len(candles) - 25), len(candles))
+        right = _scroll_x_for_index(max(1, len(candles) - 10), len(candles))
+        draw.rectangle((left, min(y1, y2), right, max(y1, y2)), fill=(83, 145, 235, 45), outline=(61, 123, 220, 180), width=2)
+        draw.text(((left + right) // 2, (y1 + y2) // 2), 'ORDER BLOCK', font=_font(20, True, True), fill=(37, 74, 129, 255), anchor='mm')
+    if current is not None:
+        delta = max(0.35, (price_max - price_min) * 0.022)
+        center = current - delta * 3 if direction == 'صاعد' else current + delta * 3
+        if price_min < center < price_max:
+            ya = _scroll_price_y(center + delta / 2, price_min, price_max); yb = _scroll_price_y(center - delta / 2, price_min, price_max)
+            left = _scroll_x_for_index(max(0, len(candles) - 33), len(candles))
+            right = _scroll_x_for_index(max(1, len(candles) - 14), len(candles))
+            draw.rectangle((left, min(ya, yb), right, max(ya, yb)), fill=(246, 162, 73, 42), outline=(234, 145, 49, 190), width=2)
+            draw.text(((left + right) // 2, (ya + yb) // 2), 'FVG', font=_font(20, True, True), fill=(101, 68, 30, 255), anchor='mm')
+
+
+def _scroll_draw_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], candles: list[dict[str, Any]], price_min: float, price_max: float) -> None:
+    highs, lows = _dash_recent_swings(candles)
+    if not highs and not lows:
+        return
+    direction = str(analysis.get('direction') or '')
+    recent = max(0, len(candles) - 22)
+    rh = [x for x in highs if x[0] >= recent]; rl = [x for x in lows if x[0] >= recent]
+    if direction == 'صاعد':
+        data = [('BOS', rh[-1] if rh else None), ('CHOCH', rl[-1] if rl else None), ('IDM', rl[-2] if len(rl) > 1 else None)]
+    else:
+        data = [('BOS', rl[-1] if rl else None), ('CHOCH', rh[-1] if rh else None), ('IDM', rh[-2] if len(rh) > 1 else None)]
+    occupied: list[tuple[int, int]] = []
+    for label, item in data:
+        if item is None:
+            continue
+        idx, price = item
+        x = _scroll_x_for_index(idx, len(candles)); y = _scroll_price_y(price, price_min, price_max)
+        radius = 9
+        draw.ellipse((x-radius, y-radius, x+radius, y+radius), fill=(248,248,248,255), outline=(35,42,49,255), width=2)
+        crowded = any(abs(y-uy) < 55 for _, uy in occupied)
+        prefer_left = x > (SCROLL_PLOT[0] + SCROLL_PLOT[2]) // 2 or crowded
+        if prefer_left:
+            x2 = max(SCROLL_PLOT[0] + 70, x - 150)
+            _dash_line(draw, (x-12, y), (x2, y), (45,48,52,255), width=2, dash=8, gap=5)
+            draw.text((x2-8, y), label, font=_font(20, True, True), fill=(32,36,40,255), anchor='rm')
+        else:
+            x2 = min(SCROLL_PLOT[2] - 70, x + 150)
+            _dash_line(draw, (x+12, y), (x2, y), (45,48,52,255), width=2, dash=8, gap=5)
+            draw.text((x2+8, y), label, font=_font(20, True, True), fill=(32,36,40,255), anchor='lm')
+        occupied.append((x, y))
+
+
+def _scroll_draw_scenario(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    action = analysis.get('action_summary') if isinstance(analysis.get('action_summary'), dict) else {}
+    code = str(action.get('code') or analysis.get('draw_mode') or 'watch')
+    side = str(action.get('primary_side') or ('buy' if str(analysis.get('direction')) == 'صاعد' else 'sell' if str(analysis.get('direction')) == 'هابط' else 'wait'))
+    confirmed = bool(action.get('is_confirmed')) or code in {'buy', 'sell', 'confirmed'}
+    entry = _number(analysis.get('entry')) if confirmed else _number(action.get('trigger'))
+    stop = _number(analysis.get('stop_loss')) if confirmed else _number(action.get('cancel'))
+    targets = [_number(analysis.get(k)) for k in ('target_1', 'target_2', 'target_3')] if confirmed else [_number(action.get('target'))]
+    targets = [float(v) for v in targets if v is not None]
+    if side == 'wait' or entry is None or stop is None or not targets:
+        return
+    entry = float(entry); stop = float(stop)
+    bullish = side == 'buy'
+    if bullish and not (stop < entry < max(targets)):
+        return
+    if not bullish and not (stop > entry > min(targets)):
+        return
+    x1, x2 = 1580, 1925
+    ey = _scroll_price_y(entry, price_min, price_max); sy = _scroll_price_y(stop, price_min, price_max)
+    end_target = targets[-1]
+    ty = _scroll_price_y(end_target, price_min, price_max)
+    draw.rectangle((x1, min(ey, ty), x2, max(ey, ty)), fill=(44, 193, 126, 60), outline=(32, 173, 108, 140), width=1)
+    draw.rectangle((x1, min(ey, sy), x2, max(ey, sy)), fill=(235, 77, 77, 55), outline=(214, 57, 57, 140), width=1)
+    def tag(y: int, label: str, fill: tuple[int,int,int,int]):
+        width = 190
+        draw.rounded_rectangle((x2-width, y-22, x2, y+22), radius=7, fill=fill)
+        draw.text((x2-10, y), label, font=_font(18, True, True), fill=WHITE, anchor='rm')
+    tag(ey, f'ENTRY {_fmt_axis_price(entry)}', (22, 160, 108, 245))
+    tag(sy, f'SL {_fmt_axis_price(stop)}', (225, 47, 49, 245))
+    for i, target in enumerate(targets[:3], 1):
+        y = _scroll_price_y(target, price_min, price_max)
+        _dash_line(draw, (x1, y), (x2, y), (31, 188, 111, 210), width=2, dash=9, gap=6)
+        tag(y, f'TP{i} {_fmt_axis_price(target)}', (23, 183, 102, 245))
+    # Expected candles stay inside the chart and move with it.
+    steps = 6
+    prev_y = ey
+    for i in range(steps):
+        r = (i + 1) / steps
+        x = int(x1 + 30 + r * (x2 - x1 - 80))
+        base = int(ey + (ty - ey) * r)
+        close_y = base + (-8 if i % 2 else 7)
+        color = (36, 180, 127, 210) if bullish else (224, 75, 74, 210)
+        draw.line((x, min(prev_y, close_y)-18, x, max(prev_y, close_y)+18), fill=(83,89,95,150), width=2)
+        draw.rectangle((x-7, min(prev_y, close_y), x+7, max(prev_y, close_y)+3), fill=color)
+        prev_y = close_y
+
+
+def _render_scrollable_chart(analysis: dict[str, Any]) -> bytes:
+    candles = _valid_renderer_candles(analysis)[-64:]
+    price_min, price_max = _scroll_chart_range(analysis, candles)
+    image = Image.new('RGBA', (SCROLL_CHART_WIDTH, SCROLL_CHART_HEIGHT), (245, 248, 252, 255))
+    draw = ImageDraw.Draw(image)
+    # Small chart-only heading; app information is rendered outside and remains fixed.
+    draw.text((56, 30), f"{analysis.get('symbol') or 'XAUUSD'} · {analysis.get('timeframe') or 'M5'}", font=_font(25, True, True), fill=(31, 38, 46, 255), anchor='la')
+    _scroll_draw_axis(draw, price_min, price_max)
+    _scroll_draw_candles(draw, candles, price_min, price_max)
+    _scroll_draw_price_levels(draw, analysis, price_min, price_max)
+    _scroll_draw_zones(draw, analysis, candles, price_min, price_max)
+    _scroll_draw_structure(draw, analysis, candles, price_min, price_max)
+    _scroll_draw_scenario(draw, analysis, price_min, price_max)
+    out = io.BytesIO()
+    image.convert('RGB').save(out, format='PNG', optimize=True)
+    return out.getvalue()
+
+
+def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
+    """Render only the wide chart canvas.
+
+    Price-linked objects live inside this image so they pan together. Status,
+    instructions and metric cards are rendered by the app UI and remain fixed.
     """
-    return _render_professional_dashboard(analysis)
+    return _render_scrollable_chart(analysis)
 

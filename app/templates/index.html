@@ -114,39 +114,6 @@
       {% set trade_type_class = 'watch' %}
     {% endif %}
 
-    <div class="result-topline">
-      <div><span class="done-dot">✓</span><div><small>اكتمل التحليل</small><h1>نتيجة SaleeM</h1></div></div>
-      <a class="new-analysis-link" href="/">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11Z"/><path d="m7 16 3.1-3.4 2.2 2.2 2.2-2.6L18 16M16.5 6.5v4m-2-2h4"/></svg>
-        <span>تحليل صورة جديدة</span>
-      </a>
-    </div>
-
-    <section class="card result-card" id="result-card">
-      <img id="result-image" src="{{ result.result_url }}" alt="نتيجة SaleeM الاحترافية لتحليل شارت الذهب">
-
-      <div class="result-actions" aria-label="خيارات صورة النتيجة">
-        <button class="result-action save-button" id="save-image-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 18v2h14v-2"/></svg>
-          حفظ الصورة
-        </button>
-        <button class="result-action share-button" id="share-image-button" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
-          مشاركة
-        </button>
-      </div>
-      <p class="result-action-status" id="result-action-status" aria-live="polite"></p>
-
-      {% if result.analysis_last_closed_m5_time %}
-      <div class="image-meta-line">
-        <span>آخر شمعة M5 مغلقة</span>
-        <b>{{ result.analysis_last_closed_m5_time }}</b>
-        <span>الفريمات</span>
-        <b dir="ltr">H4 · H1 · M15 · M5</b>
-      </div>
-      {% endif %}
-    </section>
-
     {% set buy_plan = result.buy_scenario_details or {} %}
     {% set sell_plan = result.sell_scenario_details or {} %}
     {% set decision = result.dual_scenario_decision or {} %}
@@ -162,57 +129,56 @@
     {% set action_cancel = action.get('cancel') %}
     {% set action_strength = action.get('strength', result.trade_probability) %}
     {% set action_confirmed = action.get('is_confirmed', false) %}
+    {% set explanation = result.result_explanation or {} %}
+    {% set peak = result.most_probable_peak or {} %}
+    {% set trough = result.most_probable_trough or {} %}
 
-    <section class="card smart-result-card result-{{ action_code }}" id="recommendation-type-card" aria-labelledby="recommendation-type-title">
-      <div class="smart-result-head">
-        <div class="smart-result-icon" aria-hidden="true">{% if action_primary == 'buy' %}↗{% elif action_primary == 'sell' %}↘{% elif action_code in ['no_trade','inactive'] %}✋{% else %}◉{% endif %}</div>
-        <div class="smart-result-title"><small>الخلاصة التي تحتاجها الآن</small><h2 id="recommendation-type-title">{{ action_title }}</h2><span>{{ action_badge }}</span></div>
-        <div class="smart-result-strength"><b>{% if action_code == 'inactive' %}—{% else %}{{ action_strength }}٪{% endif %}</b><small>قوة القراءة</small></div>
+    <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM">
+      <header class="terminal-header">
+        <a class="terminal-brand" href="/" aria-label="SaleeM"><b>SaleeM</b><small>XAUUSD / M5</small></a>
+        <div class="terminal-state state-{{ trade_type_class }}"><strong>{{ trade_type_label }}</strong><span aria-hidden="true">◉</span></div>
+        <div class="terminal-update"><span>آخر تحديث</span><b>{{ result.analysis_last_closed_m5_time or '—' }}</b></div>
+        <a class="terminal-new" href="/" aria-label="تحليل صورة جديدة">＋</a>
+      </header>
+
+      <div class="terminal-metrics terminal-metrics-top" aria-label="قراءة السوق">
+        <article><span>السلوك</span><b class="tone-orange">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
+        <article><span>النمط</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
+        <article><span>شكل شمعة</span><b class="tone-green">{{ result.candle_shape or 'مراقبة' }}</b><small>{{ result.confirmation or 'بانتظار إغلاق' }}</small></article>
+        <article><span>الإغلاق</span><b class="tone-gold">{% if action_confirmed %}مؤكد{% else %}محايد{% endif %}</b><small>{% if action_confirmed %}مفعّل{% else %}منتظر{% endif %}</small></article>
+        <article><span>المنطقة</span><b class="tone-blue">{{ result.zone_behavior or 'بين مستويات' }}</b><small>{{ action_badge }}</small></article>
       </div>
 
-      <div class="smart-action-line">
-        <span aria-hidden="true">✓</span>
-        <div><small>ماذا أفعل الآن؟</small><b>{{ action_instruction }}</b></div>
+      <div class="terminal-strength"><span>قوة السوق</span><div class="strength-track"><i style="width:{{ action_strength|int }}%"></i></div><b>{{ action_strength }}٪</b></div>
+
+      <section class="terminal-chart-card" aria-label="الشارت المتحرك">
+        <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب يمينًا ويسارًا">
+          <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 مع رسومات التحليل" draggable="false">
+        </div>
+        <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت يمينًا ويسارًا</div>
+      </section>
+
+      <nav class="terminal-timeframes" aria-label="الفريمات"><span>M1</span><strong>M5</strong><span>M15</span><span>H1</span><span>H4</span><span>D1</span></nav>
+
+      <div class="terminal-metrics terminal-metrics-bottom" aria-label="ملخص القرار">
+        <article><span>السبريد</span><b class="tone-green">{{ result.spread_value or '—' }}</b><small>{{ result.spread_status or 'من السوق' }}</small></article>
+        <article><span>السيولة</span><b class="tone-green">{{ result.liquidity_status or 'مراقبة' }}</b><small>{{ (explanation.liquidity or 'تحت المتابعة')|truncate(28, True, '…') }}</small></article>
+        <article class="recommendation-tile"><span>التوصية</span><b>{{ action_title }}</b><small>{{ action_instruction }}</small></article>
+        <article><span>مدى الساعة</span><div class="range-lines"><em>الأعلى <b>{{ '%.2f'|format(peak.price) if peak and peak.price is defined else '—' }}</b></em><em>الأدنى <b>{{ '%.2f'|format(trough.price) if trough and trough.price is defined else '—' }}</b></em></div></article>
       </div>
 
-      <div class="smart-result-levels">
-        <div><span>التفعيل</span><b>{% if action_trigger is not none %}{{ '%.2f'|format(action_trigger) }}{% else %}بعد تأكيد M5{% endif %}</b></div>
-        <div><span>الهدف الأرجح</span><b>{% if action_target is not none %}{{ '%.2f'|format(action_target) }}{% else %}بعد التفعيل{% endif %}</b></div>
-        <div><span>الإلغاء</span><b>{% if action_cancel is not none %}{{ '%.2f'|format(action_cancel) }}{% else %}لا صفقة قبل التفعيل{% endif %}</b></div>
+      <div class="result-actions terminal-actions" aria-label="خيارات النتيجة">
+        <button class="result-action save-button" id="save-image-button" type="button">حفظ الشارت</button>
+        <button class="result-action share-button" id="share-image-button" type="button">مشاركة</button>
       </div>
-
-      <p class="smart-result-reason"><span aria-hidden="true">ⓘ</span><b>السبب الأهم:</b> {{ action_reason }}</p>
+      <p class="result-action-status" id="result-action-status" aria-live="polite"></p>
     </section>
 
-    <section class="card scenarios-card compact-dual-card" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
-      <div class="scenario-section-topline">
-        <div><small>الخطة البديلة قبل الدخول</small><h2 id="dual-scenarios-title"><span aria-hidden="true">⇄</span> سيناريو الشراء والبيع</h2></div>
-        <strong>{{ decision.label or "لا دخول دون إغلاق M5" }}</strong>
-      </div>
+    <section class="card scenarios-card compact-dual-card hidden-legacy-result" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
+      <div class="scenario-section-topline"><div><small>الخطة البديلة قبل الدخول</small><h2 id="dual-scenarios-title">سيناريو الشراء والبيع</h2></div><strong>{{ decision.label or "لا دخول دون إغلاق M5" }}</strong></div>
       <div class="scenario-cards-grid">
-        <article class="scenario-plan buy-plan{% if action_primary == 'buy' %} preferred{% endif %}">
-          <header class="scenario-plan-header">
-            <h3><span aria-hidden="true">↗</span> الشراء</h3>
-            <span class="scenario-state {{ 'confirmed' if buy_plan.state == 'مؤكد' else 'watch' }}">{% if action_primary == 'buy' and not action_confirmed %}الأقرب{% else %}{{ buy_plan.state or 'مراقبة' }}{% endif %}</span>
-          </header>
-          <div class="scenario-rows compact-scenario-rows">
-            <div><span>شرط التفعيل</span><b>{{ (buy_plan.display_activation or buy_plan.waiting_for or 'بانتظار شرط الشراء')|logic_text }}</b></div>
-            <div><span>الهدف</span><b>{% if buy_plan.display_target is not none %}{{ '%.2f'|format(buy_plan.display_target) }}{% else %}لا توجد قمة واضحة{% endif %}</b></div>
-            <div><span>السبب</span><b>{{ buy_plan.display_reason or (buy_plan.supporting_reasons or ['لا يوجد دليل شراء كافٍ'])|first }}</b></div>
-          </div>
-        </article>
-
-        <article class="scenario-plan sell-plan{% if action_primary == 'sell' %} preferred{% endif %}">
-          <header class="scenario-plan-header">
-            <h3><span aria-hidden="true">↘</span> البيع</h3>
-            <span class="scenario-state {{ 'confirmed' if sell_plan.state == 'مؤكد' else 'watch' }}">{% if action_primary == 'sell' and not action_confirmed %}الأقرب{% else %}{{ sell_plan.state or 'مراقبة' }}{% endif %}</span>
-          </header>
-          <div class="scenario-rows compact-scenario-rows">
-            <div><span>شرط التفعيل</span><b>{{ (sell_plan.display_activation or sell_plan.waiting_for or 'بانتظار شرط البيع')|logic_text }}</b></div>
-            <div><span>الهدف</span><b>{% if sell_plan.display_target is not none %}{{ '%.2f'|format(sell_plan.display_target) }}{% else %}لا يوجد قاع واضح{% endif %}</b></div>
-            <div><span>السبب</span><b>{{ sell_plan.display_reason or (sell_plan.supporting_reasons or ['لا يوجد دليل بيع كافٍ'])|first }}</b></div>
-          </div>
-        </article>
+        <article class="scenario-plan buy-plan"><h3>سيناريو الشراء</h3><div>التفعيل</div><div>الهدف الأرجح</div><div>السبب</div></article>
+        <article class="scenario-plan sell-plan"><h3>سيناريو البيع</h3><div>التفعيل</div><div>الهدف الأرجح</div><div>السبب</div></article>
       </div>
     </section>
 
@@ -525,6 +491,22 @@
     <div class="modal-header">
       <div><small>قبل رفع الصورة</small><h2 id="capture-help-title">صورة مناسبة للتحليل</h2></div>
       <button class="modal-close" type="button" data-close-modal aria-label="إغلاق">×</button>
+    </div>
+    <div class="capture-checklist">
+      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط الصورة بشكل أفقي (Landscape).</span>
+      <span><b>2</b> أظهر الشموع ومحور الأسعار اليميني كاملًا.</span>
+      <span><b>3</b> أظهر خط السعر الحالي ولا تلصق أي صورة فوق الشارت.</span>
+      <span><b>4</b> نفّذ Reset Vertical Scale قبل التصوير ثم أدر الهاتف للوضع الأفقي.</span>
+    </div>
+    <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>
+    <button class="modal-primary" type="button" data-close-modal>فهمت</button>
+  </dialog>
+  {% endif %}
+
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
+</body>
+</html>
+ class="modal-close" type="button" data-close-modal aria-label="إغلاق">×</button>
     </div>
     <div class="capture-checklist">
       <span><b>1</b> افتح XAUUSD على فريم M5 والتقط الصورة بشكل أفقي (Landscape).</span>
