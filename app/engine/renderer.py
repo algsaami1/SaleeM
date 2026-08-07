@@ -4565,6 +4565,197 @@ def _render_scrollable_chart(analysis: dict[str, Any]) -> bytes:
     return out.getvalue()
 
 
+
+def _native_axis_price_step(analysis: dict[str, Any]) -> float | None:
+    """Return the broker tick price step using label *values only*.
+
+    Y ratios coming from vision are deliberately ignored here.  The screenshot
+    itself supplies the pixel spacing; OCR/vision supplies only the numerical
+    tick sequence.  Missing ticks are tolerated because the smallest regular
+    gaps dominate the lower portion of the sorted gap list.
+    """
+    raw_prices: list[float] = []
+    for item in analysis.get("image_axis_labels") or []:
+        if not isinstance(item, dict):
+            continue
+        value = _number(item.get("price"))
+        if value is not None and math.isfinite(float(value)):
+            raw_prices.append(float(value))
+    prices = sorted({round(value, 4) for value in raw_prices}, reverse=True)
+    if len(prices) < 3:
+        return None
+    gaps = sorted(
+        price_a - price_b
+        for price_a, price_b in zip(prices[:-1], prices[1:])
+        if price_a - price_b > 0.03
+    )
+    if len(gaps) < 2:
+        return None
+    pool_count = max(2, int(math.ceil(len(gaps) * 0.70)))
+    base = float(median(gaps[:pool_count]))
+    if base <= 0.03:
+        return None
+    regular: list[float] = []
+    for gap in gaps:
+        multiple = max(1, min(6, int(round(gap / base))))
+        expected = base * multiple
+        if abs(gap - expected) <= max(0.08, base * 0.08 * multiple):
+            if multiple == 1:
+                regular.append(gap)
+    if len(regular) >= 2:
+        base = float(median(regular))
+    return base if base > 0.03 else None
+
+
+def _native_is_grid_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    """Identify quiet horizontal broker-grid pixels on light chart themes."""
+    r, g, b, a = pixel
+    if a < 100:
+        return False
+    # Pale blue MT5/TradingView-like dashed grid.
+    if 205 <= r <= 246 and 214 <= g <= 250 and 222 <= b <= 255:
+        if b >= g - 3 and g >= r - 2 and (b - r) <= 45:
+            return True
+    # Neutral light-gray grid fallback. Pure white background is excluded.
+    if 176 <= r <= 244 and 176 <= g <= 244 and 176 <= b <= 244:
+        if max(r, g, b) - min(r, g, b) <= 12:
+            return True
+    return False
+
+
+def _native_horizontal_grid_rows(image: Image.Image) -> list[int]:
+    """Detect recurring horizontal grid rows directly from source pixels.
+
+    This is intentionally independent of OCR Y coordinates.  It scans only the
+    chart body and chooses thin, high-coverage pale/neutral rows.  Consecutive
+    rows are collapsed to one center so antialiasing cannot create fake ticks.
+    """
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    if width < 240 or height < 180:
+        return []
+    pixels = rgba.load()
+    left = max(4, int(width * 0.025))
+    right = max(left + 80, int(width * 0.82))
+    sample_step = 2 if width >= 900 else 1
+    sample_count = max(1, (right - left + sample_step - 1) // sample_step)
+    scores = [0] * height
+    for y in range(max(2, int(height * 0.02)), min(height - 2, int(height * 0.98))):
+        hits = 0
+        for x in range(left, right, sample_step):
+            if _native_is_grid_pixel(pixels[x, y]):
+                hits += 1
+        scores[y] = hits
+    best = max(scores, default=0)
+    threshold = max(18, int(sample_count * 0.075), int(best * 0.38))
+    if best < threshold:
+        return []
+
+    candidates: list[int] = []
+    for y in range(2, height - 2):
+        score = scores[y]
+        if score < threshold:
+            continue
+        if score >= scores[y - 1] and score >= scores[y + 1]:
+            candidates.append(y)
+    if not candidates:
+        return []
+
+    bands: list[list[int]] = []
+    for y in candidates:
+        if not bands or y - bands[-1][-1] > 4:
+            bands.append([y])
+        else:
+            bands[-1].append(y)
+    rows: list[int] = []
+    for band in bands:
+        best_y = max(band, key=lambda row: scores[row])
+        rows.append(int(best_y))
+    return rows
+
+
+def _native_horizontal_grid_step(image: Image.Image) -> tuple[float | None, list[int]]:
+    rows = _native_horizontal_grid_rows(image)
+    if len(rows) < 4:
+        return None, rows
+    height = image.height
+    gaps = [
+        b - a
+        for a, b in zip(rows[:-1], rows[1:])
+        if max(10, int(height * 0.025)) <= b - a <= int(height * 0.24)
+    ]
+    if len(gaps) < 3:
+        return None, rows
+    best_gap: float | None = None
+    best_score = -1.0
+    for candidate in gaps:
+        supporters = [gap for gap in gaps if abs(gap - candidate) <= max(4.0, candidate * 0.12)]
+        score = len(supporters) - abs(candidate - median(gaps)) / max(1.0, candidate) * 0.10
+        if score > best_score:
+            best_score = score
+            best_gap = float(median(supporters)) if supporters else float(candidate)
+    if best_gap is None:
+        return None, rows
+    supporters = [gap for gap in gaps if abs(gap - best_gap) <= max(4.0, best_gap * 0.12)]
+    if len(supporters) < 3:
+        return None, rows
+    return float(median(supporters)), rows
+
+
+def _native_build_pixel_axis_model(image: Image.Image, analysis: dict[str, Any]) -> dict[str, float | int | str] | None:
+    """Build the strict source-price transform from pixels, not OCR Y ratios.
+
+    The current broker price line fixes the vertical origin. Repeating source
+    grid rows fix pixels-per-tick, while axis label *values* fix price-per-tick.
+    Therefore a bad y_ratio cannot place R/S/OB/FVG/pattern geometry at the
+    wrong height.  The model is accepted only when predicted broker tick prices
+    land back on detected source grid rows.
+    """
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return None
+    current_y = _detect_green_reference_line_y(image)
+    price_step = _native_axis_price_step(analysis)
+    grid_step, grid_rows = _native_horizontal_grid_step(image)
+    if current_y is None or price_step is None or grid_step is None:
+        return None
+    pixels_per_price = float(grid_step) / float(price_step)
+    if not math.isfinite(pixels_per_price) or pixels_per_price <= 0.2:
+        return None
+
+    # Numerical tick values should project onto actual source grid rows.
+    labels = []
+    for item in analysis.get("image_axis_labels") or []:
+        if isinstance(item, dict):
+            value = _number(item.get("price"))
+            if value is not None:
+                labels.append(float(value))
+    tolerance = max(5.0, float(grid_step) * 0.16)
+    hits = 0
+    checked = 0
+    for price in labels:
+        y = float(current_y) - (price - float(current)) * pixels_per_price
+        if not (0 <= y <= image.height - 1):
+            continue
+        checked += 1
+        if grid_rows and min(abs(y - row) for row in grid_rows) <= tolerance:
+            hits += 1
+    if checked >= 4 and hits < max(3, int(math.ceil(checked * 0.55))):
+        return None
+
+    return {
+        "mode": "pixel_current_grid",
+        "current_price": float(current),
+        "current_y": int(current_y),
+        "height": int(image.height),
+        "price_step": float(price_step),
+        "grid_step": float(grid_step),
+        "pixels_per_price": float(pixels_per_price),
+        "validation_hits": int(hits),
+        "validation_checked": int(checked),
+    }
+
+
 def _native_literal_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
     """Return literal broker-axis anchors in whole-image coordinates.
 
@@ -4639,7 +4830,26 @@ def _native_piecewise_price_ratio(analysis: dict[str, Any], price: float) -> flo
 
 
 def _native_source_price_ratio(analysis: dict[str, Any], price: float) -> float | None:
-    """Map a price directly onto the uploaded screenshot's own Y ratio."""
+    """Map a price onto the uploaded screenshot with one authoritative scale."""
+    pixel_model = analysis.get("_native_axis_pixel_model")
+    if isinstance(pixel_model, dict) and pixel_model.get("mode") == "pixel_current_grid":
+        current_price = _number(pixel_model.get("current_price"))
+        current_y = _number(pixel_model.get("current_y"))
+        pixels_per_price = _number(pixel_model.get("pixels_per_price"))
+        source_height = int(pixel_model.get("height") or 0)
+        if current_price is not None and current_y is not None and pixels_per_price is not None and source_height > 1:
+            y = float(current_y) - (float(price) - float(current_price)) * float(pixels_per_price)
+            margin = max(4.0, source_height * 0.02)
+            if -margin <= y <= (source_height - 1) + margin:
+                analysis["native_axis_projection_mode"] = "pixel_current_grid"
+                return max(0.0, min(1.0, y / float(source_height - 1)))
+
+    # For uploaded-chart rendering v3.47 is fail-closed: a missing pixel model
+    # hides price-linked overlays instead of drawing them at a guessed height.
+    if analysis.get("_native_axis_strict_pixel"):
+        analysis["native_axis_projection_mode"] = "hidden_untrusted_axis"
+        return None
+
     literal = _native_piecewise_price_ratio(analysis, float(price))
     if literal is not None:
         analysis["native_axis_projection_mode"] = "literal_piecewise"
@@ -5144,6 +5354,21 @@ def _render_uploaded_chart_with_overlays(
     width, height = image.size
     font_size = max(9, min(14, int(round(height * 0.015))))
     font = _font(font_size, True, True)
+
+    # Price-linked overlays are allowed only after a pixel-derived calibration
+    # succeeds on the untouched uploaded chart.  This deliberately ignores
+    # vision-provided y_ratio positions, which may be numerically correct but
+    # vertically offset.
+    analysis.pop("_native_axis_pixel_model", None)
+    analysis["_native_axis_strict_pixel"] = True
+    pixel_axis_model = _native_build_pixel_axis_model(image, analysis)
+    if pixel_axis_model is not None:
+        analysis["_native_axis_pixel_model"] = pixel_axis_model
+        analysis["native_axis_pixel_calibration_passed"] = True
+    else:
+        analysis["native_axis_pixel_calibration_passed"] = False
+        analysis["native_axis_projection_mode"] = "hidden_untrusted_axis"
+
     # Detect X anchors from the untouched screenshot before adding any SaleeM overlay.
     candle_centers = _native_detect_candle_centers(image)
     draw = ImageDraw.Draw(image)

@@ -1,4 +1,4 @@
-SaleeM v3.46.0 — Literal broker-axis anchors + chart zoom
+SaleeM v3.47.0 — Literal broker-axis anchors + chart zoom
 - Exact piecewise Y projection through original visible broker-axis ticks.
 - Pattern overlay price geometry shifted onto the uploaded broker scale.
 - OB/FVG keep exact vertical price boundaries.
@@ -37,8 +37,11 @@ Behavior:
 - Status, instructions, market metrics and recommendation cards remain fixed in the application interface.
 - Result chart is a wide 2200x1050 chart canvas designed for horizontal panning.
 - The app initially opens the chart at the latest/right-hand section.
- update time, market strength, Entry/Stop/TP/RR/confidence cards.
-- Central dark M5 chart is generated from synchronized market candles with R1/R2, S1/S2, ORDER BLOCK, FVG, BOS, CHOCH, IDM and valid trade scenario path.
-- Added timeframe strip, analysis summary cards and bottom app navigation.
-- Invalid trade geometry is not drawn. Conditional trades use activation/cancel/target values instead of pretending an entry has already occurred.
+
+v3.47.0
+- Strict pixel-derived price-axis calibration for uploaded charts.
+- Current price line + recurring source grid rows + numeric broker tick step define one authoritative price-to-Y transform.
+- Vision y_ratio no longer controls native overlay placement.
+- Fail-closed behavior hides untrusted overlays instead of drawing them at a wrong price height.
+tivation/cancel/target values instead of pretending an entry has already occurred.
 - Updated upload instructions for landscape capture and Reset Vertical Scale.
