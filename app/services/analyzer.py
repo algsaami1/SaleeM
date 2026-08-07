@@ -4047,6 +4047,3 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
     }
-get('candles') or [])} شمعة من بيانات السوق",
-        "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
-    }
