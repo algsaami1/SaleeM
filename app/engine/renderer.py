@@ -5129,21 +5129,66 @@ def _native_draw_pattern_overlays(
             text = f"{name}{' ✓' if confirmed else ''}"
             draw.text((min(width - 8, lx + dot + 4), max(8, ly - dot - 2)), text, font=font, fill=(45, 52, 62, min(235, opacity + 20)), anchor="ls")
 
+        trigger = _number(geometry.get("trigger"))
+        stop = _number(geometry.get("stop"))
+        target = _number(geometry.get("target"))
+        breakout_idx = geometry.get("breakout_index")
+        pivot_prices = []
+        for anchor in geometry.get("anchors") or []:
+            if isinstance(anchor, dict) and str(anchor.get("role") or "") == "pivot":
+                price = _number(anchor.get("price"))
+                if price is not None:
+                    pivot_prices.append(float(price))
+
+        # For confirmed M/W overlays, show the trade explanation directly on the chart:
+        # activation/entry zone, invalidation, and the expected path arrow.
+        if confirmed and trigger is not None:
+            trigger_y = _native_y(analysis, float(trigger), height)
+            if trigger_y is not None:
+                zone_left = max(candle_centers[-1] - spacing * 2, int(width * 0.68))
+                zone_right = min(width - 8, future_x + spacing)
+                if pivot_prices:
+                    if bias == "صاعد":
+                        zone_depth = max(0.08, min(0.42, (float(trigger) - min(pivot_prices)) * 0.22))
+                        zone_top_price = float(trigger) + zone_depth
+                        zone_bottom_price = float(trigger)
+                    else:
+                        zone_depth = max(0.08, min(0.42, (max(pivot_prices) - float(trigger)) * 0.22))
+                        zone_top_price = float(trigger)
+                        zone_bottom_price = float(trigger) - zone_depth
+                    zy1 = _native_y(analysis, zone_top_price, height)
+                    zy2 = _native_y(analysis, zone_bottom_price, height)
+                else:
+                    zy1 = trigger_y - max(8, spacing // 2)
+                    zy2 = trigger_y + max(8, spacing // 2)
+                if zy1 is not None and zy2 is not None:
+                    top_y, bottom_y = sorted((zy1, zy2))
+                    fill = (33, 166, 102, 42) if bias == "صاعد" else (210, 63, 70, 42)
+                    outline = (33, 166, 102, 120) if bias == "صاعد" else (210, 63, 70, 120)
+                    draw.rectangle((zone_left, top_y, zone_right, bottom_y), fill=fill, outline=outline, width=1)
+                    draw.text((zone_right - 4, (top_y + bottom_y) // 2), "ENTRY ZONE", font=font, fill=outline, anchor="rm")
+                _dash_line(draw, (zone_left, trigger_y), (zone_right, trigger_y), (33, 147, 83, 190) if bias == "صاعد" else (212, 62, 70, 190), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
+                draw.text((zone_right - 4, max(12, trigger_y - 6)), "NECKLINE / ACTIVATION", font=font, fill=(33, 147, 83, 200) if bias == "صاعد" else (212, 62, 70, 200), anchor="rs")
+        if confirmed and stop is not None:
+            stop_y = _native_y(analysis, float(stop), height)
+            if stop_y is not None:
+                line_left = max(int(width * 0.66), candle_centers[-1] - spacing * 2)
+                line_right = min(width - 8, future_x)
+                _dash_line(draw, (line_left, stop_y), (line_right, stop_y), (212, 62, 70, 160), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
+                draw.text(((line_left + line_right) // 2, stop_y - 6), "INVALIDATION", font=font, fill=(212, 62, 70, 190), anchor="ms")
+
         # Forecast arrow is permitted only after the real breakout is confirmed.
-        if confirmed:
-            trigger = _number(geometry.get("trigger"))
-            target = _number(geometry.get("target"))
-            breakout_idx = geometry.get("breakout_index")
-            if trigger is not None and target is not None and breakout_idx is not None:
-                try:
-                    sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
-                except (TypeError, ValueError):
-                    sx = None
-                sy = _native_y(analysis, float(trigger), height)
-                ty = _native_y(analysis, float(target), height)
-                if sx is not None and sy is not None and ty is not None and future_x > sx + 4:
-                    arrow_color = (18, 155, 92, 205) if bias == "صاعد" else (211, 55, 62, 205)
-                    _native_draw_arrow(draw, (sx, sy), (future_x, ty), arrow_color, width=max(2, line_w))
+        if confirmed and trigger is not None and target is not None and breakout_idx is not None:
+            try:
+                sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
+            except (TypeError, ValueError):
+                sx = None
+            sy = _native_y(analysis, float(trigger), height)
+            ty = _native_y(analysis, float(target), height)
+            arrow_end_x = min(width - 10, max(future_x, candle_centers[-1] + spacing * 6))
+            if sx is not None and sy is not None and ty is not None and arrow_end_x > sx + 6:
+                arrow_color = (18, 155, 92, 210) if bias == "صاعد" else (211, 55, 62, 210)
+                _native_draw_arrow(draw, (sx, sy), (arrow_end_x, ty), arrow_color, width=max(2, line_w + 1))
 
     image.alpha_composite(layer)
 
@@ -5225,6 +5270,60 @@ def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int,
     image.alpha_composite(layer)
 
 
+def _native_structure_items(
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+) -> list[tuple[int, float, str]]:
+    highs, lows = _simple_swing_points(candles, window=2)
+    recent_floor = max(0, len(candles) - 24)
+    highs = [p for p in highs if p[0] >= recent_floor]
+    lows = [p for p in lows if p[0] >= recent_floor]
+    current = float(candles[-1]["close"])
+    atr_values = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-20:]]
+    atr = median(atr_values) if atr_values else 0.25
+    direction = _reference_direction(analysis)
+
+    items: list[tuple[int, float, str]] = []
+    if direction == "هابط":
+        below = sorted([p for p in lows if p[1] < current - atr * 0.10], key=lambda item: item[1], reverse=True)
+        bos = below[0] if below else (lows[-1] if lows else None)
+        idm = None
+        if bos is not None:
+            deeper = [p for p in lows if p[1] < bos[1] - atr * 0.08]
+            idm = deeper[0] if deeper else None
+        choch = highs[-1] if highs else None
+        if bos is not None:
+            items.append((bos[0], bos[1], "BOS"))
+        if choch is not None:
+            items.append((choch[0], choch[1], "CHOCH"))
+        if idm is not None:
+            items.append((idm[0], idm[1], "IDM"))
+    else:
+        above = sorted([p for p in highs if p[1] > current + atr * 0.10], key=lambda item: item[1])
+        bos = above[0] if above else (highs[-1] if highs else None)
+        idm = None
+        if bos is not None:
+            higher = [p for p in above if p[1] > bos[1] + atr * 0.08]
+            idm = higher[0] if higher else None
+        choch = lows[-1] if lows else None
+        if bos is not None:
+            items.append((bos[0], bos[1], "BOS"))
+        if choch is not None:
+            items.append((choch[0], choch[1], "CHOCH"))
+        if idm is not None:
+            items.append((idm[0], idm[1], "IDM"))
+
+    seen: set[tuple[str, int, int]] = set()
+    unique: list[tuple[int, float, str]] = []
+    for idx, price, label in items:
+        key = (label, int(idx), int(round(float(price) * 100)))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append((int(idx), float(price), label))
+    return unique[:3]
+
+
 def _native_draw_structure(
     draw: ImageDraw.ImageDraw,
     analysis: dict[str, Any],
@@ -5236,36 +5335,15 @@ def _native_draw_structure(
     candles = _valid_renderer_candles(analysis)
     if len(candles) < 8 or not candle_centers:
         return
-    highs, lows = _simple_swing_points(candles, window=2)
-    direction = _reference_direction(analysis)
-    recent_floor = max(0, len(candles) - 18)
-    highs = [p for p in highs if p[0] >= recent_floor]
-    lows = [p for p in lows if p[0] >= recent_floor]
-    items: list[tuple[int, float, str]] = []
-    if direction == "هابط":
-        if lows:
-            items.append((*lows[-1], "BOS"))
-        if len(lows) >= 2:
-            items.append((*lows[-2], "CHOCH"))
-        if highs:
-            items.append((*highs[-1], "IDM"))
-    else:
-        if highs:
-            items.append((*highs[-1], "BOS"))
-        if len(highs) >= 2:
-            items.append((*highs[-2], "CHOCH"))
-        if lows:
-            items.append((*lows[-1], "IDM"))
-
+    items = _native_structure_items(analysis, candles)
     plot_left, plot_right = int(width * 0.03), int(width * 0.82)
     structure_geometry = {"window_size": len(candles)}
-    for idx, price, label in items[:3]:
+    for idx, price, label in items:
         y = _native_y(analysis, float(price), height)
         x = _native_index_x(analysis, structure_geometry, int(idx), candle_centers)
         if y is None or x is None:
             continue
         lead = max(34, int(width * 0.065))
-        # Move only the label/leader direction; the anchor dot never moves.
         if x - lead - plot_left >= 20:
             x2 = max(plot_left, x - lead)
             label_anchor = "rm"

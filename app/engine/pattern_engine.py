@@ -157,6 +157,9 @@ def _double_pattern(candles: list[dict[str, float]], *, timeframe: str, side: st
             equality = abs(second_price - first_price) / atr
             if equality > 0.55:
                 continue
+            breakout_index: int | None = None
+            pre_path: tuple[int, float] | None = None
+            post_path: tuple[int, float] | None = None
             if side == "top":
                 neck = _extreme_between(candles, first_index, second_index, kind="low")
                 if neck is None:
@@ -168,6 +171,16 @@ def _double_pattern(candles: list[dict[str, float]], *, timeframe: str, side: st
                 evidence = "قمتان متقاربتان يفصل بينهما قاع واضح"
                 stop = max(first_price, second_price) + atr * 0.18
                 target = neckline - max(atr * 0.8, min(first_price, second_price) - neckline)
+                pre_path = _extreme_between(candles, max(0, first_index - 8), first_index, kind="low")
+                if confirmed:
+                    for idx in range(second_index + 1, len(candles)):
+                        if candles[idx]["close"] < neckline - atr * 0.04:
+                            breakout_index = idx
+                            post_path = (idx, min(float(candles[idx]["close"]), neckline - atr * 0.05))
+                            break
+                if post_path is None:
+                    follow = _extreme_between(candles, second_index, min(len(candles) - 1, second_index + 8), kind="low")
+                    post_path = follow if follow is not None else (len(candles) - 1, float(candles[-1]["close"]))
             else:
                 neck = _extreme_between(candles, first_index, second_index, kind="high")
                 if neck is None:
@@ -179,6 +192,16 @@ def _double_pattern(candles: list[dict[str, float]], *, timeframe: str, side: st
                 evidence = "قاعان متقاربان يفصل بينهما ارتداد واضح"
                 stop = min(first_price, second_price) - atr * 0.18
                 target = neckline + max(atr * 0.8, neckline - max(first_price, second_price))
+                pre_path = _extreme_between(candles, max(0, first_index - 8), first_index, kind="high")
+                if confirmed:
+                    for idx in range(second_index + 1, len(candles)):
+                        if candles[idx]["close"] > neckline + atr * 0.04:
+                            breakout_index = idx
+                            post_path = (idx, max(float(candles[idx]["close"]), neckline + atr * 0.05))
+                            break
+                if post_path is None:
+                    follow = _extreme_between(candles, second_index, min(len(candles) - 1, second_index + 8), kind="high")
+                    post_path = follow if follow is not None else (len(candles) - 1, float(candles[-1]["close"]))
             if depth < 0.65:
                 continue
             confidence = 58 + min(12, int(depth * 6)) + max(0, 10 - int(equality * 15))
@@ -188,6 +211,13 @@ def _double_pattern(candles: list[dict[str, float]], *, timeframe: str, side: st
                 evidence += " مع كسر خط العنق"
             if second_index >= len(candles) - 8:
                 confidence += 4
+            path_points: list[tuple[int, float]] = []
+            for point in (pre_path, (first_index, first_price), (neck_index, neckline), (second_index, second_price), post_path):
+                if point is None:
+                    continue
+                if path_points and point[0] == path_points[-1][0] and abs(point[1] - path_points[-1][1]) < 1e-9:
+                    continue
+                path_points.append((int(point[0]), float(point[1])))
             geometry = _geom(
                 candles,
                 anchors=[
@@ -196,11 +226,11 @@ def _double_pattern(candles: list[dict[str, float]], *, timeframe: str, side: st
                     (second_index, second_price, "pivot"),
                 ],
                 lines=[((first_index, neckline), (len(candles) - 1, neckline), "neckline")],
-                path=[(first_index, first_price), (neck_index, neckline), (second_index, second_price)],
+                path=path_points,
                 trigger=neckline,
                 stop=stop,
                 target=target,
-                breakout_index=len(candles) - 1 if confirmed else None,
+                breakout_index=breakout_index if confirmed else None,
             )
             candidate = PatternCandidate(name, min(94, confidence), timeframe, bias, evidence, status, geometry)
             if best is None or candidate.confidence > best.confidence:
