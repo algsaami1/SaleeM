@@ -4971,6 +4971,142 @@ def _native_detect_candle_centers(image: Image.Image) -> list[int]:
     return centers
 
 
+
+
+def _native_candle_color_side(pixel: tuple[int, int, int, int]) -> str | None:
+    r, g, b, a = pixel
+    if a < 120:
+        return None
+    if r >= 120 and r >= g * 1.28 and r >= b * 1.20:
+        return "bear"
+    if g >= 90 and g >= r * 1.28 and (g >= b * 1.05 or b >= r * 1.30):
+        return "bull"
+    return None
+
+
+def _native_detect_candle_geometry(image: Image.Image, centers: list[int]) -> list[dict[str, Any]]:
+    """Read the visible candle wick range directly from the untouched screenshot.
+
+    This geometry is used only to align the market-candle indices with the actual
+    pixels in the uploaded chart.  It never recreates or replaces the chart.
+    """
+    if not centers:
+        return []
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    pixels = rgba.load()
+    top = max(2, int(height * 0.02))
+    bottom = min(height - 3, int(height * 0.97))
+    gaps = [b - a for a, b in zip(centers[:-1], centers[1:]) if b > a]
+    spacing = int(median(gaps)) if gaps else max(8, width // max(12, len(centers)))
+    half = max(2, min(6, spacing // 5))
+    result: list[dict[str, Any]] = []
+    for x in centers:
+        ys: list[int] = []
+        bull = 0
+        bear = 0
+        for xx in range(max(0, x - half), min(width, x + half + 1)):
+            for y in range(top, bottom + 1):
+                side = _native_candle_color_side(pixels[xx, y])
+                if side is None:
+                    continue
+                ys.append(y)
+                if side == "bull":
+                    bull += 1
+                else:
+                    bear += 1
+        if len(ys) < 3:
+            continue
+        result.append({
+            "x": int(x),
+            "y_high": int(min(ys)),
+            "y_low": int(max(ys)),
+            "side": "bull" if bull > bear * 1.12 else "bear" if bear > bull * 1.12 else "neutral",
+        })
+    return result
+
+
+def _native_y_to_price(analysis: dict[str, Any], y: float) -> float | None:
+    model = analysis.get("_native_axis_pixel_model")
+    if not isinstance(model, dict) or model.get("mode") != "pixel_current_grid":
+        return None
+    current_price = _number(model.get("current_price"))
+    current_y = _number(model.get("current_y"))
+    pixels_per_price = _number(model.get("pixels_per_price"))
+    if current_price is None or current_y is None or pixels_per_price is None or pixels_per_price <= 0:
+        return None
+    return float(current_price) + (float(current_y) - float(y)) / float(pixels_per_price)
+
+
+def _native_build_candle_x_map(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    candle_centers: list[int],
+) -> dict[int, int]:
+    """Align visible screenshot candles to the real market-candle indices.
+
+    v3.48 mapped the last N market candles to the N detected screenshot candles.
+    That can shift every W/M/BOS/CHOCH/IDM horizontally when the screenshot is a
+    few candles behind the market feed.  Here we compare the screenshot wick
+    high/low and color with the market data and search for the best recent
+    contiguous alignment.  If the match is not trustworthy we fail closed.
+    """
+    candles = _valid_renderer_candles(analysis)
+    geoms = _native_detect_candle_geometry(image, candle_centers)
+    if len(candles) < 8 or len(geoms) < 6:
+        return {}
+    # Keep centers and geometry in the same order; geometry may omit a rare
+    # unreadable center, so use only its own x values.
+    usable = []
+    for geom in geoms:
+        high_price = _native_y_to_price(analysis, float(geom["y_high"]))
+        low_price = _native_y_to_price(analysis, float(geom["y_low"]))
+        if high_price is None or low_price is None:
+            continue
+        high_price, low_price = max(high_price, low_price), min(high_price, low_price)
+        usable.append((int(geom["x"]), high_price, low_price, str(geom.get("side") or "neutral")))
+    if len(usable) < 6:
+        return {}
+
+    n = len(usable)
+    if n > len(candles):
+        usable = usable[-len(candles):]
+        n = len(usable)
+    recent_atr_values = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-32:]]
+    atr = max(0.01, float(median(recent_atr_values))) if recent_atr_values else 0.25
+    # Screenshot can trail the live feed; search a generous recent window.
+    max_lag = min(24, max(0, len(candles) - n))
+    candidate_starts = [len(candles) - n - lag for lag in range(max_lag + 1)]
+    best: tuple[float, int] | None = None
+    for start in candidate_starts:
+        if start < 0 or start + n > len(candles):
+            continue
+        errors: list[float] = []
+        side_penalty = 0.0
+        for offset, (_x, img_high, img_low, side) in enumerate(usable):
+            candle = candles[start + offset]
+            err = (abs(img_high - float(candle["high"])) + abs(img_low - float(candle["low"]))) / (2.0 * atr)
+            errors.append(min(4.0, err))
+            market_side = "bull" if float(candle["close"]) > float(candle["open"]) else "bear" if float(candle["close"]) < float(candle["open"]) else "neutral"
+            if side != "neutral" and market_side != "neutral" and side != market_side:
+                side_penalty += 0.18
+        if not errors:
+            continue
+        errors.sort()
+        # Robust median-ish error so one long wick does not ruin the alignment.
+        core = errors[:max(4, int(len(errors) * 0.80))]
+        score = sum(core) / len(core) + side_penalty / max(1, len(errors))
+        if best is None or score < best[0]:
+            best = (score, start)
+    if best is None or best[0] > 1.15:
+        analysis["native_candle_alignment_score"] = None if best is None else round(best[0], 3)
+        analysis["native_candle_alignment_mode"] = "hidden_untrusted_x"
+        return {}
+    score, start = best
+    analysis["native_candle_alignment_score"] = round(score, 3)
+    analysis["native_candle_alignment_mode"] = "wick_price_match"
+    return {start + offset: int(item[0]) for offset, item in enumerate(usable)}
+
 def _native_pattern_abs_index(analysis: dict[str, Any], geometry: dict[str, Any], relative_index: int) -> int | None:
     candles = _valid_renderer_candles(analysis)
     if not candles:
@@ -4992,11 +5128,25 @@ def _native_index_x(
     candles = _valid_renderer_candles(analysis)
     if not candles or not candle_centers:
         return None
+    absolute = _native_pattern_abs_index(analysis, geometry, relative_index)
+    if absolute is None:
+        return None
+    x_map = analysis.get("_native_candle_x_map")
+    if isinstance(x_map, dict):
+        value = x_map.get(int(absolute))
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                pass
+        # A calibrated X model exists but this candle is not visible. Never
+        # guess its X from a different trailing-window assumption.
+        if x_map:
+            return None
     visible_count = min(len(candle_centers), len(candles))
     centers = candle_centers[-visible_count:]
     visible_start = len(candles) - visible_count
-    absolute = _native_pattern_abs_index(analysis, geometry, relative_index)
-    if absolute is None or absolute < visible_start or absolute >= len(candles):
+    if absolute < visible_start or absolute >= len(candles):
         return None
     return int(centers[absolute - visible_start])
 
@@ -5229,9 +5379,16 @@ def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: 
                 break
 
 
-def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
+def _native_draw_zones(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    width: int,
+    height: int,
+    font,
+    candle_centers: list[int] | None = None,
+) -> None:
     candles = _valid_renderer_candles(analysis)
-    if not candles:
+    if not candles or not candle_centers:
         return
     current = _number(analysis.get("current_price"))
     entry = _number(analysis.get("entry"))
@@ -5239,89 +5396,101 @@ def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int,
     atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles])
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
+    geometry = {"window_size": len(candles)}
+    gaps = [b - a for a, b in zip(candle_centers[:-1], candle_centers[1:]) if b > a]
+    spacing = max(8, int(median(gaps))) if gaps else max(10, width // max(12, len(candle_centers)))
+    latest_x = max(candle_centers)
 
     ob = _nearest_detected_order_block(analysis, candles, focal, float(atr))
     if ob is not None:
-        _index, low, high, _strength = ob
+        index, low, high, _strength = ob
         y1 = _native_y(analysis, float(high), height)
         y2 = _native_y(analysis, float(low), height)
-        if y1 is not None and y2 is not None:
+        x1 = _native_index_x(analysis, geometry, int(index), candle_centers)
+        if y1 is not None and y2 is not None and x1 is not None:
             y1, y2 = sorted((y1, y2))
-            x1, x2 = int(width * 0.42), int(width * 0.66)
-            # Do not inflate the zone vertically: its top/bottom must stay on
-            # the exact broker-axis prices. A one-pixel zone is still valid.
+            x2 = min(int(width * 0.86), max(x1 + spacing * 5, latest_x + spacing))
             if y2 <= y1:
                 y2 = min(height - 2, y1 + 1)
-            draw.rectangle((x1, y1, x2, y2), fill=(39, 112, 220, 38), outline=(39, 112, 220, 120), width=1)
-            draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=font, fill=(28, 77, 146, 210), anchor="mm")
+            if x2 > x1 + 4:
+                draw.rectangle((x1, y1, x2, y2), fill=(39, 112, 220, 30), outline=(39, 112, 220, 105), width=1)
+                draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=font, fill=(28, 77, 146, 205), anchor="mm")
 
     fvg = _nearest_detected_fvg(candles, focal, float(atr))
     if fvg is not None:
-        _index, low, high = fvg
+        index, low, high = fvg
         y1 = _native_y(analysis, float(high), height)
         y2 = _native_y(analysis, float(low), height)
-        if y1 is not None and y2 is not None:
+        x1 = _native_index_x(analysis, geometry, int(index), candle_centers)
+        if y1 is not None and y2 is not None and x1 is not None:
             y1, y2 = sorted((y1, y2))
-            x1, x2 = int(width * 0.25), int(width * 0.50)
+            x2 = min(int(width * 0.86), max(x1 + spacing * 4, latest_x))
             if y2 <= y1:
                 y2 = min(height - 2, y1 + 1)
-            draw.rectangle((x1, y1, x2, y2), fill=(232, 147, 45, 30), outline=(218, 133, 35, 105), width=1)
-            draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=font, fill=(145, 82, 22, 210), anchor="mm")
+            if x2 > x1 + 4:
+                draw.rectangle((x1, y1, x2, y2), fill=(232, 147, 45, 24), outline=(218, 133, 35, 90), width=1)
+                draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=font, fill=(145, 82, 22, 200), anchor="mm")
     image.alpha_composite(layer)
 
 
-def _native_structure_items(
+def _native_structure_events(
     analysis: dict[str, Any],
     candles: list[dict[str, Any]],
-) -> list[tuple[int, float, str]]:
+) -> list[dict[str, Any]]:
+    """Return BOS/CHOCH/IDM only when they are tied to real swing/break events.
+
+    BOS/CHOCH are drawn at the broken swing level from the swing candle to the
+    actual breaking candle. IDM is the last opposite swing inside that leg.
+    """
     highs, lows = _simple_swing_points(candles, window=2)
-    recent_floor = max(0, len(candles) - 24)
-    highs = [p for p in highs if p[0] >= recent_floor]
-    lows = [p for p in lows if p[0] >= recent_floor]
-    current = float(candles[-1]["close"])
-    atr_values = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-20:]]
-    atr = median(atr_values) if atr_values else 0.25
+    if not highs and not lows:
+        return []
+    recent_floor = max(0, len(candles) - 32)
+    atr_values = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-24:]]
+    atr = max(0.01, float(median(atr_values))) if atr_values else 0.25
+    tol = atr * 0.04
+    breaks: list[dict[str, Any]] = []
+    for idx, price in highs:
+        for j in range(idx + 2, len(candles)):
+            if float(candles[j]["close"]) > float(price) + tol:
+                breaks.append({"side": "bull", "swing_index": idx, "break_index": j, "price": float(price)})
+                break
+    for idx, price in lows:
+        for j in range(idx + 2, len(candles)):
+            if float(candles[j]["close"]) < float(price) - tol:
+                breaks.append({"side": "bear", "swing_index": idx, "break_index": j, "price": float(price)})
+                break
+    breaks = [e for e in breaks if int(e["break_index"]) >= recent_floor]
+    breaks.sort(key=lambda e: (int(e["break_index"]), int(e["swing_index"])))
+    if not breaks:
+        return []
+
     direction = _reference_direction(analysis)
+    trend_side = "bull" if direction != "هابط" else "bear"
+    bos = next((e for e in reversed(breaks) if e["side"] == trend_side), None)
+    choch = None
+    if bos is not None:
+        choch = next((e for e in reversed(breaks) if e["side"] != trend_side and int(e["break_index"]) <= int(bos["break_index"])), None)
+    if choch is None:
+        choch = next((e for e in reversed(breaks) if e["side"] != trend_side), None)
 
-    items: list[tuple[int, float, str]] = []
-    if direction == "هابط":
-        below = sorted([p for p in lows if p[1] < current - atr * 0.10], key=lambda item: item[1], reverse=True)
-        bos = below[0] if below else (lows[-1] if lows else None)
-        idm = None
-        if bos is not None:
-            deeper = [p for p in lows if p[1] < bos[1] - atr * 0.08]
-            idm = deeper[0] if deeper else None
-        choch = highs[-1] if highs else None
-        if bos is not None:
-            items.append((bos[0], bos[1], "BOS"))
-        if choch is not None:
-            items.append((choch[0], choch[1], "CHOCH"))
-        if idm is not None:
-            items.append((idm[0], idm[1], "IDM"))
-    else:
-        above = sorted([p for p in highs if p[1] > current + atr * 0.10], key=lambda item: item[1])
-        bos = above[0] if above else (highs[-1] if highs else None)
-        idm = None
-        if bos is not None:
-            higher = [p for p in above if p[1] > bos[1] + atr * 0.08]
-            idm = higher[0] if higher else None
-        choch = lows[-1] if lows else None
-        if bos is not None:
-            items.append((bos[0], bos[1], "BOS"))
-        if choch is not None:
-            items.append((choch[0], choch[1], "CHOCH"))
-        if idm is not None:
-            items.append((idm[0], idm[1], "IDM"))
+    events: list[dict[str, Any]] = []
+    if bos is not None:
+        events.append({**bos, "label": "BOS"})
+    if choch is not None and (bos is None or (choch["swing_index"], choch["price"]) != (bos["swing_index"], bos["price"])):
+        events.append({**choch, "label": "CHOCH"})
 
-    seen: set[tuple[str, int, int]] = set()
-    unique: list[tuple[int, float, str]] = []
-    for idx, price, label in items:
-        key = (label, int(idx), int(round(float(price) * 100)))
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append((int(idx), float(price), label))
-    return unique[:3]
+    if bos is not None:
+        a = int(bos["swing_index"])
+        b = int(bos["break_index"])
+        if trend_side == "bull":
+            internal = [p for p in lows if a < p[0] < b]
+        else:
+            internal = [p for p in highs if a < p[0] < b]
+        if internal:
+            idx, price = internal[-1]
+            events.append({"side": trend_side, "swing_index": idx, "break_index": idx, "price": float(price), "label": "IDM"})
+    return events[:3]
 
 
 def _native_draw_structure(
@@ -5335,28 +5504,32 @@ def _native_draw_structure(
     candles = _valid_renderer_candles(analysis)
     if len(candles) < 8 or not candle_centers:
         return
-    items = _native_structure_items(analysis, candles)
-    plot_left, plot_right = int(width * 0.03), int(width * 0.82)
-    structure_geometry = {"window_size": len(candles)}
-    for idx, price, label in items:
-        y = _native_y(analysis, float(price), height)
-        x = _native_index_x(analysis, structure_geometry, int(idx), candle_centers)
-        if y is None or x is None:
+    events = _native_structure_events(analysis, candles)
+    geometry = {"window_size": len(candles)}
+    dot = max(3, int(height * 0.0055))
+    for event in events:
+        try:
+            start_idx = int(event["swing_index"])
+            break_idx = int(event["break_index"])
+            price = float(event["price"])
+            label = str(event["label"])
+        except (KeyError, TypeError, ValueError):
             continue
-        lead = max(34, int(width * 0.065))
-        if x - lead - plot_left >= 20:
-            x2 = max(plot_left, x - lead)
-            label_anchor = "rm"
-            label_x = x2 - max(4, int(width * 0.005))
+        y = _native_y(analysis, price, height)
+        x1 = _native_index_x(analysis, geometry, start_idx, candle_centers)
+        x2 = _native_index_x(analysis, geometry, break_idx, candle_centers)
+        if y is None or x1 is None:
+            continue
+        draw.ellipse((x1-dot, y-dot, x1+dot, y+dot), fill=(246, 248, 251, 220), outline=(46, 55, 67, 220), width=1)
+        if label in {"BOS", "CHOCH"} and x2 is not None and x2 > x1 + 3:
+            _dash_line(draw, (x1 + dot + 1, y), (x2, y), (50, 58, 69, 170), width=max(1, int(height * 0.0017)), dash=max(5, int(width * 0.006)), gap=max(3, int(width * 0.004)))
+            text_x = min(width - 8, x1 + max(10, (x2 - x1) // 2))
+            draw.text((text_x, y - 5), label, font=font, fill=(31, 38, 47, 210), anchor="ms")
         else:
-            x2 = min(plot_right, x + lead)
-            label_anchor = "lm"
-            label_x = x2 + max(4, int(width * 0.005))
-        dot = max(3, int(height * 0.006))
-        draw.ellipse((x-dot, y-dot, x+dot, y+dot), fill=(246, 248, 251, 215), outline=(46, 55, 67, 220), width=1)
-        edge_x = x - dot - 2 if x2 < x else x + dot + 2
-        _dash_line(draw, (edge_x, y), (x2, y), (50, 58, 69, 165), width=max(1, int(height * 0.0017)), dash=max(4, int(width * 0.006)), gap=max(3, int(width * 0.004)))
-        draw.text((label_x, y), label, font=font, fill=(31, 38, 47, 205), anchor=label_anchor)
+            lead = max(30, int(width * 0.055))
+            x_end = max(int(width * 0.03), x1 - lead) if x1 > width * 0.20 else min(int(width * 0.84), x1 + lead)
+            _dash_line(draw, (x1 - dot - 1 if x_end < x1 else x1 + dot + 1, y), (x_end, y), (50, 58, 69, 155), width=max(1, int(height * 0.0015)), dash=max(5, int(width * 0.006)), gap=max(3, int(width * 0.004)))
+            draw.text((x_end - 4 if x_end < x1 else x_end + 4, y), label, font=font, fill=(31, 38, 47, 205), anchor="rm" if x_end < x1 else "lm")
 
 
 def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
@@ -5449,9 +5622,13 @@ def _render_uploaded_chart_with_overlays(
 
     # Detect X anchors from the untouched screenshot before adding any SaleeM overlay.
     candle_centers = _native_detect_candle_centers(image)
+    analysis.pop("_native_candle_x_map", None)
+    candle_x_map = _native_build_candle_x_map(image, analysis, candle_centers)
+    if candle_x_map:
+        analysis["_native_candle_x_map"] = candle_x_map
     draw = ImageDraw.Draw(image)
     _native_draw_sr(draw, analysis, width, height, font)
-    _native_draw_zones(image, analysis, width, height, font)
+    _native_draw_zones(image, analysis, width, height, font, candle_centers)
     _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
     draw = ImageDraw.Draw(image)
     _native_draw_structure(draw, analysis, width, height, font, candle_centers)

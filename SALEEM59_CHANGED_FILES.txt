@@ -1,3 +1,13 @@
+SaleeM v3.49.0 — True candle-X anchored pattern and structure overlays
+
+- Aligns screenshot candle X positions to actual M5 market-candle indices using wick prices and candle color instead of blindly mapping the last N candles.
+- W/M and other pattern geometry now use the calibrated candle-X map; if X cannot be trusted, the overlay is hidden.
+- BOS/CHOCH now require a real swing level followed by an actual closing break; the line runs from the broken swing to the break candle.
+- IDM is the last real internal opposite swing inside the BOS leg; it is not fabricated above/below the chart.
+- OB and FVG rectangles now begin at their detected source candle X and keep their true price bounds.
+- Confirmed patterns show Entry Zone, Neckline/Activation, Invalidation and a forecast arrow from the actual breakout candle to the measured pattern target.
+- Original uploaded chart pixels remain unchanged; all drawings are overlays only.
+
 SaleeM v3.47.0 — Literal broker-axis anchors + chart zoom
 - Exact piecewise Y projection through original visible broker-axis ticks.
 - Pattern overlay price geometry shifted onto the uploaded broker scale.
@@ -43,5 +53,3 @@ v3.47.0
 - Current price line + recurring source grid rows + numeric broker tick step define one authoritative price-to-Y transform.
 - Vision y_ratio no longer controls native overlay placement.
 - Fail-closed behavior hides untrusted overlays instead of drawing them at a wrong price height.
-tivation/cancel/target values instead of pretending an entry has already occurred.
-- Updated upload instructions for landscape capture and Reset Vertical Scale.
