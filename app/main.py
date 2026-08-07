@@ -49,7 +49,10 @@ async def track_anonymous_user(request: Request, call_next):
     if new_visitor:
         visitor_id = uuid.uuid4().hex
     if not path.startswith("/static/") and path != "/health":
-        system_status_store.touch_user(visitor_id)
+        try:
+            system_status_store.touch_user(visitor_id)
+        except Exception:
+            logging.exception("SaleeM user counter failed; request will continue")
     response = await call_next(request)
     if new_visitor:
         response.set_cookie(
@@ -95,12 +98,25 @@ class NotePayload(BaseModel):
 
 
 def page_context(request: Request, *, result=None, error=None, axis_retry=False):
+    try:
+        summary = feedback_store.summary()
+    except Exception:
+        logging.exception("SaleeM feedback summary failed; using an empty summary")
+        summary = {
+            "average_rating": 0,
+            "rating_count": 0,
+            "total_trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "open": 0,
+            "no_trade": 0,
+        }
     return {
         "request": request,
         "result": result,
         "error": error,
         "axis_retry": axis_retry,
-        "summary": feedback_store.summary(),
+        "summary": summary,
         "owner_email": owner_email(),
         "app_version": __version__,
     }
@@ -122,8 +138,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-market-snapshot-axis-projection-v3.40.0",
-        "ui": "saleem-fast-decision-result-page-v3.40.0",
+        "renderer": "saleem-market-snapshot-axis-projection-v3.40.1",
+        "ui": "saleem-fast-decision-result-page-v3.40.1",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),

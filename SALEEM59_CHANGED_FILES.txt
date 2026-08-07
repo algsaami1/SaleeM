@@ -1,13 +1,10 @@
-SaleeM v3.39.1 – S/R alignment and scenario-width tuning
+SaleeM v3.40.1 – Internal Server Error hotfix
 
-Modified files:
-- app/__init__.py
-- app/main.py
-- app/engine/renderer.py
+- Kept the portrait-only Reset Vertical Scale workflow.
+- Prevented the anonymous-user counter from crashing the whole website when its storage file is unavailable or corrupted.
+- Prevented feedback-summary storage errors from crashing the home page.
+- Removed any accidental duplicate content after the final </html> tag.
+- Verified Python compilation and the home page response locally.
 
-What changed:
-1) Made the red and green scenario zones narrower so they fit the expected scenario more naturally.
-2) Moved support/resistance values to the right axis aligned horizontally with their own lines.
-3) Kept support/resistance lines on a lower drawing layer so other graphics render above them.
 4) Preserved colored right-axis labels for Entry / Stop or Cancel / TP1 / TP2 / TP3.
 5) Updated version to 3.39.1.
