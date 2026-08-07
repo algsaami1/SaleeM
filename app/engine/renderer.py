@@ -4630,6 +4630,244 @@ def _native_tag(
     return (left, top, right, bottom)
 
 
+
+def _native_is_candle_pixel(pixel: tuple[int, int, int, int]) -> bool:
+    """Detect likely red/green candle pixels in the untouched broker screenshot."""
+    r, g, b, a = pixel
+    if a < 120:
+        return False
+    # Red candle families.
+    if r >= 120 and r >= g * 1.28 and r >= b * 1.20:
+        return True
+    # Green / teal candle families used by common broker themes.
+    if g >= 90 and g >= r * 1.28 and (g >= b * 1.05 or b >= r * 1.30):
+        return True
+    return False
+
+
+def _native_detect_candle_centers(image: Image.Image) -> list[int]:
+    """Return candle X centers from the original screenshot, never from a rebuilt chart.
+
+    The detector intentionally rejects wide colored runs so support/resistance
+    lines and broker widgets are not mistaken for candles.  If the positions
+    cannot be found reliably, pattern geometry is not drawn at all.
+    """
+    rgba = image.convert("RGBA")
+    width, height = rgba.size
+    if width < 240 or height < 160:
+        return []
+    left = max(2, int(width * 0.01))
+    right = max(left + 40, int(width * 0.82))
+    top = max(4, int(height * 0.03))
+    bottom = min(height - 4, int(height * 0.96))
+    pixels = rgba.load()
+    min_hits = max(4, int((bottom - top) * 0.0045))
+    active: list[bool] = []
+    for x in range(left, right):
+        hits = 0
+        for y in range(top, bottom):
+            if _native_is_candle_pixel(pixels[x, y]):
+                hits += 1
+                if hits >= min_hits:
+                    break
+        active.append(hits >= min_hits)
+
+    segments: list[tuple[int, int]] = []
+    start: int | None = None
+    for offset, is_active in enumerate(active):
+        if is_active and start is None:
+            start = offset
+        elif not is_active and start is not None:
+            segments.append((start, offset - 1))
+            start = None
+    if start is not None:
+        segments.append((start, len(active) - 1))
+
+    max_width = max(5, int((right - left) * 0.035))
+    centers = [left + (a + b) // 2 for a, b in segments if 1 <= b - a + 1 <= max_width]
+    # Real M5 screenshots normally show several candles.  Fewer than six is
+    # not enough to anchor a chart pattern safely.
+    if len(centers) < 6:
+        return []
+    return centers
+
+
+def _native_pattern_abs_index(analysis: dict[str, Any], geometry: dict[str, Any], relative_index: int) -> int | None:
+    candles = _valid_renderer_candles(analysis)
+    if not candles:
+        return None
+    try:
+        window_size = int(geometry.get("window_size") or len(candles))
+    except (TypeError, ValueError):
+        window_size = len(candles)
+    window_size = max(1, min(len(candles), window_size))
+    return len(candles) - window_size + int(relative_index)
+
+
+def _native_index_x(
+    analysis: dict[str, Any],
+    geometry: dict[str, Any],
+    relative_index: int,
+    candle_centers: list[int],
+) -> int | None:
+    candles = _valid_renderer_candles(analysis)
+    if not candles or not candle_centers:
+        return None
+    visible_count = min(len(candle_centers), len(candles))
+    centers = candle_centers[-visible_count:]
+    visible_start = len(candles) - visible_count
+    absolute = _native_pattern_abs_index(analysis, geometry, relative_index)
+    if absolute is None or absolute < visible_start or absolute >= len(candles):
+        return None
+    return int(centers[absolute - visible_start])
+
+
+def _native_draw_arrow(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    color: tuple[int, int, int, int],
+    *,
+    width: int,
+) -> None:
+    draw.line((start[0], start[1], end[0], end[1]), fill=color, width=width)
+    dx, dy = end[0] - start[0], end[1] - start[1]
+    length = math.hypot(dx, dy)
+    if length < 8:
+        return
+    ux, uy = dx / length, dy / length
+    size = max(7, width * 5)
+    angle = math.radians(28)
+    ca, sa = math.cos(angle), math.sin(angle)
+    for sign in (-1, 1):
+        vx = ux * ca - sign * uy * sa
+        vy = sign * ux * sa + uy * ca
+        point = (int(end[0] - vx * size), int(end[1] - vy * size))
+        draw.line((end[0], end[1], point[0], point[1]), fill=color, width=width)
+
+
+def _native_draw_pattern_overlays(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    width: int,
+    height: int,
+    font,
+    candle_centers: list[int],
+) -> None:
+    """Draw at most two M5 patterns anchored to detected screenshot candles.
+
+    Candidate patterns are dashed and never receive a forecast arrow.  A solid
+    forecast arrow is allowed only after deterministic breakout confirmation.
+    No X fallback is used: if candle positions are not detectable, the pattern
+    is hidden rather than shifted to a cosmetically convenient location.
+    """
+    overlays = analysis.get("pattern_overlays")
+    if not isinstance(overlays, list) or not overlays or len(candle_centers) < 6:
+        return
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    line_w = max(1, int(height * 0.0020))
+    dot = max(3, int(height * 0.0048))
+    spacing = 18
+    if len(candle_centers) >= 2:
+        gaps = [b - a for a, b in zip(candle_centers[:-1], candle_centers[1:]) if 2 <= b - a <= width * 0.12]
+        if gaps:
+            spacing = max(8, int(median(gaps)))
+    future_x = min(int(width * 0.80), candle_centers[-1] + spacing * 5)
+
+    for rank, overlay in enumerate(overlays[:2]):
+        if not isinstance(overlay, dict) or str(overlay.get("timeframe") or "") != "M5":
+            continue
+        geometry = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
+        status = str(overlay.get("status") or "candidate")
+        bias = str(overlay.get("bias") or "محايد")
+        confirmed = status == "confirmed"
+        opacity = 205 if rank == 0 else 135
+        boundary = (79, 91, 213, opacity) if confirmed else (71, 80, 94, opacity)
+        path_color = (70, 78, 89, max(90, opacity - 50))
+
+        # Boundaries / neckline. Clip a boundary only when both true endpoints
+        # are visible; guessed line placement is deliberately forbidden.
+        visible_lines = 0
+        for item in geometry.get("lines") or []:
+            if not isinstance(item, dict):
+                continue
+            p1, p2 = item.get("p1"), item.get("p2")
+            if not (isinstance(p1, list) and len(p1) >= 2 and isinstance(p2, list) and len(p2) >= 2):
+                continue
+            x1 = _native_index_x(analysis, geometry, int(p1[0]), candle_centers)
+            x2 = _native_index_x(analysis, geometry, int(p2[0]), candle_centers)
+            y1 = _native_y(analysis, float(p1[1]), height)
+            y2 = _native_y(analysis, float(p2[1]), height)
+            if None in (x1, x2, y1, y2):
+                continue
+            role = str(item.get("role") or "")
+            color = (187, 139, 33, opacity) if role in {"neckline", "trigger"} else boundary
+            if confirmed:
+                draw.line((x1, y1, x2, y2), fill=color, width=line_w)
+            else:
+                _dash_line(draw, (x1, y1), (x2, y2), color, width=line_w, dash=max(5, spacing // 2), gap=max(4, spacing // 3))
+            visible_lines += 1
+
+        # Pattern skeleton such as W/M/H&S. Only actual visible pivots are used.
+        path_points: list[tuple[int, int]] = []
+        for point in geometry.get("path") or []:
+            if not (isinstance(point, list) and len(point) >= 2):
+                continue
+            x = _native_index_x(analysis, geometry, int(point[0]), candle_centers)
+            y = _native_y(analysis, float(point[1]), height)
+            if x is not None and y is not None:
+                path_points.append((x, y))
+        if len(path_points) >= 2:
+            if confirmed:
+                draw.line(path_points, fill=path_color, width=line_w)
+            else:
+                for a, b in zip(path_points[:-1], path_points[1:]):
+                    _dash_line(draw, a, b, path_color, width=line_w, dash=max(5, spacing // 2), gap=max(4, spacing // 3))
+
+        anchor_points: list[tuple[int, int]] = []
+        for anchor in geometry.get("anchors") or []:
+            if not isinstance(anchor, dict):
+                continue
+            try:
+                x = _native_index_x(analysis, geometry, int(anchor.get("index")), candle_centers)
+                y = _native_y(analysis, float(anchor.get("price")), height)
+            except (TypeError, ValueError):
+                continue
+            if x is None or y is None:
+                continue
+            anchor_points.append((x, y))
+            draw.ellipse((x - dot, y - dot, x + dot, y + dot), fill=(248, 250, 252, 205), outline=boundary, width=1)
+
+        # No visible real anchors means no pattern overlay at all.
+        if not anchor_points and visible_lines == 0:
+            continue
+
+        # Tiny label only; detailed pattern explanation stays in the fixed UI.
+        name = str(overlay.get("name") or "")
+        if name and anchor_points:
+            lx, ly = anchor_points[-1]
+            text = f"{name}{' ✓' if confirmed else ''}"
+            draw.text((min(width - 8, lx + dot + 4), max(8, ly - dot - 2)), text, font=font, fill=(45, 52, 62, min(235, opacity + 20)), anchor="ls")
+
+        # Forecast arrow is permitted only after the real breakout is confirmed.
+        if confirmed:
+            trigger = _number(geometry.get("trigger"))
+            target = _number(geometry.get("target"))
+            breakout_idx = geometry.get("breakout_index")
+            if trigger is not None and target is not None and breakout_idx is not None:
+                try:
+                    sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
+                except (TypeError, ValueError):
+                    sx = None
+                sy = _native_y(analysis, float(trigger), height)
+                ty = _native_y(analysis, float(target), height)
+                if sx is not None and sy is not None and ty is not None and future_x > sx + 4:
+                    arrow_color = (18, 155, 92, 205) if bias == "صاعد" else (211, 55, 62, 205)
+                    _native_draw_arrow(draw, (sx, sy), (future_x, ty), arrow_color, width=max(2, line_w))
+
+    image.alpha_composite(layer)
+
 def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
     current = _number(analysis.get("current_price"))
     if current is None:
@@ -4710,9 +4948,16 @@ def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int,
     image.alpha_composite(layer)
 
 
-def _native_draw_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
+def _native_draw_structure(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    width: int,
+    height: int,
+    font,
+    candle_centers: list[int] | None = None,
+) -> None:
     candles = _valid_renderer_candles(analysis)
-    if len(candles) < 8:
+    if len(candles) < 8 or not candle_centers:
         return
     highs, lows = _simple_swing_points(candles, window=2)
     direction = _reference_direction(analysis)
@@ -4735,19 +4980,28 @@ def _native_draw_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], 
         if lows:
             items.append((*lows[-1], "IDM"))
 
-    plot_left, plot_right = int(width * 0.06), int(width * 0.79)
-    visible_span = max(1, len(candles) - 1)
+    plot_left, plot_right = int(width * 0.03), int(width * 0.82)
+    structure_geometry = {"window_size": len(candles)}
     for idx, price, label in items[:3]:
         y = _native_y(analysis, float(price), height)
-        if y is None:
+        x = _native_index_x(analysis, structure_geometry, int(idx), candle_centers)
+        if y is None or x is None:
             continue
-        x = int(plot_left + (idx / visible_span) * (plot_right - plot_left))
-        lead = max(36, int(width * 0.075))
-        x2 = max(plot_left, x - lead)
+        lead = max(34, int(width * 0.065))
+        # Move only the label/leader direction; the anchor dot never moves.
+        if x - lead - plot_left >= 20:
+            x2 = max(plot_left, x - lead)
+            label_anchor = "rm"
+            label_x = x2 - max(4, int(width * 0.005))
+        else:
+            x2 = min(plot_right, x + lead)
+            label_anchor = "lm"
+            label_x = x2 + max(4, int(width * 0.005))
         dot = max(3, int(height * 0.006))
         draw.ellipse((x-dot, y-dot, x+dot, y+dot), fill=(246, 248, 251, 215), outline=(46, 55, 67, 220), width=1)
-        _dash_line(draw, (x-dot-2, y), (x2, y), (50, 58, 69, 185), width=max(1, int(height * 0.002)), dash=max(4, int(width * 0.008)), gap=max(3, int(width * 0.005)))
-        draw.text((x2 - max(4, int(width * 0.005)), y), label, font=font, fill=(31, 38, 47, 220), anchor="rm")
+        edge_x = x - dot - 2 if x2 < x else x + dot + 2
+        _dash_line(draw, (edge_x, y), (x2, y), (50, 58, 69, 165), width=max(1, int(height * 0.0017)), dash=max(4, int(width * 0.006)), gap=max(3, int(width * 0.004)))
+        draw.text((label_x, y), label, font=font, fill=(31, 38, 47, 205), anchor=label_anchor)
 
 
 def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
@@ -4823,11 +5077,14 @@ def _render_uploaded_chart_with_overlays(
     width, height = image.size
     font_size = max(9, min(14, int(round(height * 0.015))))
     font = _font(font_size, True, True)
+    # Detect X anchors from the untouched screenshot before adding any SaleeM overlay.
+    candle_centers = _native_detect_candle_centers(image)
     draw = ImageDraw.Draw(image)
     _native_draw_sr(draw, analysis, width, height, font)
     _native_draw_zones(image, analysis, width, height, font)
+    _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
     draw = ImageDraw.Draw(image)
-    _native_draw_structure(draw, analysis, width, height, font)
+    _native_draw_structure(draw, analysis, width, height, font, candle_centers)
     _native_draw_trade(image, analysis, width, height, font)
 
     out = io.BytesIO()

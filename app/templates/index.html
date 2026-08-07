@@ -143,7 +143,7 @@
 
       <div class="terminal-metrics terminal-metrics-top" aria-label="قراءة السوق">
         <article><span>السلوك</span><b class="tone-orange">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
-        <article><span>النمط</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
+        <article><span>النمط</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_status == 'confirmed' %}مؤكد · {{ result.pattern_confidence }}٪{% elif result.pattern_status == 'candidate' %}مرشح · {{ result.pattern_confidence }}٪{% elif result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
         <article><span>شكل شمعة</span><b class="tone-green">{{ result.candle_shape or 'مراقبة' }}</b><small>{{ result.confirmation or 'بانتظار إغلاق' }}</small></article>
         <article><span>الإغلاق</span><b class="tone-gold">{% if action_confirmed %}مؤكد{% else %}محايد{% endif %}</b><small>{% if action_confirmed %}مفعّل{% else %}منتظر{% endif %}</small></article>
         <article><span>المنطقة</span><b class="tone-blue">{{ result.zone_behavior or 'بين مستويات' }}</b><small>{{ action_badge }}</small></article>

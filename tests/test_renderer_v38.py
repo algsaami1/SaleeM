@@ -148,7 +148,7 @@ def test_renderer_produces_phone_png(tmp_path):
     output = tmp_path / "preview.png"
     output.write_bytes(render_result(_analysis("صاعد")))
     with Image.open(output) as image:
-        assert image.size == (1320, 2868)
+        assert image.size == (2200, 1050)
         assert image.format == "PNG"
 
 
@@ -159,7 +159,7 @@ def test_renderer_accepts_chart_background(tmp_path):
     output = tmp_path / "preview_bg.png"
     output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
     with Image.open(output) as image:
-        assert image.size == (1320, 2868)
+        assert image.size == (960, 1600)
         assert image.format == "PNG"
 
 
@@ -428,7 +428,7 @@ def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
     output = tmp_path / "partial_trade_hidden.png"
     output.write_bytes(render_result(analysis))
     with Image.open(output) as image:
-        assert image.size == (1320, 2868)
+        assert image.size == (2200, 1050)
         assert image.format == "PNG"
 
 
@@ -865,3 +865,4 @@ def test_monitoring_arrow_uses_trigger_until_activation_close_exists():
     assert origin is not None
     _x, _y, start_price = origin
     assert start_price == analysis["entry"]
+

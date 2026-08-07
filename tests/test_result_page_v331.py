@@ -9,9 +9,9 @@ def test_result_page_uses_the_approved_information_order():
     html = (ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
     tokens = [
         'id="result-image"',
-        'id="recommendation-type-card"',
+        'id="result-action-status"',
         'id="dual-scenarios-card"',
-        'لماذا ظهرت النتيجة؟',
+        'id="analysis-notes-card"',
         'id="reading-card"',
         'id="limit-recommendations-card"',
         'id="feedback-card"',
@@ -72,3 +72,4 @@ def test_mobile_css_prevents_page_overflow_and_respects_safe_area():
     assert "overflow-x:hidden" in css
     assert ".recommendation-type-grid" in css
     assert ".combined-feedback-card" in css
+ck-card" in css

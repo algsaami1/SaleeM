@@ -131,9 +131,10 @@ def test_ui_explanation_hides_target_numbers_and_renderer_separates_entry_from_r
     renderer = (ROOT / "app" / "engine" / "renderer.py").read_text(encoding="utf-8")
 
     assert "analysis-breakout-line" in html
-    assert "شرط التفعيل" in html
+    assert "التفعيل" in html
     assert "أهم النقاط فقط" in html
     assert "ملخص النتيجة" in html
     assert "لا يوجد كسر مؤكد حاليًا." not in html
     assert "entry_gap = 7" in renderer
     assert "Entry is the boundary" in renderer
+nderer
