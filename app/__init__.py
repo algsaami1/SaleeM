@@ -1,3 +1,3 @@
 """SaleeM application package."""
 
-__version__ = "3.40.1"
+__version__ = "3.41.1"

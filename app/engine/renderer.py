@@ -3546,12 +3546,65 @@ def _simple_swing_points(candles: list[dict[str, Any]], *, window: int = 2) -> t
 
 
 def _reference_style_header(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
-    panel = (26, 28, 452, 120)
-    draw.rounded_rectangle(panel, radius=18, fill=(5, 17, 32, 208), outline=(255, 255, 255, 28), width=1)
-    draw.text((50, 54), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
-    draw.text((50, 90), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(186, 198, 216, 255), anchor="la")
-    note = "Vertical chart overlay"
-    draw.text((430, 90), note, font=F_TRADE_LATIN, fill=(113, 134, 167, 255), anchor="ra")
+    """Small identity badge; the rest of the top area is reserved for the action card."""
+    panel = (24, 24, 282, 118)
+    draw.rounded_rectangle(panel, radius=18, fill=(5, 17, 32, 220), outline=(255, 255, 255, 44), width=1)
+    draw.text((46, 52), "SaleeM", font=F_TITLE_LATIN, fill=WHITE, anchor="la")
+    draw.text((46, 88), f"{analysis.get('symbol') or 'XAUUSD'} / {analysis.get('timeframe') or 'M5'}", font=F_TRADE_LATIN, fill=(186, 198, 216, 255), anchor="la")
+
+
+def _reference_action_banner(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]) -> None:
+    """Answer the trader's first question: enter now, wait, or do not enter."""
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    code = str(action.get("code") or analysis.get("draw_mode") or "watch")
+    side = str(action.get("primary_side") or ("buy" if str(analysis.get("direction")) == "صاعد" else "sell" if str(analysis.get("direction")) == "هابط" else "wait"))
+    confirmed = bool(action.get("is_confirmed")) or code in {"buy", "sell", "confirmed"}
+
+    if code in {"inactive", "no_trade"} or side == "wait":
+        title = "لا تدخل الآن"
+        subtitle = "انتظر تفعيلًا واضحًا على إغلاق M5"
+        accent = (62, 128, 245, 255)
+    elif confirmed:
+        title = "ادخل شراء" if side == "buy" else "ادخل بيع"
+        subtitle = "الصفقة مفعّلة — لا تطارد السعر بعيدًا عن الدخول"
+        accent = (28, 178, 103, 255) if side == "buy" else (222, 72, 72, 255)
+    else:
+        title = "انتظر تفعيل الشراء" if side == "buy" else "انتظر تفعيل البيع"
+        trigger = _number(action.get("trigger"))
+        if trigger is not None:
+            subtitle = f"بعد إغلاق M5 {'فوق' if side == 'buy' else 'تحت'} {_fmt_axis_price(trigger)}"
+        else:
+            subtitle = str(action.get("instruction") or "لا تدخل قبل إغلاق شمعة التفعيل")
+        accent = (235, 147, 45, 255)
+
+    rect = (304, 24, WIDTH - 24, 286)
+    draw.rounded_rectangle(rect, radius=22, fill=(5, 18, 34, 238), outline=(accent[0], accent[1], accent[2], 180), width=2)
+    draw.rectangle((rect[0], rect[1], rect[0] + 8, rect[3]), fill=accent)
+
+    _draw_rtl(draw, (rect[2] - 26, 56), title, F_TITLE, accent, anchor="ra")
+    shown_subtitle = _fit_text(draw, subtitle, F_NOTE_BOLD, rect[2] - rect[0] - 62, rtl=True)
+    _draw_rtl(draw, (rect[2] - 26, 110), shown_subtitle, F_NOTE_BOLD, WHITE, anchor="ra")
+
+    entry = _number(analysis.get("entry"))
+    stop = _number(analysis.get("stop_loss"))
+    t1 = _number(analysis.get("target_1"))
+    strength = int(action.get("strength") or analysis.get("trade_probability") or 0)
+    values = [
+        ("الدخول", _fmt_axis_price(entry) if entry is not None else "—", (226, 235, 247, 255)),
+        ("الوقف", _fmt_axis_price(stop) if stop is not None else "—", (244, 103, 103, 255)),
+        ("الهدف 1", _fmt_axis_price(t1) if t1 is not None else "—", (68, 214, 138, 255)),
+        ("القوة", f"{max(0, min(100, strength))}%", accent),
+    ]
+    cell_left = rect[0] + 28
+    cell_right = rect[2] - 28
+    cell_w = (cell_right - cell_left) // 4
+    y1, y2 = 158, 264
+    for i, (label, value, color) in enumerate(values):
+        x1 = cell_left + i * cell_w
+        x2 = cell_left + (i + 1) * cell_w - 8
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=12, fill=(12, 31, 53, 235), outline=(74, 96, 125, 110), width=1)
+        _draw_rtl(draw, (x2 - 12, y1 + 18), label, F_SMALL_BOLD, MUTED, anchor="ra")
+        draw.text((x2 - 12, y2 - 20), value, font=F_TOP_VALUE_LATIN, fill=color, anchor="rs")
 
 
 def _candle_slot_geometry(candles: list[dict[str, Any]]) -> tuple[float, int]:
@@ -3559,6 +3612,26 @@ def _candle_slot_geometry(candles: list[dict[str, Any]]) -> tuple[float, int]:
     candle_right = int(CHART[0] + (CHART[2] - CHART[0]) * 0.70)
     slot = (candle_right - CHART[0]) / count
     return slot, candle_right
+
+
+def _reference_style_sr_levels(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
+    """Keep S/R useful but quiet: thin background lines with small right-axis prices."""
+    level_specs = (
+        ("resistance_levels", "R", (176, 67, 75, 150)),
+        ("support_levels", "S", (54, 112, 190, 150)),
+    )
+    labels: list[tuple[str, float, int, tuple[int, int, int, int]]] = []
+    for key, prefix, color in level_specs:
+        for rank, level in enumerate(list(analysis.get(key) or [])[:2], start=1):
+            price = _number(level.get("price"))
+            if price is None or not (price_min <= price <= price_max):
+                continue
+            y = _price_y(float(price), price_min, price_max)
+            draw.line((CHART[0] + 10, y, CHART[2] - 4, y), fill=color, width=2)
+            labels.append((f"{prefix}{rank}", float(price), y, color))
+    # Keep the labels small and aligned to their own level in the spare right margin.
+    for label, price, y, color in labels:
+        draw.text((WIDTH - 16, y), f"{label} {_fmt_axis_price(price)}", font=F_AXIS_EDGE, fill=color, anchor="rm")
 
 
 def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
@@ -3584,8 +3657,8 @@ def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analys
         y1, y2 = center_y - height // 2, center_y + height // 2
         x1 = max(CHART[0] + 120, int(CHART[0] + slot * max(0, index - 0.35)))
         x2 = max(x1 + 240, min(zone_right, x1 + 420))
-        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(54, 67, 88, 132), outline=(164, 174, 194, 120), width=2)
-        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_TRADE_LATIN, fill=WHITE, anchor="mm")
+        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(54, 67, 88, 92), outline=(164, 174, 194, 88), width=2)
+        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_ZONE, fill=(224, 231, 240, 230), anchor="mm")
 
     fvg = _nearest_detected_fvg(candles, float(focal_price), float(atr))
     if fvg is not None:
@@ -3600,11 +3673,107 @@ def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analys
     image.alpha_composite(layer)
 
 
-def _structure_line(draw: ImageDraw.ImageDraw, x: int, y: int, label: str, *, point_fill=(182, 190, 205, 255)) -> None:
-    x2 = min(CHART[2] - 90, x + 150)
-    draw.ellipse((x - 7, y - 7, x + 7, y + 7), fill=point_fill)
-    _dash_line(draw, (x + 8, y), (x2, y), WHITE, width=2, dash=8, gap=5)
-    draw.text((x2 + 8, y), label, font=F_TRADE_LATIN, fill=WHITE, anchor="lm")
+def _rect_overlap_area(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+    left = max(a[0], b[0])
+    top = max(a[1], b[1])
+    right = min(a[2], b[2])
+    bottom = min(a[3], b[3])
+    if right <= left or bottom <= top:
+        return 0
+    return (right - left) * (bottom - top)
+
+
+def _structure_candidate_box(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    label: str,
+    side: str,
+    span: int,
+) -> tuple[int, int, int, int]:
+    text_box = draw.textbbox((0, 0), label, font=F_TRADE_LATIN)
+    text_w = max(42, text_box[2] - text_box[0])
+    text_h = max(18, text_box[3] - text_box[1])
+    if side == "left":
+        text_right = max(CHART[0] + text_w + 8, x - span - 8)
+        text_left = text_right - text_w
+    else:
+        text_left = min(CHART[2] - text_w - 12, x + span + 8)
+        text_right = text_left + text_w
+    return (text_left - 6, y - text_h // 2 - 6, text_right + 6, y + text_h // 2 + 6)
+
+
+def _structure_line(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    label: str,
+    *,
+    occupied: list[tuple[int, int, int, int]] | None = None,
+    blocked: list[tuple[int, int, int, int]] | None = None,
+    point_fill=(178, 188, 204, 235),
+) -> tuple[int, int, int, int]:
+    """Draw a clear structure marker and flip its side when the preferred side is crowded."""
+    occupied = occupied or []
+    blocked = blocked or []
+    chart_mid = (CHART[0] + CHART[2]) // 2
+    preferred = "left" if x > chart_mid + 40 else "right"
+    alternate = "right" if preferred == "left" else "left"
+    span = 108 if label in {"BOS", "IDM"} else 132
+
+    candidates: list[tuple[int, str, tuple[int, int, int, int]]] = []
+    for side in (preferred, alternate):
+        box = _structure_candidate_box(draw, x, y, label, side, span)
+        overlap = sum(_rect_overlap_area(box, other) for other in occupied)
+        overlap += sum(_rect_overlap_area(box, other) for other in blocked)
+        candidates.append((overlap, side, box))
+
+    # Prefer the normal side, but reverse the line when that side is crowded.
+    if candidates[0][0] == 0:
+        _score, side, box = candidates[0]
+    elif candidates[1][0] <= candidates[0][0]:
+        _score, side, box = candidates[1]
+    else:
+        _score, side, box = candidates[0]
+
+    radius = 7
+    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=point_fill, outline=(235, 240, 247, 220), width=1)
+    line_color = (205, 214, 226, 205)
+    text_color = (238, 243, 250, 245)
+    if side == "left":
+        x2 = max(CHART[0] + 46, x - span)
+        _dash_line(draw, (x - radius - 2, y), (x2, y), line_color, width=2, dash=8, gap=5)
+        draw.text((x2 - 8, y), label, font=F_TRADE_LATIN, fill=text_color, anchor="rm")
+    else:
+        x2 = min(CHART[2] - 118, x + span)
+        _dash_line(draw, (x + radius + 2, y), (x2, y), line_color, width=2, dash=8, gap=5)
+        draw.text((x2 + 8, y), label, font=F_TRADE_LATIN, fill=text_color, anchor="lm")
+    return box
+
+
+def _latest_internal_swing(
+    candles: list[dict[str, Any]],
+    swings: list[tuple[int, float]],
+    start_idx: int,
+    end_idx: int,
+    *,
+    kind: str,
+) -> tuple[int, float]:
+    """Pick the latest real counter-trend swing between CHOCH and BOS for IDM."""
+    lo = max(1, min(start_idx, end_idx) + 1)
+    hi = min(len(candles) - 2, max(start_idx, end_idx) - 1)
+    candidates = [(idx, price) for idx, price in swings if lo <= idx <= hi]
+    if candidates:
+        return candidates[-1]
+    if lo <= hi:
+        if kind == "high":
+            idx = max(range(lo, hi + 1), key=lambda i: float(candles[i]["high"]))
+            return idx, float(candles[idx]["high"])
+        idx = min(range(lo, hi + 1), key=lambda i: float(candles[i]["low"]))
+        return idx, float(candles[idx]["low"])
+    fallback = max(1, min(len(candles) - 2, (start_idx + end_idx) // 2))
+    price = float(candles[fallback]["high"] if kind == "high" else candles[fallback]["low"])
+    return fallback, price
 
 
 def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
@@ -3614,28 +3783,32 @@ def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, An
     highs, lows = _simple_swing_points(candles)
     slot, _candle_right = _candle_slot_geometry(candles)
     direction = _reference_direction(analysis)
-
     recent_end = len(candles) - 2
+
     if direction == "هابط":
         high_idx, high_price = highs[-1] if highs else (max(2, recent_end - 6), max(float(c['high']) for c in candles[-8:]))
         low_idx, low_price = lows[-1] if lows else (max(3, recent_end - 3), min(float(c['low']) for c in candles[-6:]))
         choch_idx, choch_price = lows[-2] if len(lows) >= 2 else (max(1, high_idx - 2), (high_price + low_price) / 2)
-        idm_idx = max(1, min(len(candles) - 2, (choch_idx + low_idx) // 2))
-        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
-        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
-        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
-        _structure_line(draw, int(CHART[0] + slot * (low_idx + 0.5)), _price_y(low_price, price_min, price_max), "BOS")
-        draw.text((CHART[0] + 40, CHART[3] - 132), "BEARISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
+        # Bearish IDM is the latest internal high before the bearish BOS.
+        idm_idx, idm_price = _latest_internal_swing(candles, highs, choch_idx, low_idx, kind="high")
+        data = ((choch_idx, choch_price, "CHOCH"), (low_idx, low_price, "BOS"), (idm_idx, idm_price, "IDM"))
     else:
         low_idx, low_price = lows[-1] if lows else (max(2, recent_end - 6), min(float(c['low']) for c in candles[-8:]))
         high_idx, high_price = highs[-1] if highs else (max(3, recent_end - 3), max(float(c['high']) for c in candles[-6:]))
         choch_idx, choch_price = highs[-2] if len(highs) >= 2 else (max(1, low_idx - 2), (high_price + low_price) / 2)
-        idm_idx = max(1, min(len(candles) - 2, (choch_idx + high_idx) // 2))
-        idm_price = (float(candles[idm_idx]["high"]) + float(candles[idm_idx]["low"])) / 2
-        _structure_line(draw, int(CHART[0] + slot * (choch_idx + 0.5)), _price_y(choch_price, price_min, price_max), "CHOCH")
-        _structure_line(draw, int(CHART[0] + slot * (idm_idx + 0.5)), _price_y(idm_price, price_min, price_max), "IDM")
-        _structure_line(draw, int(CHART[0] + slot * (high_idx + 0.5)), _price_y(high_price, price_min, price_max), "BOS")
-        draw.text((CHART[0] + 40, CHART[3] - 132), "BULLISH\nDISPLACEMENT", font=F_SMALL_BOLD, fill=WHITE, anchor="la", spacing=2)
+        # Bullish IDM is the latest internal low before the bullish BOS.
+        idm_idx, idm_price = _latest_internal_swing(candles, lows, choch_idx, high_idx, kind="low")
+        data = ((choch_idx, choch_price, "CHOCH"), (high_idx, high_price, "BOS"), (idm_idx, idm_price, "IDM"))
+
+    # Reserve the right-side trade-decision area so structure text flips away from it.
+    chart_width = CHART[2] - CHART[0]
+    trade_block = (int(CHART[0] + chart_width * 0.68), CHART[1] + 120, CHART[2], CHART[3] - 80)
+    occupied: list[tuple[int, int, int, int]] = []
+    for idx2, price2, label in data:
+        y2 = _price_y(float(price2), price_min, price_max)
+        x2 = int(CHART[0] + slot * (idx2 + 0.5))
+        box = _structure_line(draw, x2, y2, label, occupied=occupied, blocked=[trade_block])
+        occupied.append(box)
 
 
 def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
@@ -3646,68 +3819,80 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
     t2 = _number(analysis.get("target_2"))
     t3 = _number(analysis.get("target_3"))
     primary_target = t3 or t2 or t1
-
     if entry is None:
         entry = current
     if entry is None:
         return
+
     direction = _reference_direction(analysis, entry=entry, target=primary_target, stop=stop)
     span = max(0.5, price_max - price_min)
     if stop is None:
-        stop = entry - span * 0.08 if direction == "صاعد" else entry + span * 0.08
+        stop = entry - span * 0.07 if direction == "صاعد" else entry + span * 0.07
     if primary_target is None:
-        primary_target = entry + span * 0.18 if direction == "صاعد" else entry - span * 0.18
-    targets = [value for value in (t1, t2, t3) if value is not None]
-    if not targets:
-        step = span * 0.06
-        if direction == "صاعد":
-            targets = [entry + step, entry + step * 2, primary_target]
-        else:
-            targets = [entry - step, entry - step * 2, primary_target]
+        primary_target = entry + span * 0.14 if direction == "صاعد" else entry - span * 0.14
 
-    zone_left = int(CHART[0] + (CHART[2] - CHART[0]) * 0.76)
+    targets: list[float] = [float(v) for v in (t1, t2, t3) if v is not None and price_min <= float(v) <= price_max]
+    if len(targets) < 3:
+        distance = float(primary_target) - float(entry)
+        targets = [float(entry) + distance * r for r in (0.36, 0.68, 1.0)]
+
+    # A compact scenario area near the latest candles; it should explain, not cover, the chart.
     zone_right = CHART[2] - 16
+    zone_width = 220
+    zone_left = max(CHART[0] + 560, zone_right - zone_width)
     entry_y = _price_y(float(entry), price_min, price_max)
     stop_y = _price_y(float(stop), price_min, price_max)
     target_y = _price_y(float(primary_target), price_min, price_max)
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
+    risk_fill = (189, 66, 56, 108)
+    reward_fill = (15, 117, 79, 102)
     if direction == "هابط":
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
+        ld.rounded_rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), radius=8, fill=risk_fill)
+        ld.rounded_rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), radius=8, fill=reward_fill)
     else:
-        ld.rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), fill=(16, 121, 82, 148))
-        ld.rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), fill=(188, 63, 52, 148))
+        ld.rounded_rectangle((zone_left, min(target_y, entry_y), zone_right, max(target_y, entry_y)), radius=8, fill=reward_fill)
+        ld.rounded_rectangle((zone_left, min(stop_y, entry_y), zone_right, max(stop_y, entry_y)), radius=8, fill=risk_fill)
     image.alpha_composite(layer)
 
-    draw.text((zone_left + 18, entry_y - 12), "ENTRY", font=F_TRADE_LATIN, fill=WHITE, anchor="ls")
-    draw.line((zone_left + 8, entry_y, zone_right - 8, entry_y), fill=WHITE, width=2)
-
-    mid1_x = zone_left + 64
-    mid2_x = zone_left + 118
-    end_x = zone_right - 26
-    if direction == "هابط":
-        p1 = (zone_left + 8, entry_y)
-        p2 = (mid1_x, entry_y + max(12, abs(target_y - entry_y) * 0.18))
-        p3 = (mid2_x, entry_y + max(22, abs(target_y - entry_y) * 0.56))
-        p4 = (end_x, target_y)
-    else:
-        p1 = (zone_left + 8, entry_y)
-        p2 = (mid1_x, entry_y - max(12, abs(target_y - entry_y) * 0.18))
-        p3 = (mid2_x, entry_y - max(22, abs(target_y - entry_y) * 0.56))
-        p4 = (end_x, target_y)
-    points = _bezier_points(p1, p2, p3, p4, steps=24)
-    for a, b in zip(points[::2], points[1::2]):
-        _dash_line(draw, a, b, WHITE, width=2, dash=7, gap=5)
-
+    # Exact execution levels across the scenario area.
+    _dash_line(draw, (zone_left - 22, entry_y), (zone_right, entry_y), (242, 245, 248, 235), width=2, dash=8, gap=5)
+    _dash_line(draw, (zone_left - 12, stop_y), (zone_right, stop_y), (238, 95, 95, 210), width=1, dash=8, gap=6)
+    target_colors = ((61, 207, 131, 230), (43, 181, 108, 230), (27, 154, 91, 230))
+    target_y_values: list[int] = []
     for idx, value in enumerate(targets[:3], start=1):
-        y = _price_y(float(value), price_min, price_max)
-        _dash_line(draw, (zone_left - 40, y), (zone_right - 8, y), (214, 230, 216, 210), width=1, dash=8, gap=6)
-        draw.text((zone_right - 6, y - 3), f"TP{idx}", font=F_TRADE_LATIN, fill=WHITE, anchor="rs")
+        y = _price_y(value, price_min, price_max)
+        target_y_values.append(y)
+        _dash_line(draw, (zone_left - 12, y), (zone_right, y), target_colors[idx - 1], width=1, dash=8, gap=6)
+
+    # Short expected candle path: easy to understand for a trader at a glance.
+    end_target_y = target_y_values[-1] if target_y_values else target_y
+    candle_count = 5
+    for i in range(candle_count):
+        ratio = (i + 1) / candle_count
+        x = int(zone_left + 34 + ratio * max(50, zone_width - 64))
+        base_y = int(entry_y + (end_target_y - entry_y) * ratio)
+        wave = (-1 if i % 2 == 0 else 1) * min(14, max(5, abs(end_target_y - entry_y) // 20))
+        close_y = base_y + wave
+        open_y = entry_y if i == 0 else int(entry_y + (end_target_y - entry_y) * (i / candle_count)) - wave
+        body_top, body_bottom = sorted((open_y, close_y))
+        if body_bottom - body_top < 8:
+            body_bottom = body_top + 8
+        candle_color = (79, 201, 184, 215) if close_y < open_y else (239, 104, 98, 215)
+        draw.line((x, body_top - 12, x, body_bottom + 12), fill=(222, 229, 237, 130), width=2)
+        draw.rounded_rectangle((x - 6, body_top, x + 6, body_bottom), radius=2, fill=candle_color)
+
+    # Colored text on the spare right margin, aligned with the true price level.
+    axis_x = WIDTH - 14
+    draw.text((axis_x, stop_y), f"وقف {_fmt_axis_price(stop)}", font=F_AXIS_EDGE, fill=(239, 94, 94, 255), anchor="rm")
+    draw.text((axis_x, entry_y), f"دخول {_fmt_axis_price(entry)}", font=F_AXIS_EDGE, fill=(104, 170, 255, 255), anchor="rm")
+    for idx, (value, y) in enumerate(zip(targets[:3], target_y_values), start=1):
+        draw.text((axis_x, y), f"TP{idx} {_fmt_axis_price(value)}", font=F_AXIS_EDGE, fill=target_colors[idx - 1], anchor="rm")
 
     rr = abs(float(primary_target) - float(entry)) / max(0.01, abs(float(stop) - float(entry)))
-    draw.text((zone_left + 8, max(CHART[1] + 24, min(CHART[3] - 24, target_y + (36 if direction == 'هابط' else -36)))), f"RR {rr:.1f}", font=F_TRADE_LATIN, fill=WHITE, anchor="la")
+    rr_y = max(CHART[1] + 20, min(CHART[3] - 22, end_target_y + (34 if direction == "هابط" else -34)))
+    draw.text((zone_left + 6, rr_y), f"RR {rr:.1f}", font=F_TRADE_LATIN, fill=(225, 231, 239, 240), anchor="la")
 
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
@@ -3754,6 +3939,8 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     draw = ImageDraw.Draw(image)
 
     _reference_style_header(draw, analysis)
+    _reference_action_banner(draw, analysis)
+    _reference_style_sr_levels(draw, analysis, price_min, price_max)
     _reference_style_zones(image, draw, analysis, price_min, price_max)
     draw = ImageDraw.Draw(image)
     _reference_style_structure(draw, analysis, price_min, price_max)

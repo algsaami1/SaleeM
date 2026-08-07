@@ -1,10 +1,22 @@
-SaleeM v3.40.1 – Internal Server Error hotfix
+SaleeM v3.41.0 – trader-first portrait result
 
-- Kept the portrait-only Reset Vertical Scale workflow.
-- Prevented the anonymous-user counter from crashing the whole website when its storage file is unavailable or corrupted.
-- Prevented feedback-summary storage errors from crashing the home page.
-- Removed any accidental duplicate content after the final </html> tag.
-- Verified Python compilation and the home page response locally.
+Modified files:
+- app/__init__.py
+- app/main.py
+- app/engine/renderer.py
 
-4) Preserved colored right-axis labels for Entry / Stop or Cancel / TP1 / TP2 / TP3.
-5) Updated version to 3.39.1.
+Key changes:
+1) Added a large top decision card that answers: enter now, wait for activation, or do not enter.
+2) Shows Entry, Stop, TP1 and reading strength in the top card.
+3) Uses a compact scenario zone near the latest candles instead of covering the chart.
+4) Added 5 projected candles along the expected path.
+5) Shows Entry/Stop/TP prices as colored text aligned on the spare right margin.
+6) Support/resistance remain thin background lines with compact aligned prices.
+7) BOS/CHOCH/IDM are secondary; IDM is hidden when it would overlap important labels.
+8) Kept the portrait-only workflow and Reset Vertical Scale requirement.
+
+=== v3.41.1 ===
+- Corrected IDM placement to use the latest real internal counter-trend swing before BOS.
+- BOS / CHOCH / IDM are always shown when structure data is available.
+- Increased structure marker circle size slightly and strengthened the line/text for readability.
+- Structure side-lines automatically reverse direction when the preferred side is crowded or overlaps the right-side trade area.
