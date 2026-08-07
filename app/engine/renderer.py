@@ -3562,7 +3562,7 @@ def _reference_action_banner(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]
 
     if code in {"inactive", "no_trade"} or side == "wait":
         title = "لا تدخل الآن"
-        subtitle = "انتظر تفعيلًا واضحًا على إغلاق M5"
+        subtitle = "انتظر إغلاق شمعة الخمس دقائق بوضوح"
         accent = (62, 128, 245, 255)
     elif confirmed:
         title = "ادخل شراء" if side == "buy" else "ادخل بيع"
@@ -3572,7 +3572,7 @@ def _reference_action_banner(draw: ImageDraw.ImageDraw, analysis: dict[str, Any]
         title = "انتظر تفعيل الشراء" if side == "buy" else "انتظر تفعيل البيع"
         trigger = _number(action.get("trigger"))
         if trigger is not None:
-            subtitle = f"بعد إغلاق M5 {'فوق' if side == 'buy' else 'تحت'} {_fmt_axis_price(trigger)}"
+            subtitle = f"بعد إغلاق شمعة الخمس دقائق {'فوق' if side == 'buy' else 'تحت'} {_fmt_axis_price(trigger)}"
         else:
             subtitle = str(action.get("instruction") or "لا تدخل قبل إغلاق شمعة التفعيل")
         accent = (235, 147, 45, 255)
@@ -3638,7 +3638,7 @@ def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analys
     candles = _valid_renderer_candles(analysis)
     if not candles:
         return
-    slot, candle_right = _candle_slot_geometry(candles)
+    slot, _candle_right = _candle_slot_geometry(candles)
     entry = _number(analysis.get("entry"))
     current = _number(analysis.get("current_price"))
     focal_price = entry if entry is not None else (current if current is not None else float(candles[-1]["close"]))
@@ -3647,31 +3647,40 @@ def _reference_style_zones(image: Image.Image, draw: ImageDraw.ImageDraw, analys
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     ld = ImageDraw.Draw(layer)
     zone_right = CHART[2] - 16
+    scenario_left = max(CHART[0] + 600, zone_right - 190)
 
     ob = _nearest_detected_order_block(analysis, candles, float(focal_price), float(atr))
     if ob is not None:
         index, low, high, _strength = ob
         y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
         center_y = (y1 + y2) // 2
-        height = max(56, min(112, y2 - y1 + 20))
+        height = max(48, min(96, y2 - y1 + 16))
         y1, y2 = center_y - height // 2, center_y + height // 2
-        x1 = max(CHART[0] + 120, int(CHART[0] + slot * max(0, index - 0.35)))
-        x2 = max(x1 + 240, min(zone_right, x1 + 420))
-        ld.rounded_rectangle((x1, y1, x2, y2), radius=8, fill=(54, 67, 88, 92), outline=(164, 174, 194, 88), width=2)
-        ld.text(((x1 + x2) // 2, center_y), "ORDER BLOCK", font=F_ZONE, fill=(224, 231, 240, 230), anchor="mm")
+        x1 = max(CHART[0] + 110, int(CHART[0] + slot * max(0, index - 0.25)))
+        x2 = min(zone_right, x1 + 330)
+        if x1 < scenario_left - 80:
+            x2 = min(x2, scenario_left - 12)
+        if x2 - x1 >= 100:
+            ld.rounded_rectangle((x1, y1, x2, y2), radius=7, fill=(54, 67, 88, 72), outline=(164, 174, 194, 70), width=1)
+            # Keep the text quiet and left of the scenario whenever possible.
+            ld.text((x1 + 12, center_y), "ORDER BLOCK", font=F_ZONE, fill=(196, 208, 223, 190), anchor="lm")
 
     fvg = _nearest_detected_fvg(candles, float(focal_price), float(atr))
     if fvg is not None:
         index, low, high = fvg
-        y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
-        center_y = (y1 + y2) // 2
-        x1 = max(CHART[0] + 90, int(CHART[0] + slot * max(0, index - 0.2)))
-        x2 = min(zone_right - 140, x1 + 180)
-        _dash_line(ld, (x1, center_y), (x2, center_y), WHITE, width=2, dash=10, gap=6)
-        ld.text((x2 + 14, center_y), "FVG", font=F_TRADE_LATIN, fill=WHITE, anchor="lm")
+        center_price = (low + high) / 2
+        recent_enough = index >= max(0, len(candles) - 14)
+        close_enough = abs(center_price - float(focal_price)) <= max(float(atr) * 3.5, 0.8)
+        if recent_enough and close_enough:
+            y1, y2 = sorted((_price_y(high, price_min, price_max), _price_y(low, price_min, price_max)))
+            center_y = (y1 + y2) // 2
+            x1 = max(CHART[0] + 90, int(CHART[0] + slot * max(0, index - 0.15)))
+            x2 = min(scenario_left - 18, x1 + 160)
+            if x2 - x1 >= 64:
+                _dash_line(ld, (x1, center_y), (x2, center_y), (225, 231, 239, 210), width=2, dash=9, gap=6)
+                ld.text((x2 + 10, center_y), "FVG", font=F_TRADE_SMALL_LATIN, fill=(235, 240, 247, 225), anchor="lm")
 
     image.alpha_composite(layer)
-
 
 def _rect_overlap_area(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
     left = max(a[0], b[0])
@@ -3691,17 +3700,25 @@ def _structure_candidate_box(
     side: str,
     span: int,
 ) -> tuple[int, int, int, int]:
-    text_box = draw.textbbox((0, 0), label, font=F_TRADE_LATIN)
-    text_w = max(42, text_box[2] - text_box[0])
-    text_h = max(18, text_box[3] - text_box[1])
+    font = F_TRADE_SMALL_LATIN
+    text_box = draw.textbbox((0, 0), label, font=font)
+    text_w = max(38, text_box[2] - text_box[0])
+    text_h = max(16, text_box[3] - text_box[1])
     if side == "left":
-        text_right = max(CHART[0] + text_w + 8, x - span - 8)
+        line_end = max(CHART[0] + 52, x - span)
+        text_right = line_end - 8
         text_left = text_right - text_w
+        left = text_left - 6
+        right = x + 12
     else:
-        text_left = min(CHART[2] - text_w - 12, x + span + 8)
+        line_end = min(CHART[2] - 104, x + span)
+        text_left = line_end + 8
         text_right = text_left + text_w
-    return (text_left - 6, y - text_h // 2 - 6, text_right + 6, y + text_h // 2 + 6)
-
+        left = x - 12
+        right = text_right + 6
+    top = y - max(10, text_h // 2 + 6)
+    bottom = y + max(10, text_h // 2 + 6)
+    return (left, top, right, bottom)
 
 def _structure_line(
     draw: ImageDraw.ImageDraw,
@@ -3711,105 +3728,140 @@ def _structure_line(
     *,
     occupied: list[tuple[int, int, int, int]] | None = None,
     blocked: list[tuple[int, int, int, int]] | None = None,
-    point_fill=(178, 188, 204, 235),
+    point_fill=(188, 196, 210, 240),
 ) -> tuple[int, int, int, int]:
-    """Draw a clear structure marker and flip its side when the preferred side is crowded."""
+    """Draw a secondary structure marker, flipping its side when crowded.
+
+    The true structure level is preserved, but the visible marker is clamped
+    inside the chart so BOS/CHOCH/IDM can never be clipped by the header or
+    bottom edge.
+    """
     occupied = occupied or []
     blocked = blocked or []
     chart_mid = (CHART[0] + CHART[2]) // 2
     preferred = "left" if x > chart_mid + 40 else "right"
     alternate = "right" if preferred == "left" else "left"
-    span = 108 if label in {"BOS", "IDM"} else 132
+    span = 104 if label in {"BOS", "IDM"} else 124
+
+    true_y = int(y)
+    margin_y = 22
+    display_y = max(CHART[1] + margin_y, min(CHART[3] - margin_y, true_y))
+    if display_y != true_y:
+        draw.line((x, true_y, x, display_y), fill=(173, 184, 199, 150), width=1)
 
     candidates: list[tuple[int, str, tuple[int, int, int, int]]] = []
     for side in (preferred, alternate):
-        box = _structure_candidate_box(draw, x, y, label, side, span)
+        box = _structure_candidate_box(draw, x, display_y, label, side, span)
         overlap = sum(_rect_overlap_area(box, other) for other in occupied)
         overlap += sum(_rect_overlap_area(box, other) for other in blocked)
+        # Strongly penalize any label/leader that would leave the chart.
+        if box[0] < CHART[0] + 6 or box[2] > CHART[2] - 6:
+            overlap += 100000
         candidates.append((overlap, side, box))
 
-    # Prefer the normal side, but reverse the line when that side is crowded.
-    if candidates[0][0] == 0:
-        _score, side, box = candidates[0]
-    elif candidates[1][0] <= candidates[0][0]:
-        _score, side, box = candidates[1]
-    else:
-        _score, side, box = candidates[0]
+    _score, side, box = min(candidates, key=lambda item: item[0])
 
-    radius = 7
-    draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=point_fill, outline=(235, 240, 247, 220), width=1)
-    line_color = (205, 214, 226, 205)
-    text_color = (238, 243, 250, 245)
+    radius = 9
+    draw.ellipse(
+        (x - radius, display_y - radius, x + radius, display_y + radius),
+        fill=point_fill,
+        outline=(245, 248, 252, 235),
+        width=2,
+    )
+    line_color = (205, 214, 226, 195)
+    text_color = (235, 240, 247, 235)
+    font = F_TRADE_SMALL_LATIN
     if side == "left":
-        x2 = max(CHART[0] + 46, x - span)
-        _dash_line(draw, (x - radius - 2, y), (x2, y), line_color, width=2, dash=8, gap=5)
-        draw.text((x2 - 8, y), label, font=F_TRADE_LATIN, fill=text_color, anchor="rm")
+        x2 = max(CHART[0] + 52, x - span)
+        _dash_line(draw, (x - radius - 3, display_y), (x2, display_y), line_color, width=2, dash=8, gap=5)
+        draw.text((x2 - 8, display_y), label, font=font, fill=text_color, anchor="rm")
     else:
-        x2 = min(CHART[2] - 118, x + span)
-        _dash_line(draw, (x + radius + 2, y), (x2, y), line_color, width=2, dash=8, gap=5)
-        draw.text((x2 + 8, y), label, font=F_TRADE_LATIN, fill=text_color, anchor="lm")
+        x2 = min(CHART[2] - 104, x + span)
+        _dash_line(draw, (x + radius + 3, display_y), (x2, display_y), line_color, width=2, dash=8, gap=5)
+        draw.text((x2 + 8, display_y), label, font=font, fill=text_color, anchor="lm")
     return box
-
 
 def _latest_internal_swing(
     candles: list[dict[str, Any]],
     swings: list[tuple[int, float]],
-    start_idx: int,
-    end_idx: int,
+    choch_idx: int,
+    bos_idx: int,
     *,
-    kind: str,
-) -> tuple[int, float]:
-    """Pick the latest real counter-trend swing between CHOCH and BOS for IDM."""
-    lo = max(1, min(start_idx, end_idx) + 1)
-    hi = min(len(candles) - 2, max(start_idx, end_idx) - 1)
-    candidates = [(idx, price) for idx, price in swings if lo <= idx <= hi]
-    if candidates:
-        return candidates[-1]
-    if lo <= hi:
-        if kind == "high":
-            idx = max(range(lo, hi + 1), key=lambda i: float(candles[i]["high"]))
-            return idx, float(candles[idx]["high"])
-        idx = min(range(lo, hi + 1), key=lambda i: float(candles[i]["low"]))
-        return idx, float(candles[idx]["low"])
-    fallback = max(1, min(len(candles) - 2, (start_idx + end_idx) // 2))
-    price = float(candles[fallback]["high"] if kind == "high" else candles[fallback]["low"])
-    return fallback, price
+    lookback: int = 12,
+) -> tuple[int, float] | None:
+    """Return a recent *real* internal swing immediately before BOS.
 
+    IDM is intentionally omitted when there is no genuine local swing in the
+    recent structure window; drawing an old distant low/high is worse than not
+    drawing IDM at all.
+    """
+    if bos_idx <= 1:
+        return None
+    lo = max(1, bos_idx - max(8, min(12, lookback)))
+    if choch_idx < bos_idx:
+        lo = max(lo, choch_idx + 1)
+    hi = min(len(candles) - 2, bos_idx - 1)
+    if lo > hi:
+        return None
+    candidates = [(idx, price) for idx, price in swings if lo <= idx <= hi]
+    return candidates[-1] if candidates else None
 
 def _reference_style_structure(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
     candles = _valid_renderer_candles(analysis)
     if len(candles) < 6:
         return
-    highs, lows = _simple_swing_points(candles)
+
+    highs, lows = _simple_swing_points(candles, window=2)
+    internal_highs, internal_lows = _simple_swing_points(candles, window=1)
     slot, _candle_right = _candle_slot_geometry(candles)
     direction = _reference_direction(analysis)
+    recent_floor = max(0, len(candles) - 24)
+    recent_highs = [item for item in highs if item[0] >= recent_floor] or highs
+    recent_lows = [item for item in lows if item[0] >= recent_floor] or lows
     recent_end = len(candles) - 2
 
+    data: list[tuple[int, float, str]] = []
     if direction == "هابط":
-        high_idx, high_price = highs[-1] if highs else (max(2, recent_end - 6), max(float(c['high']) for c in candles[-8:]))
-        low_idx, low_price = lows[-1] if lows else (max(3, recent_end - 3), min(float(c['low']) for c in candles[-6:]))
-        choch_idx, choch_price = lows[-2] if len(lows) >= 2 else (max(1, high_idx - 2), (high_price + low_price) / 2)
-        # Bearish IDM is the latest internal high before the bearish BOS.
-        idm_idx, idm_price = _latest_internal_swing(candles, highs, choch_idx, low_idx, kind="high")
-        data = ((choch_idx, choch_price, "CHOCH"), (low_idx, low_price, "BOS"), (idm_idx, idm_price, "IDM"))
+        high_idx, high_price = recent_highs[-1] if recent_highs else (
+            max(2, recent_end - 6), max(float(c["high"]) for c in candles[-8:])
+        )
+        low_idx, low_price = recent_lows[-1] if recent_lows else (
+            max(3, recent_end - 3), min(float(c["low"]) for c in candles[-6:])
+        )
+        prior_lows = [item for item in recent_lows if item[0] <= low_idx - 3]
+        choch_idx, choch_price = prior_lows[-1] if prior_lows else (
+            max(1, low_idx - 4), float(candles[max(1, low_idx - 4)]["low"])
+        )
+        data.extend(((choch_idx, choch_price, "CHOCH"), (low_idx, low_price, "BOS")))
+        idm = _latest_internal_swing(candles, internal_highs, choch_idx, low_idx)
+        if idm is not None:
+            data.append((idm[0], idm[1], "IDM"))
     else:
-        low_idx, low_price = lows[-1] if lows else (max(2, recent_end - 6), min(float(c['low']) for c in candles[-8:]))
-        high_idx, high_price = highs[-1] if highs else (max(3, recent_end - 3), max(float(c['high']) for c in candles[-6:]))
-        choch_idx, choch_price = highs[-2] if len(highs) >= 2 else (max(1, low_idx - 2), (high_price + low_price) / 2)
-        # Bullish IDM is the latest internal low before the bullish BOS.
-        idm_idx, idm_price = _latest_internal_swing(candles, lows, choch_idx, high_idx, kind="low")
-        data = ((choch_idx, choch_price, "CHOCH"), (high_idx, high_price, "BOS"), (idm_idx, idm_price, "IDM"))
+        low_idx, low_price = recent_lows[-1] if recent_lows else (
+            max(2, recent_end - 6), min(float(c["low"]) for c in candles[-8:])
+        )
+        high_idx, high_price = recent_highs[-1] if recent_highs else (
+            max(3, recent_end - 3), max(float(c["high"]) for c in candles[-6:])
+        )
+        prior_highs = [item for item in recent_highs if item[0] <= high_idx - 3]
+        choch_idx, choch_price = prior_highs[-1] if prior_highs else (
+            max(1, high_idx - 4), float(candles[max(1, high_idx - 4)]["high"])
+        )
+        data.extend(((choch_idx, choch_price, "CHOCH"), (high_idx, high_price, "BOS")))
+        idm = _latest_internal_swing(candles, internal_lows, choch_idx, high_idx)
+        if idm is not None:
+            data.append((idm[0], idm[1], "IDM"))
 
-    # Reserve the right-side trade-decision area so structure text flips away from it.
     chart_width = CHART[2] - CHART[0]
-    trade_block = (int(CHART[0] + chart_width * 0.68), CHART[1] + 120, CHART[2], CHART[3] - 80)
+    # Reserve only the actual scenario footprint; labels are free elsewhere.
+    trade_block = (int(CHART[0] + chart_width * 0.72), CHART[1] + 90, CHART[2], CHART[3] - 70)
     occupied: list[tuple[int, int, int, int]] = []
     for idx2, price2, label in data:
         y2 = _price_y(float(price2), price_min, price_max)
         x2 = int(CHART[0] + slot * (idx2 + 0.5))
+        x2 = max(CHART[0] + 16, min(CHART[2] - 16, x2))
         box = _structure_line(draw, x2, y2, label, occupied=occupied, blocked=[trade_block])
         occupied.append(box)
-
 
 def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw, analysis: dict[str, Any], price_min: float, price_max: float) -> None:
     current = _number(analysis.get("current_price"))
@@ -3838,8 +3890,8 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
 
     # A compact scenario area near the latest candles; it should explain, not cover, the chart.
     zone_right = CHART[2] - 16
-    zone_width = 220
-    zone_left = max(CHART[0] + 560, zone_right - zone_width)
+    zone_width = 190
+    zone_left = max(CHART[0] + 600, zone_right - zone_width)
     entry_y = _price_y(float(entry), price_min, price_max)
     stop_y = _price_y(float(stop), price_min, price_max)
     target_y = _price_y(float(primary_target), price_min, price_max)
@@ -3882,6 +3934,21 @@ def _reference_style_trade_overlay(image: Image.Image, draw: ImageDraw.ImageDraw
         candle_color = (79, 201, 184, 215) if close_y < open_y else (239, 104, 98, 215)
         draw.line((x, body_top - 12, x, body_bottom + 12), fill=(222, 229, 237, 130), width=2)
         draw.rounded_rectangle((x - 6, body_top, x + 6, body_bottom), radius=2, fill=candle_color)
+
+    # Small in-chart labels make the setup understandable without recreating
+    # the old large right-axis cards.
+    def draw_trade_tag(y: int, text_value: str, fill: tuple[int, int, int, int], *, width: int = 154) -> None:
+        tag_h = 34
+        x2 = zone_right - 4
+        x1 = max(zone_left + 18, x2 - width)
+        yy = max(CHART[1] + tag_h // 2 + 4, min(CHART[3] - tag_h // 2 - 4, y))
+        draw.rounded_rectangle((x1, yy - tag_h // 2, x2, yy + tag_h // 2), radius=6, fill=fill, outline=(245, 248, 252, 150), width=1)
+        draw.text(((x1 + x2) // 2, yy), text_value, font=F_TRADE_SMALL_LATIN, fill=WHITE, anchor="mm")
+
+    draw_trade_tag(entry_y, f"ENTRY {_fmt_axis_price(entry)}", (21, 126, 91, 230), width=166)
+    draw_trade_tag(stop_y, f"SL {_fmt_axis_price(stop)}", (190, 52, 56, 232), width=148)
+    if targets and target_y_values:
+        draw_trade_tag(target_y_values[0], f"TP1 {_fmt_axis_price(targets[0])}", (18, 139, 84, 232), width=158)
 
     # Colored text on the spare right margin, aligned with the true price level.
     axis_x = WIDTH - 14
