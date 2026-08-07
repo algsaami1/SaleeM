@@ -22,7 +22,7 @@ Key changes:
 - Structure side-lines automatically reverse direction when the preferred side is crowded or overlaps the right-side trade area.
 
 
-=== v3.41.2 ===
+=== v3.41.3 ===
 - Corrected BOS / CHOCH / IDM visual placement for the portrait result.
 - BOS/CHOCH/IDM markers are clamped inside the chart and can no longer be clipped at the top/bottom.
 - Structure leader lines now score both text and line congestion and flip to the opposite side when crowded.
@@ -32,4 +32,14 @@ Key changes:
 - Kept Order Block visually behind the trade scenario and reduced label overlap.
 - Made the scenario box narrower and added compact ENTRY / TP1 / SL labels inside the chart.
 - Reworded the top Arabic activation message to avoid mixed RTL/LTR M5 rendering artifacts.
-- Version bumped to 3.41.2.
+- Version bumped to 3.41.3.
+
+=== v3.42.0 — Final Professional SaleeM Image ===
+- Adopted the approved professional SaleeM dashboard as the final generated-image style.
+- Upload screenshot is now required to be landscape (minimum aspect ratio 1.20:1).
+- Final result remains phone-friendly portrait and is generated as a full trading application dashboard.
+- Added professional app header, market state panel, update time, market strength, Entry/Stop/TP/RR/confidence cards.
+- Central dark M5 chart is generated from synchronized market candles with R1/R2, S1/S2, ORDER BLOCK, FVG, BOS, CHOCH, IDM and valid trade scenario path.
+- Added timeframe strip, analysis summary cards and bottom app navigation.
+- Invalid trade geometry is not drawn. Conditional trades use activation/cancel/target values instead of pretending an entry has already occurred.
+- Updated upload instructions for landscape capture and Reset Vertical Scale.

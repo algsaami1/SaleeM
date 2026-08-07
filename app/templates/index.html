@@ -26,7 +26,7 @@
         <div>
           <span class="eyebrow">تحليل سريع ومنظم</span>
           <h1>ارفع صورة شارت الذهب</h1>
-          <p>يجب أن تكون الصورة رأسية بعد Reset Vertical Scale، مع ظهور الشموع ومحور الأسعار اليميني وخط السعر الحالي بوضوح.</p>
+          <p>التقط صورة الشارت بشكل أفقي بعد Reset Vertical Scale، مع ظهور الشموع ومحور الأسعار اليميني وخط السعر الحالي بوضوح.</p>
         </div>
         <button class="help-button" id="capture-help-button" type="button" aria-haspopup="dialog" aria-controls="capture-help-modal">كيف ألتقط الصورة؟</button>
       </div>
@@ -87,7 +87,7 @@
       {% if axis_retry %}
       <div class="axis-retry-steps">
         <span><b>1</b> استخدم Reset Vertical Scale في الشارت قبل التصوير.</span>
-        <span><b>2</b> أظهر أرقام المحور اليميني وخط السعر الحالي كاملًا، والتقط الصورة بشكل رأسي.</span>
+        <span><b>2</b> أظهر أرقام المحور اليميني وخط السعر الحالي كاملًا، والتقط الصورة بشكل أفقي.</span>
         <span><b>3</b> التقط صورة جديدة ثم أعد المحاولة.</span>
       </div>
       <button class="axis-retry-button" id="axis-retry-button" type="button">اختيار صورة جديدة</button>
@@ -123,7 +123,7 @@
     </div>
 
     <section class="card result-card" id="result-card">
-      <img id="result-image" src="{{ result.result_url }}" alt="شارت الذهب الرأسي مع طبقة التحليل فوق صورة المستخدم">
+      <img id="result-image" src="{{ result.result_url }}" alt="نتيجة SaleeM الاحترافية لتحليل شارت الذهب">
 
       <div class="result-actions" aria-label="خيارات صورة النتيجة">
         <button class="result-action save-button" id="save-image-button" type="button">
@@ -527,10 +527,10 @@
       <button class="modal-close" type="button" data-close-modal aria-label="إغلاق">×</button>
     </div>
     <div class="capture-checklist">
-      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط الصورة بشكل رأسي.</span>
+      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط الصورة بشكل أفقي (Landscape).</span>
       <span><b>2</b> أظهر الشموع ومحور الأسعار اليميني كاملًا.</span>
       <span><b>3</b> أظهر خط السعر الحالي ولا تلصق أي صورة فوق الشارت.</span>
-      <span><b>4</b> نفّذ Reset Vertical Scale قبل التصوير، خصوصًا عند ضغط الشموع.</span>
+      <span><b>4</b> نفّذ Reset Vertical Scale قبل التصوير ثم أدر الهاتف للوضع الأفقي.</span>
     </div>
     <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>
     <button class="modal-primary" type="button" data-close-modal>فهمت</button>

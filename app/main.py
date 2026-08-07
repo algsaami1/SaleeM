@@ -138,8 +138,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-market-snapshot-axis-projection-v3.41.2",
-        "ui": "saleem-fast-decision-result-page-v3.41.2",
+        "renderer": "saleem-market-snapshot-axis-projection-v3.42.0",
+        "ui": "saleem-fast-decision-result-page-v3.42.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
@@ -281,6 +281,11 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                 raise HTTPException(
                     status_code=400,
                     detail="أبعاد الصورة كبيرة جدًا. استخدم صورة لا تتجاوز 40 مليون بكسل.",
+                )
+            if width <= height or (width / max(1, height)) < 1.20:
+                raise HTTPException(
+                    status_code=400,
+                    detail="يجب التقاط صورة الشارت بشكل أفقي (Landscape) مع إظهار الشموع ومحور الأسعار اليميني بوضوح.",
                 )
 
         result = await run_in_threadpool(
