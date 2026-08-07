@@ -1,3 +1,10 @@
+SaleeM v3.46.0 — Literal broker-axis anchors + chart zoom
+- Exact piecewise Y projection through original visible broker-axis ticks.
+- Pattern overlay price geometry shifted onto the uploaded broker scale.
+- OB/FVG keep exact vertical price boundaries.
+- Mobile pinch zoom, one-finger pan, desktop pan, +/- and 1:1 controls.
+- Original uploaded chart remains unchanged beneath overlays.
+
 SaleeM v3.45.0 — Anchored chart-pattern overlays
 - Preserves the uploaded M5 screenshot pixel geometry; patterns are overlays only.
 - Draws pattern geometry only when M5 candle X anchors are detected in the original screenshot.
@@ -30,13 +37,7 @@ Behavior:
 - Status, instructions, market metrics and recommendation cards remain fixed in the application interface.
 - Result chart is a wide 2200x1050 chart canvas designed for horizontal panning.
 - The app initially opens the chart at the latest/right-hand section.
-3.41.3.
-
-=== v3.42.0 — Final Professional SaleeM Image ===
-- Adopted the approved professional SaleeM dashboard as the final generated-image style.
-- Upload screenshot is now required to be landscape (minimum aspect ratio 1.20:1).
-- Final result remains phone-friendly portrait and is generated as a full trading application dashboard.
-- Added professional app header, market state panel, update time, market strength, Entry/Stop/TP/RR/confidence cards.
+ update time, market strength, Entry/Stop/TP/RR/confidence cards.
 - Central dark M5 chart is generated from synchronized market candles with R1/R2, S1/S2, ORDER BLOCK, FVG, BOS, CHOCH, IDM and valid trade scenario path.
 - Added timeframe strip, analysis summary cards and bottom app navigation.
 - Invalid trade geometry is not drawn. Conditional trades use activation/cancel/target values instead of pretending an entry has already occurred.

@@ -151,11 +151,17 @@
 
       <div class="terminal-strength"><span>قوة السوق</span><div class="strength-track"><i style="width:{{ action_strength|int }}%"></i></div><b>{{ action_strength }}٪</b></div>
 
-      <section class="terminal-chart-card" aria-label="الشارت المتحرك">
-        <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب يمينًا ويسارًا">
-          <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 مع رسومات التحليل" draggable="false">
+      <section class="terminal-chart-card" aria-label="الشارت المتحرك والقابل للتكبير">
+        <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
+          <button type="button" id="chart-zoom-out" aria-label="تصغير الشارت">−</button>
+          <output id="chart-zoom-value" aria-live="polite">100%</output>
+          <button type="button" id="chart-zoom-in" aria-label="تكبير الشارت">＋</button>
+          <button type="button" id="chart-zoom-reset" class="chart-zoom-reset" aria-label="إعادة الشارت للحجم الأصلي">1:1</button>
         </div>
-        <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت يمينًا ويسارًا</div>
+        <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
+          <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
+        </div>
+        <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
       </section>
 
       <nav class="terminal-timeframes" aria-label="الفريمات"><span>M1</span><strong>M5</strong><span>M15</span><span>H1</span><span>H4</span><span>D1</span></nav>

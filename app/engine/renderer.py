@@ -4565,8 +4565,86 @@ def _render_scrollable_chart(analysis: dict[str, Any]) -> bytes:
     return out.getvalue()
 
 
+def _native_literal_axis_points(analysis: dict[str, Any]) -> list[tuple[float, float]]:
+    """Return literal broker-axis anchors in whole-image coordinates.
+
+    Source tick labels are more authoritative than a best-fit scale.  The current
+    price badge is admitted as an extra anchor only when it agrees closely with
+    the surrounding tick sequence, so one bad vision read cannot bend the axis.
+    """
+    points = list(_image_axis_points(analysis))
+    if len(points) < 2:
+        return points
+
+    current = _number(analysis.get("current_price"))
+    current_ratio = _number(analysis.get("current_price_y_ratio"))
+    if current is not None and current_ratio is not None:
+        current_ratio = max(0.0, min(1.0, float(current_ratio)))
+        expected: float | None = None
+        for (upper_price, upper_ratio), (lower_price, lower_ratio) in zip(points[:-1], points[1:]):
+            if upper_price >= float(current) >= lower_price and upper_price > lower_price:
+                fraction = (upper_price - float(current)) / (upper_price - lower_price)
+                expected = upper_ratio + fraction * (lower_ratio - upper_ratio)
+                break
+        if expected is None or abs(expected - current_ratio) <= 0.035:
+            points.append((float(current), current_ratio))
+
+    points.sort(key=lambda item: item[1])
+    cleaned: list[tuple[float, float]] = []
+    for price_value, ratio_value in points:
+        if cleaned and ratio_value - cleaned[-1][1] < 0.004:
+            continue
+        if cleaned and price_value >= cleaned[-1][0] - 0.01:
+            continue
+        cleaned.append((float(price_value), float(ratio_value)))
+    return cleaned
+
+
+def _native_piecewise_price_ratio(analysis: dict[str, Any], price: float) -> float | None:
+    """Interpolate between the two nearest literal axis ticks.
+
+    This makes every visible broker tick an exact anchor instead of allowing a
+    global fitted line to drift a few pixels away from the original screenshot.
+    """
+    points = _native_literal_axis_points(analysis)
+    if len(points) < 2:
+        return None
+
+    target = float(price)
+    for (upper_price, upper_ratio), (lower_price, lower_ratio) in zip(points[:-1], points[1:]):
+        if upper_price >= target >= lower_price and upper_price > lower_price:
+            fraction = (upper_price - target) / (upper_price - lower_price)
+            return max(0.0, min(1.0, upper_ratio + fraction * (lower_ratio - upper_ratio)))
+
+    # Permit only a small extrapolation beyond the first/last visible tick.
+    if target > points[0][0]:
+        p1, r1 = points[0]
+        p2, r2 = points[1]
+    elif target < points[-1][0]:
+        p1, r1 = points[-2]
+        p2, r2 = points[-1]
+    else:
+        return None
+    price_span = p1 - p2
+    ratio_span = r2 - r1
+    if price_span <= 0.01 or ratio_span <= 0.001:
+        return None
+    extrapolated_steps = abs(target - (p1 if target > points[0][0] else p2)) / price_span
+    if extrapolated_steps > 1.25:
+        return None
+    ratio = r1 + ((p1 - target) / price_span) * ratio_span
+    if -0.08 <= ratio <= 1.08:
+        return max(0.0, min(1.0, ratio))
+    return None
+
+
 def _native_source_price_ratio(analysis: dict[str, Any], price: float) -> float | None:
     """Map a price directly onto the uploaded screenshot's own Y ratio."""
+    literal = _native_piecewise_price_ratio(analysis, float(price))
+    if literal is not None:
+        analysis["native_axis_projection_mode"] = "literal_piecewise"
+        return literal
+
     model = _exact_image_axis_model(analysis)
     if model is not None:
         slope = float(model.get("slope") or 0.0)
@@ -4574,6 +4652,7 @@ def _native_source_price_ratio(analysis: dict[str, Any], price: float) -> float 
         if slope > 0:
             ratio = (intercept - float(price)) / slope
             if -0.12 <= ratio <= 1.12:
+                analysis["native_axis_projection_mode"] = "robust_fit"
                 return max(0.0, min(1.0, ratio))
 
     step = _image_axis_step_model(analysis)
@@ -4584,17 +4663,7 @@ def _native_source_price_ratio(analysis: dict[str, Any], price: float) -> float 
             intervals = (float(step["top_price"]) - float(price)) / price_step
             ratio = float(step["top_ratio"]) + intervals * ratio_step
             if -0.12 <= ratio <= 1.12:
-                return max(0.0, min(1.0, ratio))
-
-    points = _image_axis_points(analysis)
-    if len(points) >= 2:
-        top_price, top_ratio = points[0]
-        bottom_price, bottom_ratio = points[-1]
-        delta = top_price - bottom_price
-        if delta > 0.01 and bottom_ratio > top_ratio:
-            fraction = (top_price - float(price)) / delta
-            ratio = top_ratio + fraction * (bottom_ratio - top_ratio)
-            if -0.12 <= ratio <= 1.12:
+                analysis["native_axis_projection_mode"] = "step_fallback"
                 return max(0.0, min(1.0, ratio))
     return None
 
@@ -4924,10 +4993,10 @@ def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int,
         if y1 is not None and y2 is not None:
             y1, y2 = sorted((y1, y2))
             x1, x2 = int(width * 0.42), int(width * 0.66)
-            min_h = max(8, int(height * 0.018))
-            if y2 - y1 < min_h:
-                c = (y1 + y2) // 2
-                y1, y2 = c - min_h // 2, c + min_h // 2
+            # Do not inflate the zone vertically: its top/bottom must stay on
+            # the exact broker-axis prices. A one-pixel zone is still valid.
+            if y2 <= y1:
+                y2 = min(height - 2, y1 + 1)
             draw.rectangle((x1, y1, x2, y2), fill=(39, 112, 220, 38), outline=(39, 112, 220, 120), width=1)
             draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "ORDER BLOCK", font=font, fill=(28, 77, 146, 210), anchor="mm")
 
@@ -4939,10 +5008,8 @@ def _native_draw_zones(image: Image.Image, analysis: dict[str, Any], width: int,
         if y1 is not None and y2 is not None:
             y1, y2 = sorted((y1, y2))
             x1, x2 = int(width * 0.25), int(width * 0.50)
-            min_h = max(7, int(height * 0.014))
-            if y2 - y1 < min_h:
-                c = (y1 + y2) // 2
-                y1, y2 = c - min_h // 2, c + min_h // 2
+            if y2 <= y1:
+                y2 = min(height - 2, y1 + 1)
             draw.rectangle((x1, y1, x2, y2), fill=(232, 147, 45, 30), outline=(218, 133, 35, 105), width=1)
             draw.text(((x1 + x2) // 2, (y1 + y2) // 2), "FVG", font=font, fill=(145, 82, 22, 210), anchor="mm")
     image.alpha_composite(layer)

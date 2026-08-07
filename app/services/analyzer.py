@@ -1443,9 +1443,9 @@ def _extract_chart_geometry(path: Path) -> dict[str, Any]:
 استخدم الصورة فقط لاستخراج الإحداثيات السعرية التالية من بوكس الشارت ومحور السعر اليميني الأصلي:
 - chart_readable: true فقط إذا أمكن قراءة ملصق السعر الحالي أو محور متناسق.
 - current_price: الرقم الظاهر في ملصق السعر الحالي المرتبط بآخر شمعة. لا تستخدم رقم أمر التداول العلوي.
-- current_price_y_ratio: موضع مركز خط السعر الحالي داخل بوكس الشارت؛ 0 أعلى و1 أسفل.
+- current_price_y_ratio: موضع مركز خط السعر الحالي كنسبة من ارتفاع الصورة المرفوعة كاملة؛ 0 عند أعلى بكسل في الصورة و1 عند أسفل بكسل في الصورة.
 - image_price_high وimage_price_low: أعلى وأدنى رقمين واضحين على المحور.
-- image_axis_labels: كل أرقام المحور الواضحة من الأعلى للأسفل مع y_ratio لمركز كل رقم.
+- image_axis_labels: كل أرقام المحور الواضحة من الأعلى للأسفل مع y_ratio لمركز كل رقم، ويجب أن يكون y_ratio أيضًا بالنسبة للصورة المرفوعة كاملة وليس بالنسبة لبوكس الشارت فقط.
 
 إذا كانت الصورة كاملة للهاتف أو تحتوي شريط أمر تداول، تجاهل كل العناصر خارج بوكس الشارت. لا تخمّن رقمًا مقصوصًا، ولا تعِد أي نتيجة تحليلية."""
     geometry = _request_structured_openai(
@@ -1538,6 +1538,55 @@ def _shift_numeric_price(value: Any, offset: float) -> float | None:
     return round(float(number) + offset, 2)
 
 
+def _shift_pattern_overlays(overlays: Any, offset: float) -> list[dict[str, Any]]:
+    """Shift every price-bearing pattern coordinate onto the broker image scale.
+
+    Pattern detection runs on Twelve Data candles before the image-price offset is
+    known.  v3.45 shifted the candles and trade levels but accidentally left the
+    pattern geometry on the provider scale, which could place W/M/triangle lines
+    far above or below the visible candles.  Only price coordinates are shifted;
+    candle indices stay untouched so X anchors remain tied to the same candles.
+    """
+    shifted_overlays: list[dict[str, Any]] = []
+    if not isinstance(overlays, list):
+        return shifted_overlays
+
+    for overlay in overlays:
+        if not isinstance(overlay, dict):
+            continue
+        item = copy.deepcopy(overlay)
+        geometry = item.get("geometry")
+        if not isinstance(geometry, dict):
+            shifted_overlays.append(item)
+            continue
+
+        for anchor_item in geometry.get("anchors") or []:
+            if isinstance(anchor_item, dict):
+                anchor_item["price"] = _shift_numeric_price(anchor_item.get("price"), offset)
+
+        for line in geometry.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            for key in ("p1", "p2"):
+                point = line.get(key)
+                if isinstance(point, list) and len(point) >= 2:
+                    shifted = _shift_numeric_price(point[1], offset)
+                    if shifted is not None:
+                        point[1] = shifted
+
+        for point in geometry.get("path") or []:
+            if isinstance(point, list) and len(point) >= 2:
+                shifted = _shift_numeric_price(point[1], offset)
+                if shifted is not None:
+                    point[1] = shifted
+
+        for key in ("trigger", "stop", "target"):
+            geometry[key] = _shift_numeric_price(geometry.get(key), offset)
+
+        shifted_overlays.append(item)
+    return shifted_overlays
+
+
 def _bind_market_analysis_to_image(
     canonical: dict[str, Any],
     geometry: dict[str, Any],
@@ -1587,6 +1636,10 @@ def _bind_market_analysis_to_image(
 
     for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
         result[key] = _shift_numeric_price(result.get(key), offset)
+
+    # Pattern geometry is detected before the broker-image offset is known.
+    # Shift its Y-price coordinates by the exact same offset as candles/levels.
+    result["pattern_overlays"] = _shift_pattern_overlays(result.get("pattern_overlays"), offset)
 
     pressure = result.get("level_pressure")
     if isinstance(pressure, dict):

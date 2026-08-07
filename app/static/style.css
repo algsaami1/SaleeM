@@ -672,3 +672,61 @@ body[data-has-result="true"] .chart-pan-hint{
   body[data-has-result="true"] .terminal-metrics-top article{min-height:76px}
   body[data-has-result="true"] .terminal-metrics-bottom article{min-height:86px}
 }
+
+
+/* v3.46 — literal-axis projection + pinch/controls zoom on the original chart */
+body[data-has-result="true"] .terminal-chart-card{isolation:isolate}
+body[data-has-result="true"] .chart-pan-viewport{
+  position:relative;
+  overflow:auto;
+  overscroll-behavior:contain;
+  touch-action:none;
+  cursor:grab;
+  scrollbar-width:none;
+}
+body[data-has-result="true"] .chart-pan-viewport.dragging{cursor:grabbing}
+body[data-has-result="true"] .chart-pan-viewport img{
+  display:block;
+  height:100%;
+  width:auto;
+  min-width:0;
+  max-width:none;
+  max-height:none;
+  object-fit:contain;
+  transform-origin:0 0;
+  pointer-events:none;
+  user-select:none;
+  -webkit-user-drag:none;
+}
+.chart-zoom-controls{
+  position:absolute;
+  z-index:7;
+  top:9px;
+  left:9px;
+  direction:ltr;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  padding:4px;
+  border:1px solid rgba(55,78,101,.32);
+  border-radius:9px;
+  background:rgba(3,16,29,.70);
+  backdrop-filter:blur(6px);
+}
+.chart-zoom-controls button,.chart-zoom-controls output{
+  min-width:31px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  margin:0;
+  border:0;
+  border-radius:6px;
+  background:rgba(13,37,61,.88);
+  color:#e5eef7;
+  font:700 13px/1 Alexandria,sans-serif;
+}
+.chart-zoom-controls button{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.chart-zoom-controls button:active{background:#174a7b}
+.chart-zoom-controls output{min-width:44px;background:transparent;color:#9fb3c7;font-size:9px}
+.chart-zoom-controls .chart-zoom-reset{min-width:38px;font-size:9px}
+body[data-has-result="true"] .chart-pan-hint{z-index:6;white-space:nowrap}

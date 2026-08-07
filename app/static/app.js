@@ -529,54 +529,201 @@
     }
   });
 
-  // v3.43: only the chart moves. All analysis cards stay fixed in the app UI.
+  // v3.46: the original chart image and every overlay move/zoom as one canvas.
   const chartPanViewport = document.getElementById('chart-pan-viewport');
   const chartPanHint = document.getElementById('chart-pan-hint');
+  const chartZoomIn = document.getElementById('chart-zoom-in');
+  const chartZoomOut = document.getElementById('chart-zoom-out');
+  const chartZoomReset = document.getElementById('chart-zoom-reset');
+  const chartZoomValue = document.getElementById('chart-zoom-value');
+
   if (chartPanViewport && resultImage) {
-    const scrollToLatest = () => {
-      chartPanViewport.scrollLeft = chartPanViewport.scrollWidth;
+    const MIN_ZOOM = 1;
+    const MAX_ZOOM = 3.5;
+    const ZOOM_STEP = 0.25;
+    let zoom = 1;
+    let baseHeight = 0;
+    let mouseDragging = false;
+    let mouseStartX = 0;
+    let mouseStartY = 0;
+    let mouseStartLeft = 0;
+    let mouseStartTop = 0;
+    let touchMode = '';
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchStartLeft = 0;
+    let touchStartTop = 0;
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let pinchContentX = 0;
+    let pinchContentY = 0;
+
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const hideHint = () => chartPanHint?.classList.add('hidden');
+    const updateZoomValue = () => {
+      if (chartZoomValue) chartZoomValue.textContent = `${Math.round(zoom * 100)}%`;
     };
+    const measureBaseHeight = () => {
+      if (zoom === 1 || !baseHeight) baseHeight = Math.max(1, chartPanViewport.clientHeight);
+    };
+    const applyZoom = (nextZoom, anchorClientX = null, anchorClientY = null) => {
+      measureBaseHeight();
+      const oldZoom = zoom;
+      const newZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+      if (Math.abs(newZoom - oldZoom) < 0.001) return;
+
+      const rect = chartPanViewport.getBoundingClientRect();
+      const localX = anchorClientX == null ? rect.width / 2 : anchorClientX - rect.left;
+      const localY = anchorClientY == null ? rect.height / 2 : anchorClientY - rect.top;
+      const contentX = chartPanViewport.scrollLeft + localX;
+      const contentY = chartPanViewport.scrollTop + localY;
+      const scaleRatio = newZoom / oldZoom;
+
+      zoom = newZoom;
+      resultImage.style.height = `${Math.round(baseHeight * zoom)}px`;
+      resultImage.style.width = 'auto';
+      updateZoomValue();
+
+      requestAnimationFrame(() => {
+        chartPanViewport.scrollLeft = contentX * scaleRatio - localX;
+        chartPanViewport.scrollTop = contentY * scaleRatio - localY;
+      });
+      hideHint();
+    };
+    const scrollToLatest = () => {
+      measureBaseHeight();
+      resultImage.style.height = `${baseHeight}px`;
+      resultImage.style.width = 'auto';
+      chartPanViewport.scrollLeft = chartPanViewport.scrollWidth;
+      chartPanViewport.scrollTop = 0;
+      updateZoomValue();
+    };
+    const resetZoom = () => {
+      zoom = 1;
+      measureBaseHeight();
+      resultImage.style.height = `${baseHeight}px`;
+      resultImage.style.width = 'auto';
+      updateZoomValue();
+      requestAnimationFrame(() => {
+        chartPanViewport.scrollLeft = chartPanViewport.scrollWidth;
+        chartPanViewport.scrollTop = 0;
+      });
+      hideHint();
+    };
+
     if (resultImage.complete) scrollToLatest();
     else resultImage.addEventListener('load', scrollToLatest, { once: true });
+    window.addEventListener('resize', () => {
+      if (zoom === 1) {
+        baseHeight = Math.max(1, chartPanViewport.clientHeight);
+        resultImage.style.height = `${baseHeight}px`;
+      }
+    });
 
-    let dragging = false;
-    let startX = 0;
-    let startScroll = 0;
+    chartZoomIn?.addEventListener('click', () => applyZoom(zoom + ZOOM_STEP));
+    chartZoomOut?.addEventListener('click', () => applyZoom(zoom - ZOOM_STEP));
+    chartZoomReset?.addEventListener('click', resetZoom);
+
+    // Desktop / pointer-device drag.
     chartPanViewport.addEventListener('pointerdown', (event) => {
       if (event.pointerType === 'touch') return;
-      dragging = true;
-      startX = event.clientX;
-      startScroll = chartPanViewport.scrollLeft;
+      mouseDragging = true;
+      mouseStartX = event.clientX;
+      mouseStartY = event.clientY;
+      mouseStartLeft = chartPanViewport.scrollLeft;
+      mouseStartTop = chartPanViewport.scrollTop;
       chartPanViewport.classList.add('dragging');
       chartPanViewport.setPointerCapture?.(event.pointerId);
     });
     chartPanViewport.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
-      chartPanViewport.scrollLeft = startScroll - (event.clientX - startX);
+      if (!mouseDragging || event.pointerType === 'touch') return;
+      chartPanViewport.scrollLeft = mouseStartLeft - (event.clientX - mouseStartX);
+      chartPanViewport.scrollTop = mouseStartTop - (event.clientY - mouseStartY);
+      hideHint();
     });
-    const endPan = () => {
-      dragging = false;
+    const endMousePan = () => {
+      mouseDragging = false;
       chartPanViewport.classList.remove('dragging');
     };
-    chartPanViewport.addEventListener('pointerup', endPan);
-    chartPanViewport.addEventListener('pointercancel', endPan);
-    chartPanViewport.addEventListener('scroll', () => chartPanHint?.classList.add('hidden'), { once: true });
-    window.setTimeout(() => chartPanHint?.classList.add('hidden'), 4200);
+    chartPanViewport.addEventListener('pointerup', endMousePan);
+    chartPanViewport.addEventListener('pointercancel', endMousePan);
+
+    // iPhone/iPad: one finger pans; two fingers pinch-zoom around the midpoint.
+    chartPanViewport.addEventListener('touchstart', (event) => {
+      if (event.touches.length === 1) {
+        touchMode = 'pan';
+        touchStartX = event.touches[0].clientX;
+        touchStartY = event.touches[0].clientY;
+        touchStartLeft = chartPanViewport.scrollLeft;
+        touchStartTop = chartPanViewport.scrollTop;
+      } else if (event.touches.length >= 2) {
+        touchMode = 'pinch';
+        const a = event.touches[0];
+        const b = event.touches[1];
+        pinchStartDistance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
+        pinchStartZoom = zoom;
+        const rect = chartPanViewport.getBoundingClientRect();
+        const midX = (a.clientX + b.clientX) / 2 - rect.left;
+        const midY = (a.clientY + b.clientY) / 2 - rect.top;
+        pinchContentX = chartPanViewport.scrollLeft + midX;
+        pinchContentY = chartPanViewport.scrollTop + midY;
+      }
+      hideHint();
+    }, { passive: false });
+
+    chartPanViewport.addEventListener('touchmove', (event) => {
+      if (event.touches.length === 1 && touchMode === 'pan') {
+        event.preventDefault();
+        chartPanViewport.scrollLeft = touchStartLeft - (event.touches[0].clientX - touchStartX);
+        chartPanViewport.scrollTop = touchStartTop - (event.touches[0].clientY - touchStartY);
+        return;
+      }
+      if (event.touches.length >= 2) {
+        event.preventDefault();
+        const a = event.touches[0];
+        const b = event.touches[1];
+        const distance = Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY) || 1;
+        const nextZoom = clamp(pinchStartZoom * (distance / pinchStartDistance), MIN_ZOOM, MAX_ZOOM);
+        const oldZoom = zoom;
+        if (Math.abs(nextZoom - oldZoom) < 0.008) return;
+        const rect = chartPanViewport.getBoundingClientRect();
+        const midX = (a.clientX + b.clientX) / 2 - rect.left;
+        const midY = (a.clientY + b.clientY) / 2 - rect.top;
+        const ratio = nextZoom / oldZoom;
+        zoom = nextZoom;
+        resultImage.style.height = `${Math.round(baseHeight * zoom)}px`;
+        resultImage.style.width = 'auto';
+        updateZoomValue();
+        requestAnimationFrame(() => {
+          chartPanViewport.scrollLeft = pinchContentX * ratio - midX;
+          chartPanViewport.scrollTop = pinchContentY * ratio - midY;
+          pinchContentX = chartPanViewport.scrollLeft + midX;
+          pinchContentY = chartPanViewport.scrollTop + midY;
+        });
+      }
+    }, { passive: false });
+
+    chartPanViewport.addEventListener('touchend', (event) => {
+      if (event.touches.length === 1) {
+        touchMode = 'pan';
+        touchStartX = event.touches[0].clientX;
+        touchStartY = event.touches[0].clientY;
+        touchStartLeft = chartPanViewport.scrollLeft;
+        touchStartTop = chartPanViewport.scrollTop;
+      } else {
+        touchMode = '';
+      }
+    });
+
+    // Trackpad / mouse wheel zoom when Ctrl/Command is held.
+    chartPanViewport.addEventListener('wheel', (event) => {
+      if (!(event.ctrlKey || event.metaKey)) return;
+      event.preventDefault();
+      applyZoom(zoom + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP), event.clientX, event.clientY);
+    }, { passive: false });
+
+    chartPanViewport.addEventListener('scroll', hideHint, { once: true });
+    window.setTimeout(() => chartPanHint?.classList.add('hidden'), 5200);
   }
 
-})();
-t-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || 'تعذر إرسال الملاحظات.');
-      if (notesStatus) notesStatus.textContent = payload.message || 'تم إرسال الملاحظات.';
-      if (feedbackNotes) feedbackNotes.value = '';
-      if (feedbackCount) feedbackCount.textContent = '0';
-    } catch (error) {
-      if (notesStatus) notesStatus.textContent = error.message || 'تعذر إرسال الملاحظات والاقتراحات.';
-    } finally {
-      if (submitButton) submitButton.disabled = false;
-    }
-  });
 })();
