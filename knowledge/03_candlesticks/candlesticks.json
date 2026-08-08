@@ -1,0 +1,272 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "candlesticks",
+  "items": [
+    {
+      "id": "bullish_pin_bar",
+      "name_ar": "شمعة رفض صاعدة",
+      "name_en": "Bullish Pin Bar",
+      "bias": "bullish",
+      "shape": [
+        "ذيل سفلي طويل",
+        "جسم صغير قرب أعلى الشمعة"
+      ],
+      "best_location": [
+        "دعم",
+        "قاع نطاق",
+        "إعادة اختبار صاعدة"
+      ],
+      "confirmation": [
+        "إغلاق الشمعة التالية أعلى جسمها أو قمتها"
+      ],
+      "invalid_if": [
+        "كسر قاع الذيل بإغلاق"
+      ],
+      "tags": [
+        "rejection",
+        "pinbar",
+        "bullish"
+      ]
+    },
+    {
+      "id": "bearish_pin_bar",
+      "name_ar": "شمعة رفض هابطة",
+      "name_en": "Bearish Pin Bar",
+      "bias": "bearish",
+      "shape": [
+        "ذيل علوي طويل",
+        "جسم صغير قرب أسفل الشمعة"
+      ],
+      "best_location": [
+        "مقاومة",
+        "قمة نطاق",
+        "إعادة اختبار هابطة"
+      ],
+      "confirmation": [
+        "إغلاق الشمعة التالية أسفل جسمها أو قاعها"
+      ],
+      "invalid_if": [
+        "كسر قمة الذيل بإغلاق"
+      ],
+      "tags": [
+        "rejection",
+        "pinbar",
+        "bearish"
+      ]
+    },
+    {
+      "id": "hammer",
+      "name_ar": "المطرقة",
+      "name_en": "Hammer",
+      "bias": "bullish",
+      "shape": [
+        "ذيل سفلي طويل",
+        "جسم صغير",
+        "يفضل بعد هبوط"
+      ],
+      "best_location": [
+        "دعم أو سحب سيولة أسفل قاع"
+      ],
+      "confirmation": [
+        "شمعة صاعدة لاحقة"
+      ],
+      "caution": "لون الجسم أقل أهمية من الموقع والإغلاق.",
+      "tags": [
+        "hammer",
+        "reversal"
+      ]
+    },
+    {
+      "id": "shooting_star",
+      "name_ar": "الشهاب",
+      "name_en": "Shooting Star",
+      "bias": "bearish",
+      "shape": [
+        "ذيل علوي طويل",
+        "جسم صغير",
+        "يفضل بعد صعود"
+      ],
+      "best_location": [
+        "مقاومة أو سحب سيولة أعلى قمة"
+      ],
+      "confirmation": [
+        "شمعة هابطة لاحقة"
+      ],
+      "caution": "لون الجسم أقل أهمية من الموقع والإغلاق.",
+      "tags": [
+        "shooting_star",
+        "reversal"
+      ]
+    },
+    {
+      "id": "bullish_engulfing",
+      "name_ar": "ابتلاع صاعد",
+      "name_en": "Bullish Engulfing",
+      "bias": "bullish",
+      "shape": [
+        "جسم صاعد يبتلع جسم الشمعة الهابطة السابقة"
+      ],
+      "best_location": [
+        "دعم",
+        "HL",
+        "إعادة اختبار"
+      ],
+      "confirmation": [
+        "ثبات أعلى منتصف شمعة الابتلاع"
+      ],
+      "invalid_if": [
+        "إغلاق أسفل قاع النموذج"
+      ],
+      "tags": [
+        "engulfing",
+        "bullish"
+      ]
+    },
+    {
+      "id": "bearish_engulfing",
+      "name_ar": "ابتلاع هابط",
+      "name_en": "Bearish Engulfing",
+      "bias": "bearish",
+      "shape": [
+        "جسم هابط يبتلع جسم الشمعة الصاعدة السابقة"
+      ],
+      "best_location": [
+        "مقاومة",
+        "LH",
+        "إعادة اختبار"
+      ],
+      "confirmation": [
+        "ثبات أسفل منتصف شمعة الابتلاع"
+      ],
+      "invalid_if": [
+        "إغلاق أعلى قمة النموذج"
+      ],
+      "tags": [
+        "engulfing",
+        "bearish"
+      ]
+    },
+    {
+      "id": "doji",
+      "name_ar": "دوجي",
+      "name_en": "Doji",
+      "bias": "neutral",
+      "shape": [
+        "افتتاح وإغلاق متقاربان"
+      ],
+      "meaning": "تردد، ولا يكفي وحده لتحديد الاتجاه.",
+      "confirmation": [
+        "كسر واضح لنطاق الدوجي في سياق دعم أو مقاومة"
+      ],
+      "tags": [
+        "doji",
+        "indecision"
+      ]
+    },
+    {
+      "id": "inside_bar",
+      "name_ar": "شمعة داخلية",
+      "name_en": "Inside Bar",
+      "bias": "neutral",
+      "shape": [
+        "مدى الشمعة داخل مدى الشمعة السابقة"
+      ],
+      "meaning": "انكماش مؤقت وقد يسبق توسعًا.",
+      "confirmation": [
+        "كسر نطاق الشمعة الأم مع السياق"
+      ],
+      "tags": [
+        "compression",
+        "inside_bar"
+      ]
+    },
+    {
+      "id": "outside_bar",
+      "name_ar": "شمعة خارجية",
+      "name_en": "Outside Bar",
+      "bias": "contextual",
+      "shape": [
+        "قمة أعلى وقاع أدنى من الشمعة السابقة"
+      ],
+      "meaning": "توسع وتذبذب أو ابتلاع قوي حسب الإغلاق.",
+      "confirmation": [
+        "اتجاه الإغلاق وموقعها من مستوى مهم"
+      ],
+      "tags": [
+        "outside_bar",
+        "volatility"
+      ]
+    },
+    {
+      "id": "marubozu_bullish",
+      "name_ar": "شمعة دفع صاعدة",
+      "name_en": "Bullish Marubozu",
+      "bias": "bullish",
+      "shape": [
+        "جسم كبير",
+        "ذيول صغيرة"
+      ],
+      "meaning": "زخم شراء قوي، لكن الدخول المتأخر يحتاج إعادة اختبار.",
+      "tags": [
+        "momentum",
+        "bullish"
+      ]
+    },
+    {
+      "id": "marubozu_bearish",
+      "name_ar": "شمعة دفع هابطة",
+      "name_en": "Bearish Marubozu",
+      "bias": "bearish",
+      "shape": [
+        "جسم كبير",
+        "ذيول صغيرة"
+      ],
+      "meaning": "زخم بيع قوي، لكن الدخول المتأخر يحتاج إعادة اختبار.",
+      "tags": [
+        "momentum",
+        "bearish"
+      ]
+    },
+    {
+      "id": "morning_star",
+      "name_ar": "نجمة الصباح",
+      "name_en": "Morning Star",
+      "bias": "bullish",
+      "shape": [
+        "هبوط قوي",
+        "شمعة تردد صغيرة",
+        "شمعة صاعدة تستعيد جزءًا معتبرًا"
+      ],
+      "best_location": [
+        "دعم أو نهاية دفع هابط"
+      ],
+      "tags": [
+        "three_candle",
+        "reversal",
+        "bullish"
+      ]
+    },
+    {
+      "id": "evening_star",
+      "name_ar": "نجمة المساء",
+      "name_en": "Evening Star",
+      "bias": "bearish",
+      "shape": [
+        "صعود قوي",
+        "شمعة تردد صغيرة",
+        "شمعة هابطة تستعيد جزءًا معتبرًا"
+      ],
+      "best_location": [
+        "مقاومة أو نهاية دفع صاعد"
+      ],
+      "tags": [
+        "three_candle",
+        "reversal",
+        "bearish"
+      ]
+    }
+  ]
+}

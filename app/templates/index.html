@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f8">
+  <title>SaleeM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v={{ app_version }}">
+</head>
+<body data-has-result="{{ 'true' if result else 'false' }}">
+  <main class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="/" aria-label="العودة إلى الصفحة الرئيسية">
+        <span class="brand-mark">S</span>
+        <span class="brand-copy"><b>SaleeM</b><small>تحليل ذكي لشارت الذهب</small></span>
+      </a>
+      <span class="market-badge"><b>XAUUSD</b><small>M5</small></span>
+    </header>
+
+    {% if not result %}
+    <section class="card upload-card">
+      <div class="upload-heading">
+        <div>
+          <span class="eyebrow">تحليل SaleeM الذكي</span>
+          <h1>حلّل شارت الذهب بوضوح</h1>
+          <p>التقط صورة الشارت بشكل أفقي بعد Reset Vertical Scale، مع ظهور الشموع ومحور الأسعار اليميني وخط السعر الحالي بوضوح.</p>
+        </div>
+        <button class="help-button" id="capture-help-button" type="button" aria-haspopup="dialog" aria-controls="capture-help-modal">كيف ألتقط الصورة؟</button>
+      </div>
+
+      <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
+        <label class="drop-zone" id="drop-zone" for="image-input">
+          <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
+          <span class="upload-cloud" aria-hidden="true">
+            <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
+          </span>
+          <strong>اختيار صورة الشارت</strong>
+          <small>PNG أو JPG أو WEBP — الحد الأقصى 12 MB</small>
+          <span class="primary-button">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+            فتح الصور
+          </span>
+          <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
+        </label>
+
+        <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
+      </form>
+    </section>
+
+    <section class="card processing-card" id="processing-card" hidden aria-live="polite">
+      <div class="progress-ring" id="progress-ring">
+        <svg class="progress-svg" viewBox="0 0 180 180" aria-hidden="true">
+          <circle class="progress-track" cx="90" cy="90" r="76"></circle>
+          <circle class="progress-indicator" id="progress-circle" cx="90" cy="90" r="76" pathLength="100"></circle>
+        </svg>
+        <div class="progress-inner">
+          <strong id="progress-value">0%</strong>
+          <span>جاري المعالجة</span>
+        </div>
+        <span class="progress-moving-dot" aria-hidden="true"></span>
+      </div>
+      <div class="processing-copy">
+        <h2>جاري التحليل...</h2>
+        <div class="steps" id="processing-steps">
+          <span class="current">قراءة صورة الشارت</span>
+          <span>مزامنة بيانات السوق</span>
+          <span>تحديد الاتجاه والدخول</span>
+          <span>توليد النتيجة النهائية</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-secondary status-palette" aria-label="حالات التحليل المعتمدة">
+      <span class="status-buy"><i aria-hidden="true">↗</i><b>شراء</b><small>إشارة إيجابية</small></span>
+      <span class="status-sell"><i aria-hidden="true">↘</i><b>بيع</b><small>إشارة سلبية</small></span>
+      <span class="status-watch"><i aria-hidden="true">◉</i><b>مراقبة</b><small>انتظار ومتابعة</small></span>
+      <span class="status-conditional"><i aria-hidden="true">⌛</i><b>مشروط</b><small>يتطلب تفعيلًا</small></span>
+    </section>
+    {% endif %}
+
+    {% if error %}
+    <section class="card error-card{% if axis_retry %} axis-retry-card{% endif %}">
+      <strong>{% if axis_retry %}تعذر ضبط محور الأسعار{% else %}تعذر التحليل{% endif %}</strong>
+      <p>{{ error }}</p>
+      {% if axis_retry %}
+      <div class="axis-retry-steps">
+        <span><b>1</b> استخدم Reset Vertical Scale في الشارت قبل التصوير.</span>
+        <span><b>2</b> أظهر أرقام المحور اليميني وخط السعر الحالي كاملًا، والتقط الصورة بشكل أفقي.</span>
+        <span><b>3</b> التقط صورة جديدة ثم أعد المحاولة.</span>
+      </div>
+      <button class="axis-retry-button" id="axis-retry-button" type="button">اختيار صورة جديدة</button>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if result %}
+    {% set state_label = 'السوق مغلق/البيانات غير محدثة' if result.draw_mode == 'inactive' else ('مشروط' if result.draw_mode == 'conditional' else ('مراقبة' if result.draw_mode == 'watch' else (('شراء مؤكد' if result.direction == 'صاعد' else 'بيع مؤكد') if result.draw_mode == 'confirmed' else 'مراقبة'))) %}
+    {% if result.draw_mode == 'inactive' %}
+      {% set trade_type_label = 'انتظار السوق' %}
+      {% set trade_type_class = 'inactive' %}
+    {% elif result.draw_mode == 'conditional' %}
+      {% set trade_type_label = 'مشروط' %}
+      {% set trade_type_class = 'conditional' %}
+    {% elif result.draw_mode == 'watch' %}
+      {% set trade_type_label = 'مراقبة' %}
+      {% set trade_type_class = 'watch' %}
+    {% elif result.direction == 'صاعد' %}
+      {% set trade_type_label = 'شراء مؤكد' %}
+      {% set trade_type_class = 'buy' %}
+    {% elif result.direction == 'هابط' %}
+      {% set trade_type_label = 'بيع مؤكد' %}
+      {% set trade_type_class = 'sell' %}
+    {% else %}
+      {% set trade_type_label = 'مراقبة' %}
+      {% set trade_type_class = 'watch' %}
+    {% endif %}
+
+    {% set buy_plan = result.buy_scenario_details or {} %}
+    {% set sell_plan = result.sell_scenario_details or {} %}
+    {% set decision = result.dual_scenario_decision or {} %}
+    {% set action = result.action_summary or {} %}
+    {% set action_code = action.get('code', trade_type_class) %}
+    {% set action_primary = action.get('primary_side', 'wait') %}
+    {% set action_title = action.get('title', state_label) %}
+    {% set action_badge = action.get('badge', 'بانتظار التفعيل') %}
+    {% set action_instruction = action.get('instruction', (decision.waiting_for if decision else result.entry_activation_reason) or result.entry_activation_reason or 'انتظر إغلاق شمعة التفعيل') %}
+    {% set action_reason = action.get('reason', (decision.reason if decision else result.market_reading_comment) or result.market_reading_comment) %}
+    {% set action_trigger = action.get('trigger') %}
+    {% set action_target = action.get('target') %}
+    {% set action_cancel = action.get('cancel') %}
+    {% set action_strength = action.get('strength') or result.trade_probability or result.pattern_confidence or 0 %}
+    {% set action_confirmed = action.get('is_confirmed', false) %}
+    {% set explanation = result.result_explanation or {} %}
+    {% set decision_zone = result.decision_zone or {} %}
+    {% set zone_up = decision_zone.get('up_trigger') %}
+    {% set zone_down = decision_zone.get('down_trigger') %}
+    {% set buy_trigger = buy_plan.get('trigger_price') %}
+    {% set sell_trigger = sell_plan.get('trigger_price') %}
+    {% set display_up_trigger = zone_up if decision_zone.get('active') else buy_trigger %}
+    {% set display_down_trigger = zone_down if decision_zone.get('active') else sell_trigger %}
+    {% set peak = result.most_probable_peak or {} %}
+    {% set trough = result.most_probable_trough or {} %}
+
+    <div class="result-page-heading" aria-label="عنوان نتيجة التحليل">
+      <span class="result-page-kicker">نتيجة التحليل</span>
+      <strong>XAUUSD · M5</strong>
+      <small>النموذج الأقرب + مناطق القرار + المسار المتوقع</small>
+    </div>
+
+    <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM">
+      <header class="terminal-header">
+        <a class="terminal-brand" href="/" aria-label="SaleeM"><b>SaleeM</b><small>XAUUSD / M5</small></a>
+        <div class="terminal-state state-{{ trade_type_class }}"><strong>{{ trade_type_label }}</strong><span aria-hidden="true">◉</span></div>
+        <div class="terminal-update"><span>آخر تحديث</span><b>{{ result.analysis_last_closed_m5_time or '—' }}</b></div>
+        <a class="terminal-new" href="/" aria-label="تحليل صورة جديدة">＋</a>
+      </header>
+
+      <div class="terminal-metrics terminal-metrics-top" aria-label="قراءة السوق">
+        <article><span>الاتجاه العام</span><b class="{% if (result.higher_timeframe_direction or result.direction) == 'صاعد' %}tone-green{% elif (result.higher_timeframe_direction or result.direction) == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.higher_timeframe_direction or result.direction or 'غير واضح' }}</b><small>من H4 / H1</small></article>
+        <article><span>الحركة الحالية</span><b class="{% if result.current_movement == 'صاعد' %}tone-green{% elif result.current_movement == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
+        <article><span>منطقة القرار</span><b class="{% if decision_zone.get('active') %}tone-gold{% else %}tone-blue{% endif %}">{% if decision_zone.get('active') %}{{ '%.2f'|format(decision_zone.low) }} - {{ '%.2f'|format(decision_zone.high) }}{% else %}{{ result.zone_behavior or 'بين مستويات' }}{% endif %}</b><small>{% if decision_zone.get('active') %}لا دخول داخلها{% else %}{{ action_badge }}{% endif %}</small></article>
+        <article><span>التفعيل</span><b class="tone-orange">{% if decision_zone.get('active') %}انتظار خروج{% elif action_confirmed %}مفعّل{% else %}منتظر{% endif %}</b><small>{% if decision_zone.get('active') %}إغلاق M5 خارج المنطقة{% else %}{{ action_instruction|truncate(34, True, '…') }}{% endif %}</small></article>
+        <article><span>النموذج</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_status == 'confirmed' %}مؤكد · {{ result.pattern_confidence }}٪{% elif result.pattern_status == 'candidate' %}مرشح · {{ result.pattern_confidence }}٪{% elif result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
+      </div>
+
+      <div class="terminal-strength"><span>تطابق القاعدة</span><div class="strength-track"><i style="width:{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}%"></i></div><b>{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}٪</b></div>
+
+      <section class="terminal-chart-card" aria-label="الشارت المتحرك والقابل للتكبير">
+        <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
+          <button type="button" id="chart-zoom-out" aria-label="تصغير الشارت">−</button>
+          <output id="chart-zoom-value" aria-live="polite">100%</output>
+          <button type="button" id="chart-zoom-in" aria-label="تكبير الشارت">＋</button>
+          <button type="button" id="chart-zoom-reset" class="chart-zoom-reset" aria-label="إعادة الشارت للحجم الأصلي">1:1</button>
+          {% if result.animation_plan and result.animation_plan.enabled %}<button type="button" id="chart-animation-replay" class="chart-animation-replay" aria-label="إعادة تشغيل حركة السيناريو">▶</button>{% endif %}
+        </div>
+        <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
+          <div class="chart-pan-canvas" id="chart-pan-canvas">
+            <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
+            <img id="share-result-image" src="{{ result.share_result_url or result.result_url }}" alt="" hidden aria-hidden="true">
+            {% if result.animation_plan and result.animation_plan.enabled %}<svg id="saleem-animation-overlay" class="saleem-animation-overlay" aria-hidden="true"></svg>{% endif %}
+          </div>
+        </div>
+        {% if result.animation_plan and result.animation_plan.enabled %}<script type="application/json" id="saleem-animation-plan">{{ result.animation_plan|tojson }}</script>{% endif %}
+        <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
+      </section>
+
+      <nav class="terminal-timeframes" aria-label="الفريمات"><span>M1</span><strong>M5</strong><span>M15</span><span>H1</span><span>H4</span><span>D1</span></nav>
+
+      <div class="terminal-metrics terminal-metrics-bottom" aria-label="ملخص القرار">
+        <article class="recommendation-tile"><span>القرار الآن</span><b>{{ action_title }}</b><small>{{ action_instruction }}</small></article>
+        <article><span>تفعيل صعود</span><b class="tone-green">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
+        <article><span>تفعيل هبوط</span><b class="tone-red">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
+        <article><span>سبب الانتظار</span><b class="tone-gold">{% if decision_zone.get('active') %}داخل منطقة قرار{% elif result.rule_check and result.rule_check.first_missing %}{{ result.rule_check.first_missing }}{% else %}{{ action_badge }}{% endif %}</b><small>{{ action_reason|truncate(32, True, '…') }}</small></article>
+      </div>
+
+      <div class="result-actions terminal-actions" aria-label="خيارات النتيجة">
+        <button class="result-action save-button" id="save-image-button" type="button">حفظ النتيجة</button>
+        <button class="result-action share-button" id="share-image-button" type="button">مشاركة</button>
+      </div>
+      <p class="result-action-status" id="result-action-status" aria-live="polite"></p>
+    </section>
+
+    <section class="card scenarios-card compact-dual-card hidden-legacy-result" id="dual-scenarios-card" aria-labelledby="dual-scenarios-title">
+      <div class="scenario-section-topline"><div><small>الخطة البديلة قبل الدخول</small><h2 id="dual-scenarios-title">سيناريو الشراء والبيع</h2></div><strong>{{ decision.label or "لا دخول دون إغلاق M5" }}</strong></div>
+      <div class="scenario-cards-grid">
+        <article class="scenario-plan buy-plan"><h3>سيناريو الشراء</h3><div>التفعيل</div><div>الهدف الأرجح</div><div>السبب</div></article>
+        <article class="scenario-plan sell-plan"><h3>سيناريو البيع</h3><div>التفعيل</div><div>الهدف الأرجح</div><div>السبب</div></article>
+      </div>
+    </section>
+
+    {% set explanation = result.result_explanation or {} %}
+    <details class="card intelligent-details why-result-card" id="analysis-notes-card">
+      <summary>
+        <span class="details-title"><i aria-hidden="true">?</i><span><b>لماذا ظهرت النتيجة؟</b><small>ملخص النتيجة — أهم النقاط فقط، وافتح للتفاصيل الفنية</small></span></span>
+        <span class="details-arrow" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="intelligent-details-content">
+        <div class="explanation-lead">
+          <span aria-hidden="true">✓</span>
+          <div><b>الخلاصة</b><p>اكتملت قراءة الصورة. {{ explanation.summary or result.market_reading_comment }}</p></div>
+        </div>
+
+        <section class="quick-reading-panel" id="reading-card" aria-label="قراءة التحليل">
+          <div class="quick-reading-grid">
+            <div><span>الاتجاه العام</span><b>{{ result.higher_timeframe_direction or result.direction }}</b></div>
+            <div><span>حركة M5 الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
+            <div><span>حالة القرار</span><b>{{ action_title }}</b></div>
+            <div><span>المطلوب الآن</span><b>{{ action_instruction }}</b></div>
+          </div>
+        </section>
+
+        {% if result.rule_check %}
+        <section class="explanation-block rule-audit-block">
+          <h3><span aria-hidden="true">✓</span> فحص القاعدة</h3>
+          <div class="quick-reading-grid rule-audit-grid">
+            <div><span>1. البنية</span><b>{{ 'متحقق' if result.rule_check.structure == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>2. الموقع</span><b>{{ 'متحقق' if result.rule_check.location == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>3. التفعيل</span><b>{{ 'متحقق' if result.rule_check.trigger == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>4. المخاطرة</span><b>{{ 'متحقق' if result.rule_check.risk == 'pass' else 'غير متحقق' }}</b></div>
+          </div>
+          {% if result.rule_check.first_missing %}<p><strong>توقف عند:</strong> {{ result.rule_check.first_missing }}.</p>{% endif %}
+          <p>درجة الثقة: {{ result.rule_check.confidence_label or 'منخفضة' }} — تطابق {{ result.rule_check.match_percent or 0 }}٪.</p>
+        </section>
+        {% endif %}
+
+        <section class="explanation-block">
+          <h3><span aria-hidden="true">H</span> اتجاه الفريمات</h3>
+          <div class="frame-explanation-grid">
+            {% for frame in explanation.frames or [] %}
+            <div><strong dir="ltr">{{ frame.timeframe }}</strong><b>{{ frame.direction }}</b>{% if frame.detail %}<small>{{ frame.detail }}</small>{% endif %}</div>
+            {% endfor %}
+          </div>
+        </section>
+
+        <div class="explanation-two-column">
+          <section class="explanation-block"><h3><span aria-hidden="true">↕</span> البنية والحركة</h3><p>{{ explanation.structure }}</p><p class="analysis-breakout-line">{{ result.breakout_summary }}</p></section>
+          <section class="explanation-block"><h3><span aria-hidden="true">▥</span> الزخم</h3><p>{{ explanation.momentum }}</p><p>{{ result.confirmation_explanation }}</p></section>
+          <section class="explanation-block"><h3><span aria-hidden="true">◌</span> السيولة</h3><p>{{ explanation.liquidity }}</p><p>{{ explanation.levels }}</p></section>
+          <section class="explanation-block"><h3><span aria-hidden="true">▱</span> المناطق الفنية</h3><p>{{ explanation.zones }}</p><p>{{ result.stop_reason or 'تمت مراجعة منطق الوقف والإلغاء بالنسبة للبنية الحالية.' }}</p></section>
+        </div>
+
+        <section class="explanation-block">
+          <h3><span aria-hidden="true">W</span> النماذج الفنية</h3>
+          <p>{{ explanation.pattern }}</p>
+          <small>{{ explanation.pattern_review }}</small>
+        </section>
+
+        <section class="explanation-block">
+          <h3><span aria-hidden="true">✓</span> ما الذي دعم النتيجة؟</h3>
+          <ul class="reason-list">{% for reason in explanation.technical_reasons or [] %}<li>{{ reason }}</li>{% endfor %}</ul>
+        </section>
+
+        <section class="explanation-block warning-block">
+          <h3><span aria-hidden="true">!</span> ما الذي يمنع التأكيد أو يلغي السيناريو؟</h3>
+          <ul class="reason-list">{% for item in explanation.opposition or [] %}<li>{{ item }}</li>{% endfor %}</ul>
+        </section>
+
+        <section class="explanation-block news-block">
+          <h3><span aria-hidden="true">◷</span> الأخبار والعوامل الخارجية</h3>
+          <p>{{ explanation.news or result.macro_note }}</p>
+          {% if not explanation.news_available %}<small>لا يختلق SaleeM خبرًا غير موجود ضمن مصدر البيانات.</small>{% endif %}
+        </section>
+
+        <section class="explanation-block scenario-answer-block">
+          <h3><span aria-hidden="true">◎</span> الإجابة العملية</h3>
+          <p>{{ explanation.decision_reason }}</p>
+          <b>ننتظر: {{ explanation.waiting_for }}</b>
+        </section>
+        <p class="analysis-notes-footnote">تحليل تعليمي تقديري، ولا يتم تنفيذ أي صفقة تلقائيًا.</p>
+      </div>
+    </details>
+
+    <details class="card limit-recommendations" id="limit-recommendations-card">
+      <summary>
+        <span class="details-title"><i aria-hidden="true">L</i><span><b>توصية الصفقة — Buy Limit وSell Limit</b><small>تظهر فقط من قمة أو قاع مؤكد — ثابتة حتى الإلغاء</small></span></span>
+        <span class="details-arrow" aria-hidden="true">⌄</span>
+      </summary>
+      {% set recommendations = result.limit_recommendations %}
+      {% if recommendations and recommendations.available %}
+      <div class="limit-recommendations-content">
+        <div class="limit-market-line"><span>السعر الحالي</span><b>{{ '%.2f'|format(recommendations.current_price) }}</b></div>
+        <div class="limit-plans-grid">
+          {% set buy_plan = recommendations.buy_limit %}
+          {% if buy_plan %}
+          <article class="limit-plan buy-limit{% if recommendations.stronger == 'buy_limit' %} strongest{% endif %}">
+            <header class="limit-plan-header">
+              <div><span class="limit-order-dot"></span><div><small>شراء من قاع مؤكد</small><h3>Buy Limit</h3></div></div>
+              <div class="limit-rate"><strong>{{ buy_plan.estimated_success }}٪</strong><small>تقريبي</small></div>
+            </header>
+            {% if recommendations.stronger == 'buy_limit' %}<span class="stronger-badge">الأقوى الآن</span>{% endif %}
+            {% if buy_plan.probability_scenarios %}
+            <div class="limit-probability-cases">
+              <div class="limit-probability-case">
+                <span>{{ buy_plan.probability_scenarios.current_label }}</span>
+                <b>{{ buy_plan.probability_scenarios.current_probability }}٪</b>
+              </div>
+              <div class="limit-probability-case alt">
+                <span>{{ buy_plan.probability_scenarios.change_label }}</span>
+                <b>{{ buy_plan.probability_scenarios.change_probability }}٪</b>
+              </div>
+            </div>
+            {% endif %}
+            <div class="limit-levels">
+              <div><span>القاع المعتمد</span><b>{{ '%.2f'|format(buy_plan.pivot_price) }} — {{ buy_plan.pivot_timeframe }}</b></div>
+              <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(buy_plan.zone_low) }} – {{ '%.2f'|format(buy_plan.zone_high) }}</b></div>
+              <div class="primary-level"><span>الدخول</span><b>{{ '%.2f'|format(buy_plan.entry) }}</b></div>
+              <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(buy_plan.stop_loss) }}</b></div>
+              <div><span>TP1</span><b>{{ '%.2f'|format(buy_plan.target_1) }}</b></div>
+              <div><span>TP2</span><b>{{ '%.2f'|format(buy_plan.target_2) }}</b></div>
+              <div><span>TP3</span><b>{{ '%.2f'|format(buy_plan.target_3) }}</b></div>
+              <div><span>الإلغاء</span><b>{{ buy_plan.invalidation_condition }}</b></div>
+            </div>
+            <p class="limit-distance">يبعد {{ '%.2f'|format(buy_plan.distance_to_entry) }} عن السعر الحالي.</p>
+            <p class="limit-reason">{{ buy_plan.short_reason or buy_plan.reason }}</p>
+            {% if buy_plan.probability_scenarios %}<p class="limit-scenario-note">{{ buy_plan.probability_scenarios.note }}</p>{% endif %}
+          </article>
+          {% else %}
+          <article class="limit-plan buy-limit unavailable-plan">
+            <header class="limit-plan-header"><div><span class="limit-order-dot"></span><div><small>أمر شراء معلّق</small><h3>Buy Limit</h3></div></div></header>
+            <p class="limit-plan-empty">لا يوجد قاع مؤكد صالح أسفل السعر حاليًا.</p>
+          </article>
+          {% endif %}
+
+          {% set sell_plan = recommendations.sell_limit %}
+          {% if sell_plan %}
+          <article class="limit-plan sell-limit{% if recommendations.stronger == 'sell_limit' %} strongest{% endif %}">
+            <header class="limit-plan-header">
+              <div><span class="limit-order-dot"></span><div><small>بيع من قمة مؤكدة</small><h3>Sell Limit</h3></div></div>
+              <div class="limit-rate"><strong>{{ sell_plan.estimated_success }}٪</strong><small>تقريبي</small></div>
+            </header>
+            {% if recommendations.stronger == 'sell_limit' %}<span class="stronger-badge">الأقوى الآن</span>{% endif %}
+            {% if sell_plan.probability_scenarios %}
+            <div class="limit-probability-cases">
+              <div class="limit-probability-case">
+                <span>{{ sell_plan.probability_scenarios.current_label }}</span>
+                <b>{{ sell_plan.probability_scenarios.current_probability }}٪</b>
+              </div>
+              <div class="limit-probability-case alt">
+                <span>{{ sell_plan.probability_scenarios.change_label }}</span>
+                <b>{{ sell_plan.probability_scenarios.change_probability }}٪</b>
+              </div>
+            </div>
+            {% endif %}
+            <div class="limit-levels">
+              <div><span>القمة المعتمدة</span><b>{{ '%.2f'|format(sell_plan.pivot_price) }} — {{ sell_plan.pivot_timeframe }}</b></div>
+              <div><span>منطقة الدخول</span><b>{{ '%.2f'|format(sell_plan.zone_low) }} – {{ '%.2f'|format(sell_plan.zone_high) }}</b></div>
+              <div class="primary-level"><span>الدخول</span><b>{{ '%.2f'|format(sell_plan.entry) }}</b></div>
+              <div class="stop-level"><span>وقف الخسارة</span><b>{{ '%.2f'|format(sell_plan.stop_loss) }}</b></div>
+              <div><span>TP1</span><b>{{ '%.2f'|format(sell_plan.target_1) }}</b></div>
+              <div><span>TP2</span><b>{{ '%.2f'|format(sell_plan.target_2) }}</b></div>
+              <div><span>TP3</span><b>{{ '%.2f'|format(sell_plan.target_3) }}</b></div>
+              <div><span>الإلغاء</span><b>{{ sell_plan.invalidation_condition }}</b></div>
+            </div>
+            <p class="limit-distance">يبعد {{ '%.2f'|format(sell_plan.distance_to_entry) }} عن السعر الحالي.</p>
+            <p class="limit-reason">{{ sell_plan.short_reason or sell_plan.reason }}</p>
+            {% if sell_plan.probability_scenarios %}<p class="limit-scenario-note">{{ sell_plan.probability_scenarios.note }}</p>{% endif %}
+          </article>
+          {% else %}
+          <article class="limit-plan sell-limit unavailable-plan">
+            <header class="limit-plan-header"><div><span class="limit-order-dot"></span><div><small>أمر بيع معلّق</small><h3>Sell Limit</h3></div></div></header>
+            <p class="limit-plan-empty">لا توجد قمة مؤكدة صالحة أعلى السعر حاليًا.</p>
+          </article>
+          {% endif %}
+        </div>
+        <div class="limit-disclaimer"><b>تنبيه:</b> {{ recommendations.disclaimer }} لا تستخدم Market Execution في هذه الخاصية، ولا تُفتح الصفقات تلقائيًا.</div>
+      </div>
+      {% else %}
+      <div class="limit-unavailable">
+        <strong>التوصية غير متاحة الآن</strong>
+        <p>{{ recommendations.reason if recommendations else 'لا توجد قمة أو قاع صالح للتوصية حاليًا.' }}</p>
+        <small>نسبة القوة تقديرية وغير مضمونة، ولا يتم تنفيذ أي أمر تلقائيًا.</small>
+      </div>
+      {% endif %}
+    </details>
+
+    <section class="card feedback-card combined-feedback-card" id="feedback-card" aria-labelledby="feedback-title">
+      <div class="smart-section-heading">
+        <span class="smart-section-icon" aria-hidden="true">★</span>
+        <div><small>نتيجة الصفقة السابقة — ساعدنا على تحسين الدقة</small><h2 id="feedback-title">نتيجة الصفقة والتقييم</h2></div>
+      </div>
+
+      <form id="trade-feedback-form" class="trade-feedback-form">
+        <fieldset class="trade-fieldset">
+          <legend>كيف انتهت الصفقة السابقة؟</legend>
+          <div class="trade-result-grid" id="trade-result-grid">
+            <button type="button" class="trade-result-option success" data-result="win"><span class="option-icon">✓</span><span>نجحت</span></button>
+            <button type="button" class="trade-result-option danger" data-result="loss"><span class="option-icon">×</span><span>فشلت</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="no_trade"><span class="option-icon">−</span><span>لم أدخل</span></button>
+            <button type="button" class="trade-result-option neutral" data-result="open"><span class="option-icon">◷</span><span>مفتوحة</span></button>
+          </div>
+          <input id="trade-result-value" type="hidden" value="">
+        </fieldset>
+
+        <fieldset class="rating-fieldset">
+          <legend>تقييم التحليل</legend>
+          <div class="rating-stars" id="rating-stars" role="radiogroup" aria-label="اختر تقييمًا من خمس نجوم">
+            <button type="button" class="rating-star" data-rating="1" aria-label="نجمة واحدة">☆</button>
+            <button type="button" class="rating-star" data-rating="2" aria-label="نجمتان">☆</button>
+            <button type="button" class="rating-star" data-rating="3" aria-label="ثلاث نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="4" aria-label="أربع نجوم">☆</button>
+            <button type="button" class="rating-star" data-rating="5" aria-label="خمس نجوم">☆</button>
+          </div>
+          <input id="rating-value" type="hidden" value="">
+        </fieldset>
+
+        <button class="feedback-submit" id="trade-feedback-submit" type="submit">إرسال النتيجة والتقييم</button>
+        <p class="feedback-status" id="trade-feedback-status" role="status" aria-live="polite"></p>
+      </form>
+
+      <div class="feedback-divider"><span>ملاحظة اختيارية</span></div>
+      <form id="notes-form" class="inline-notes-form">
+        <textarea id="feedback-notes" maxlength="1500" rows="3" aria-label="ملاحظة لتحسين التطبيق" placeholder="اكتب ملاحظتك لتحسين التحليل أو الواجهة..."></textarea>
+        <div class="notes-action-row"><span class="feedback-counter"><span id="feedback-count">0</span>/1500</span><button class="feedback-submit notes-submit" type="submit"><span aria-hidden="true">✉</span> إرسال الملاحظة</button></div>
+        <p class="feedback-status" id="notes-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <details class="card summary-card" id="summary-card">
+      <summary>
+        <span class="details-title"><i aria-hidden="true">#</i><span><b>إحصاءات المشاركين</b><small>التقييمات والنتائج المجمعة دون أسماء</small></span></span>
+        <span class="details-arrow" aria-hidden="true">⌄</span>
+      </summary>
+      <div class="summary-content">
+        <div class="summary-grid">
+          <div class="summary-gauge-block">
+            <div class="gauge-label">نسبة النجاح</div>
+            <div class="summary-gauge" id="summary-gauge" style="--summary-progress: {{ summary.success_rate }}">
+              <div class="summary-gauge-inner"><strong id="summary-success-rate">{{ summary.success_rate }}%</strong></div>
+            </div>
+          </div>
+          <div class="summary-rating-block">
+            <div class="summary-rating-value"><span id="summary-average-rating">{{ '%.1f'|format(summary.average_rating) }}</span> <small>/ 5</small></div>
+            <div class="summary-stars" id="summary-stars" data-average="{{ summary.average_rating }}"><span>★</span><span>★</span><span>★</span><span>★</span><span>★</span></div>
+            <div class="summary-rating-count">عدد التقييمات: <b id="summary-rating-count">{{ summary.rating_count }}</b></div>
+          </div>
+          <div class="summary-stat-list">
+            <div class="summary-stat-item"><span>إجمالي الصفقات</span><b id="summary-total-trades">{{ summary.total_trades }}</b></div>
+            <div class="summary-stat-item"><span>الناجحة</span><b id="summary-wins">{{ summary.wins }}</b></div>
+            <div class="summary-stat-item"><span>الفاشلة</span><b id="summary-losses">{{ summary.losses }}</b></div>
+            <div class="summary-stat-item"><span>المفتوحة</span><b id="summary-open-trades">{{ summary.open_trades }}</b></div>
+          </div>
+        </div>
+        <div class="summary-bar-wrap">
+          <span class="summary-bar-side"><b id="summary-success-rate-inline">{{ summary.success_rate }}%</b> ناجحة</span>
+          <div class="summary-bar"><span id="summary-success-bar" style="width: {{ summary.success_rate }}%"></span></div>
+          <span class="summary-bar-side"><b id="summary-failure-rate-inline">{{ summary.failure_rate }}%</b> فاشلة</span>
+        </div>
+      </div>
+    </details>
+
+    <p class="experimental-note">نسخة تجريبية قيد التطوير — النتائج لأغراض تعليمية.</p>
+    {% endif %}
+    <nav class="saleem-bottom-nav" aria-label="التنقل السريع">
+      <a class="nav-home" href="/" aria-label="الصفحة الرئيسية"><i aria-hidden="true">⌂</i><span>الرئيسية</span></a>
+      {% if result %}<a class="nav-analysis active" href="#result-image" aria-label="نتيجة التحليل"><i aria-hidden="true">⌁</i><span>النتيجة</span></a>{% else %}<a class="nav-analysis active" href="#analysis-form" aria-label="بدء التحليل"><i aria-hidden="true">＋</i><span>التحليل</span></a>{% endif %}
+      {% if result %}<a href="#analysis-notes-card" aria-label="تفاصيل التحليل"><i aria-hidden="true">☷</i><span>التفاصيل</span></a>{% else %}<a href="#capture-help-button" aria-label="مساعدة التصوير"><i aria-hidden="true">?</i><span>المساعدة</span></a>{% endif %}
+    </nav>
+  </main>
+
+  <button class="system-status-launcher" id="system-status-launcher" type="button" aria-haspopup="dialog" aria-controls="system-status-modal">
+    <span aria-hidden="true">&lt;/&gt;</span> حالة التطبيق
+  </button>
+
+  <dialog class="system-status-modal" id="system-status-modal" aria-labelledby="system-status-title">
+    <div class="system-status-window">
+      <header class="system-status-header">
+        <div><small>لوحة الإدارة</small><h2 id="system-status-title">حالة تطبيق SaleeM</h2></div>
+        <button class="system-status-close" id="system-status-close" type="button" aria-label="إغلاق">×</button>
+      </header>
+
+      <div class="system-code-panel" id="system-code-panel" aria-live="polite">
+        <section>
+          <h3>[ التطبيق ]</h3>
+          <div><span>الحالة</span><b id="status-app-state">—</b></div>
+          <div><span>الإصدار</span><b id="status-app-version">—</b></div>
+        </section>
+        <section>
+          <h3>[ بيانات السوق ]</h3>
+          <div><span>الحالة</span><b id="status-market-state">—</b></div>
+          <div><span>الخطة</span><b id="status-market-plan">—</b></div>
+          <div><span>المتبقي اليوم</span><b id="status-market-daily">—</b></div>
+          <div><span>المتبقي الآن</span><b id="status-market-minute">—</b></div>
+          <div><span>تحديثات كاملة متبقية</span><b id="status-market-refreshes">—</b></div>
+          <div><span>آخر جلب</span><b id="status-market-last-fetch">—</b></div>
+          <div><span>الفريمات</span><b id="status-market-frames">—</b></div>
+        </section>
+        <section>
+          <h3>[ المستخدمون ]</h3>
+          <div><span>إجمالي المستخدمين</span><b id="status-users-total">—</b></div>
+          <div><span>المستخدمون اليوم</span><b id="status-users-today">—</b></div>
+          <div><span>المستخدمون الآن</span><b id="status-users-online">—</b></div>
+          <div><span>التحليلات اليوم</span><b id="status-analyses-today">—</b></div>
+        </section>
+        <section>
+          <h3>[ OpenAI API ]</h3>
+          <div><span>الحالة</span><b id="status-openai-state">—</b></div>
+          <div><span>الرصيد المتبقي</span><b id="status-openai-balance">—</b></div>
+          <div><span>استهلاك اليوم</span><b id="status-openai-today">—</b></div>
+          <div><span>استهلاك الشهر</span><b id="status-openai-month">—</b></div>
+          <div><span>تكلفة آخر تحليل</span><b id="status-openai-last">—</b></div>
+          <div><span>طريقة الحساب</span><b id="status-openai-source">—</b></div>
+        </section>
+        <section>
+          <h3>[ النظام ]</h3>
+          <div><span>التخزين المؤقت</span><b id="status-cache-state">—</b></div>
+          <div><span>آخر خطأ</span><b id="status-last-error">—</b></div>
+        </section>
+        <button class="system-status-refresh" id="system-status-refresh" type="button">تحديث البيانات</button>
+        <p class="system-status-message" id="system-status-message"></p>
+      </div>
+    </div>
+  </dialog>
+
+  {% if not result %}
+  <dialog class="capture-help-modal" id="capture-help-modal" aria-labelledby="capture-help-title">
+    <div class="modal-header">
+      <div><small>قبل رفع الصورة</small><h2 id="capture-help-title">صورة مناسبة للتحليل</h2></div>
+      <button class="modal-close" type="button" data-close-modal aria-label="إغلاق">×</button>
+    </div>
+    <div class="capture-checklist">
+      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط الصورة بشكل أفقي (Landscape).</span>
+      <span><b>2</b> أظهر الشموع ومحور الأسعار اليميني كاملًا.</span>
+      <span><b>3</b> أظهر خط السعر الحالي ولا تلصق أي صورة فوق الشارت.</span>
+      <span><b>4</b> نفّذ Reset Vertical Scale قبل التصوير ثم أدر الهاتف للوضع الأفقي.</span>
+    </div>
+    <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>
+    <button class="modal-primary" type="button" data-close-modal>فهمت</button>
+  </dialog>
+  {% endif %}
+
+  <script src="/static/app.js?v={{ app_version }}" defer></script>
+</body>
+</html>
