@@ -161,7 +161,7 @@ def test_renderer_accepts_chart_background(tmp_path):
     with Image.open(output) as image:
         assert image.height > image.width
         assert image.format == "PNG"
-        assert image.size != (960, 1600)  # rebuilt from market OHLC; source is reference only
+        assert image.size == (960, 1600)  # v3.67 preserves the uploaded chart canvas
 
 
 def test_result_preserves_full_iphone_canvas_and_native_viewport():
@@ -373,8 +373,9 @@ def test_renderer_does_not_copy_detected_green_line_from_reference_screenshot(tm
     output.write_bytes(render_result(analysis, chart_background_path=background))
     with Image.open(output) as image:
         assert image.height > image.width
-        # v3.66 reconstructs the chart; uploaded pixels are not pasted.
-        assert image.size != (width, height)
+        # v3.67 keeps the exact uploaded chart dimensions and pixels as base.
+        assert image.size == (width, height)
+        assert image.convert("RGB").getpixel((width // 2, line_y)) == (38, 201, 128)
 
 
 def test_all_price_drawings_share_green_line_anchored_transform():

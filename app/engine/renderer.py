@@ -4745,7 +4745,7 @@ def _native_build_pixel_axis_model(image: Image.Image, analysis: dict[str, Any])
     wrong height.  The model is accepted only when predicted broker tick prices
     land back on detected source grid rows.
     """
-    current = _number(analysis.get("current_price"))
+    current = _number(analysis.get("visual_current_price")) or _number(analysis.get("current_price"))
     if current is None:
         return None
     current_y = _detect_green_reference_line_y(image)
@@ -4801,7 +4801,7 @@ def _native_literal_axis_points(analysis: dict[str, Any]) -> list[tuple[float, f
     if len(points) < 2:
         return points
 
-    current = _number(analysis.get("current_price"))
+    current = _number(analysis.get("visual_current_price")) or _number(analysis.get("current_price"))
     current_ratio = _number(analysis.get("current_price_y_ratio"))
     if current is not None and current_ratio is not None:
         current_ratio = max(0.0, min(1.0, float(current_ratio)))
@@ -5755,6 +5755,197 @@ def _native_draw_structure(
 
 
 
+
+def _ratio_point_to_px(point: Any, width: int, height: int, bounds: tuple[int, int, int, int]) -> tuple[int, int] | None:
+    if not (isinstance(point, list) and len(point) >= 2):
+        return None
+    try:
+        xr = float(point[0]); yr = float(point[1])
+    except (TypeError, ValueError):
+        return None
+    if not (0.0 <= xr <= 1.0 and 0.0 <= yr <= 1.0):
+        return None
+    x = max(bounds[0], min(bounds[2], int(round(xr * max(1, width - 1)))))
+    y = max(bounds[1], min(bounds[3], int(round(yr * max(1, height - 1)))))
+    return x, y
+
+
+def _visual_overlay_bounds(analysis: dict[str, Any], width: int, height: int) -> tuple[int, int, int, int]:
+    raw = analysis.get("visual_chart_plot_bounds")
+    if isinstance(raw, list) and len(raw) >= 4:
+        try:
+            x1, y1, x2, y2 = [float(v) for v in raw[:4]]
+            x1, x2 = sorted((max(0.0, min(1.0, x1)), max(0.0, min(1.0, x2))))
+            y1, y2 = sorted((max(0.0, min(1.0, y1)), max(0.0, min(1.0, y2))))
+            if x2 - x1 >= 0.20 and y2 - y1 >= 0.20:
+                return (
+                    int(round(x1 * (width - 1))), int(round(y1 * (height - 1))),
+                    int(round(x2 * (width - 1))), int(round(y2 * (height - 1))),
+                )
+        except (TypeError, ValueError):
+            pass
+    return (0, 0, width - 1, height - 1)
+
+
+def _native_draw_visual_reference_geometry(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    width: int,
+    height: int,
+    font,
+) -> bool:
+    """Draw pixel-anchored teaching geometry over the untouched upload.
+
+    v3.67 uses visual coordinates only after the deterministic engine verifies
+    the same source-model/scenario family.  These points do not decide prices or
+    trades; they only place already-verified educational geometry on the exact
+    screenshot so the result stays authentic even when market-candle timestamps
+    cannot be aligned to the screenshot.
+    """
+    score = int(analysis.get("visual_geometry_score") or 0)
+    scenario_ok = bool(analysis.get("reference_scenario_available"))
+    pattern_ok = str(analysis.get("pattern_type") or "لا يوجد") != "لا يوجد" and int(analysis.get("pattern_confidence") or 0) >= 60
+    if score < 68 or not (scenario_ok or pattern_ok):
+        return False
+
+    path_raw = analysis.get("visual_pattern_path") or []
+    lines_raw = analysis.get("visual_pattern_lines") or []
+    structures = analysis.get("visual_structure_lines") or []
+    zones = analysis.get("visual_zones") or []
+    expected = analysis.get("visual_expected_path") or []
+    if not (path_raw or lines_raw or structures or zones):
+        return False
+
+    bounds = _visual_overlay_bounds(analysis, width, height)
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    status = str(analysis.get("reference_scenario_status") or analysis.get("pattern_status") or "candidate")
+    confirmed = status == "confirmed"
+    bias = str(analysis.get("reference_scenario_bias") or analysis.get("pattern_bias") or "محايد")
+    components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
+    family = str(analysis.get("pattern_reference_family") or "")
+    line_w = max(2, int(round(min(width, height) * 0.0024)))
+    dash = max(7, int(round(min(width, height) * 0.010)))
+    gap = max(5, int(round(min(width, height) * 0.006)))
+    pattern_color = (38, 93, 202, 235)
+    skeleton_color = (245, 248, 252, 238) if sum(image.convert("RGB").getpixel((max(0,bounds[0]), max(0,bounds[1])))) < 380 else (37, 45, 57, 230)
+
+    # Transparent verified zones, similar to the user's educational references.
+    zone_kinds_allowed = set()
+    if "order_block" in components: zone_kinds_allowed.add("order_block")
+    if "fvg" in components: zone_kinds_allowed.add("fvg")
+    if "liquidity" in components: zone_kinds_allowed.add("liquidity_area")
+    for item in zones[:4]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        if scenario_ok and kind not in zone_kinds_allowed:
+            continue
+        rect = item.get("rect")
+        if not (isinstance(rect, list) and len(rect) >= 4):
+            continue
+        p1 = _ratio_point_to_px(rect[:2], width, height, bounds)
+        p2 = _ratio_point_to_px(rect[2:4], width, height, bounds)
+        if p1 is None or p2 is None:
+            continue
+        x1,x2=sorted((p1[0],p2[0])); y1,y2=sorted((p1[1],p2[1]))
+        if x2-x1 < 4 or y2-y1 < 4:
+            continue
+        if kind == "order_block":
+            fill=(88, 88, 88, 45); outline=(78, 78, 78, 145); label="OB"
+        elif kind == "fvg":
+            fill=(228, 157, 45, 36); outline=(198, 132, 32, 135); label="FVG"
+        else:
+            fill=(64, 133, 212, 28); outline=(51, 111, 185, 120); label="LIQ"
+        draw.rounded_rectangle((x1,y1,x2,y2), radius=max(3,line_w*2), fill=fill, outline=outline, width=1)
+        draw.text((x1+5, max(y1+4, y2-16)), label, font=font, fill=outline)
+
+    # Pattern boundaries and neckline, anchored to visible chart pixels.
+    if pattern_ok or "pattern" in components:
+        for item in lines_raw[:6]:
+            if not (isinstance(item, list) and len(item) >= 4):
+                continue
+            p1=_ratio_point_to_px(item[:2],width,height,bounds); p2=_ratio_point_to_px(item[2:4],width,height,bounds)
+            if p1 is None or p2 is None: continue
+            if confirmed:
+                draw.line((p1,p2), fill=pattern_color, width=line_w)
+            else:
+                _dash_line(draw,p1,p2,pattern_color,width=line_w,dash=dash,gap=gap)
+
+        path=[]
+        for point in path_raw[:12]:
+            px=_ratio_point_to_px(point,width,height,bounds)
+            if px is not None: path.append(px)
+        if len(path) >= 2:
+            # Dark/white teaching skeleton with a thin outline stays readable on
+            # both broker light and dark themes without obscuring candles.
+            for a,b in zip(path[:-1],path[1:]):
+                under=(19,25,34,150) if skeleton_color[0] > 200 else (250,250,250,150)
+                draw.line((a,b), fill=under, width=line_w+3)
+                if confirmed:
+                    draw.line((a,b), fill=skeleton_color, width=line_w)
+                else:
+                    _dash_line(draw,a,b,skeleton_color,width=line_w,dash=dash,gap=gap)
+            r=max(3,line_w+1)
+            for x,y in path:
+                draw.ellipse((x-r,y-r,x+r,y+r), fill=(250,252,255,205), outline=pattern_color, width=1)
+
+    # Structure lines are shown only when the verified scenario uses structure.
+    if not scenario_ok or "structure" in components:
+        for item in structures[:6]:
+            if not isinstance(item, dict): continue
+            line=item.get("line"); label=str(item.get("label") or "")
+            if not (isinstance(line,list) and len(line)>=4): continue
+            p1=_ratio_point_to_px(line[:2],width,height,bounds); p2=_ratio_point_to_px(line[2:4],width,height,bounds)
+            if p1 is None or p2 is None: continue
+            col=(40,47,58,205)
+            _dash_line(draw,p1,p2,col,width=max(1,line_w-1),dash=dash,gap=gap)
+            mx=(p1[0]+p2[0])//2; my=(p1[1]+p2[1])//2
+            draw.text((mx,my-5),label,font=font,fill=col,anchor="ms")
+
+    # One compact model/scenario name, never a large banner.
+    label = str(analysis.get("reference_scenario_label") or analysis.get("pattern_type") or "").strip()
+    anchor_points=[_ratio_point_to_px(pt,width,height,bounds) for pt in path_raw]
+    anchor_points=[pt for pt in anchor_points if pt is not None]
+    if label and anchor_points:
+        xs=[pt[0] for pt in anchor_points]; ys=[pt[1] for pt in anchor_points]
+        lx=max(bounds[0]+6,min(bounds[2]-8,int(sum(xs)/len(xs))))
+        ly=max(bounds[1]+12,min(ys)-max(18,line_w*7))
+        short=label if len(label)<=36 else label[:33]+"…"
+        suffix=" ✓" if confirmed else " — مرشح"
+        text=short+suffix
+        box=draw.textbbox((0,0),text,font=font); tw=box[2]-box[0]; th=box[3]-box[1]
+        x1=max(bounds[0]+4,min(bounds[2]-tw-16,lx-tw//2)); y1=max(bounds[1]+4,ly-th//2)
+        accent=(21,151,91,215) if bias=="صاعد" else (210,60,68,215) if bias=="هابط" else pattern_color
+        draw.rounded_rectangle((x1-5,y1-3,x1+tw+5,y1+th+3),radius=5,fill=(250,252,255,215),outline=accent,width=1)
+        draw.text((x1,y1),text,font=font,fill=(31,39,49,235))
+
+    # Expected path: use the pixel-grounded path from the reference match when
+    # supplied; otherwise extrapolate only from the final real pattern pivot.
+    forecast=[]
+    for point in expected[:5]:
+        px=_ratio_point_to_px(point,width,height,bounds)
+        if px is not None: forecast.append(px)
+    if len(forecast) < 2 and anchor_points and bias in {"صاعد","هابط"}:
+        sx,sy=anchor_points[-1]
+        dx=max(32,int((bounds[2]-bounds[0])*0.12))
+        dy=max(24,int((bounds[3]-bounds[1])*0.11))
+        forecast=[(sx,sy),(min(bounds[2]-4,sx+dx), max(bounds[1]+4,sy-dy) if bias=="صاعد" else min(bounds[3]-4,sy+dy))]
+    if len(forecast)>=2 and bias in {"صاعد","هابط"}:
+        col=(20,151,91,230) if bias=="صاعد" else (210,58,67,230)
+        for a,b in zip(forecast[:-1],forecast[1:]):
+            if confirmed:
+                draw.line((a,b),fill=col,width=line_w+1)
+            else:
+                _dash_line(draw,a,b,col,width=line_w+1,dash=dash,gap=gap)
+        _native_draw_arrow(draw,forecast[-2],forecast[-1],col,width=line_w+1)
+
+    image.alpha_composite(layer)
+    analysis["educational_overlay_visual_geometry_used"] = True
+    analysis["educational_overlay_bounds"] = list(bounds)
+    return True
+
+
 def _native_draw_reference_scenario(
     image: Image.Image,
     analysis: dict[str, Any],
@@ -5781,8 +5972,11 @@ def _native_draw_reference_scenario(
     status = str(analysis.get("reference_scenario_status") or "candidate")
     confirmed = status == "confirmed"
 
-    # Draw classical geometry only when the selected scenario actually uses it.
-    if "pattern" in components and analysis.get("pattern_overlays"):
+    # Draw market-index classical geometry only when no trustworthy pixel-anchored
+    # visual geometry exists.  v3.67 prefers exact screenshot anchors so a stale
+    # or differently cropped upload cannot shift the pattern horizontally.
+    visual_ready = int(analysis.get("visual_geometry_score") or 0) >= 68 and bool(analysis.get("visual_pattern_path") or analysis.get("visual_pattern_lines"))
+    if "pattern" in components and analysis.get("pattern_overlays") and not visual_ready:
         _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
 
     if "structure" in components:
@@ -5949,7 +6143,7 @@ def _render_uploaded_chart_with_overlays(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None,
 ) -> bytes:
-    """Preserve the exact uploaded landscape screenshot and add only light overlays."""
+    """Composite one clean educational overlay over the exact uploaded chart."""
     if chart_background_path:
         try:
             with Image.open(chart_background_path) as source:
@@ -5962,44 +6156,61 @@ def _render_uploaded_chart_with_overlays(
         return _render_scrollable_chart(analysis)
 
     width, height = image.size
-    font_size = max(9, min(14, int(round(height * 0.015))))
+    font_size = max(9, min(16, int(round(min(width, height) * 0.018))))
     font = _font(font_size, True, True)
 
-    # Price-linked overlays are allowed only after a pixel-derived calibration
-    # succeeds on the untouched uploaded chart.  This deliberately ignores
-    # vision-provided y_ratio positions, which may be numerically correct but
-    # vertically offset.
+    # Price mapping: prefer strict pixel calibration.  If it fails but the
+    # screenshot reader supplied at least two literal broker ticks, permit only
+    # piecewise interpolation between those real labels.  No synthetic scale.
     analysis.pop("_native_axis_pixel_model", None)
-    analysis["_native_axis_strict_pixel"] = True
     pixel_axis_model = _native_build_pixel_axis_model(image, analysis)
     if pixel_axis_model is not None:
         analysis["_native_axis_pixel_model"] = pixel_axis_model
+        analysis["_native_axis_strict_pixel"] = True
         analysis["native_axis_pixel_calibration_passed"] = True
     else:
+        literal = _native_literal_axis_points(analysis)
         analysis["native_axis_pixel_calibration_passed"] = False
-        analysis["native_axis_projection_mode"] = "hidden_untrusted_axis"
+        if len(literal) >= 2:
+            analysis["_native_axis_strict_pixel"] = False
+            analysis["native_axis_projection_mode"] = "literal_piecewise_fallback"
+        else:
+            analysis["_native_axis_strict_pixel"] = True
+            analysis["native_axis_projection_mode"] = "hidden_untrusted_axis"
 
-    # Detect X anchors from the untouched screenshot before adding any SaleeM overlay.
+    # Market candle index mapping is optional in v3.67.  If exact screenshot to
+    # market alignment fails, the visual-reference geometry still places the
+    # verified model directly on real visible pivots without recreating candles.
     candle_centers = _native_detect_candle_centers(image)
     analysis.pop("_native_candle_x_map", None)
-    candle_x_map = _native_build_candle_x_map(image, analysis, candle_centers)
+    candle_x_map = _native_build_candle_x_map(image, analysis, candle_centers) if pixel_axis_model is not None else {}
     if candle_x_map:
         analysis["_native_candle_x_map"] = candle_x_map
     analysis.pop("animation_plan", None)
-    # v3.63 keeps the result visually close to the uploaded broker chart.
-    # Only the compact S/R/decision context and the single verified reference
-    # pattern are drawn here.  Generic OB/FVG/structure/trade overlays are kept
-    # out of the main image so they cannot obscure the user's candles.
-    draw = ImageDraw.Draw(image)
-    _native_draw_sr(draw, analysis, width, height, font)
-    _native_draw_reference_scenario(image, analysis, width, height, font, candle_centers)
-    # No generic fallback arrow: only a verified source pattern/scenario may
-    # add an expectation path; otherwise the broker chart remains untouched.
+
+    scenario_available = bool(analysis.get("reference_scenario_available"))
+    pattern_available = str(analysis.get("pattern_type") or "لا يوجد") != "لا يوجد"
+
+    # One scenario first.  Generic S/R is only a fallback so the educational
+    # picture never becomes a dashboard full of competing lines.
+    if scenario_available:
+        _native_draw_reference_scenario(image, analysis, width, height, font, candle_centers)
+        _native_draw_visual_reference_geometry(image, analysis, width, height, font)
+        # Entry/SL/TP are allowed only when the execution rule itself is active
+        # and the price axis can place them honestly on the broker screenshot.
+        if analysis.get("native_axis_projection_mode") != "hidden_untrusted_axis":
+            _native_draw_trade(image, analysis, width, height, font)
+    elif pattern_available:
+        used_visual = _native_draw_visual_reference_geometry(image, analysis, width, height, font)
+        if not used_visual:
+            _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
+    else:
+        draw = ImageDraw.Draw(image)
+        _native_draw_sr(draw, analysis, width, height, font)
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
     return out.getvalue()
-
 
 
 
@@ -6472,9 +6683,9 @@ def _render_reconstructed_market_chart(
 def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
     """Create a pattern-first image for Save/Share without polluting the chart.
 
-    The interactive chart is reconstructed from real market OHLC and keeps the
-    uploaded screenshot only as a visual reference.  The source/scenario rule
-    explanation remains directly below the chart, followed by compact cards.
+    The interactive chart keeps the exact uploaded pixels and composites only
+    the verified educational overlay.  The source/scenario rule explanation
+    remains directly below the chart, followed by compact cards.
     """
     try:
         with Image.open(io.BytesIO(chart_png)) as source:
@@ -6703,7 +6914,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v3.66", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v3.67", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
@@ -6711,12 +6922,10 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """Render SaleeM v3.66 from real market OHLC, guided by the upload style.
+    """SaleeM v3.67: preserve the original chart and add one clean overlay.
 
-    The uploaded chart is a visual reference only.  It is never pasted as the
-    final chart and never supplies historical candles.  Portrait and landscape
-    uploads therefore produce the same deterministic market structure while
-    keeping a familiar aspect/style.
+    Market data verifies structure and execution; it never replaces the user's
+    screenshot.  The final pixels are the original chart plus the verified
+    educational scenario/pattern layer.
     """
-    return _render_reconstructed_market_chart(analysis, chart_background_path)
-
+    return _render_uploaded_chart_with_overlays(analysis, chart_background_path)

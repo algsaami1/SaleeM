@@ -14,7 +14,7 @@ def test_health():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["version"] == "3.66.0"
+    assert payload["version"] == "3.67.0"
     assert "owner_email" not in payload
     assert "owner_email_configured" in payload
     assert "smtp_configured" in payload
@@ -22,7 +22,7 @@ def test_health():
     assert payload["targets"] == 3
     assert payload["market_data"] == "Twelve Data: M5/M15/H1/H4"
     assert payload["cache_policy"] == "M5=4m,M15=14m,H1=55m,H4=4h"
-    assert payload["decision_pipeline"] == "market-only-decision+image-axis-geometry+source-pattern-visual-match"
+    assert payload["decision_pipeline"] == "original-chart+market-confirmation+reference-scenario+educational-overlay"
     assert payload["analysis_cache_path"].endswith("saleem_analysis_snapshot_cache.json")
 
 

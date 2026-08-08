@@ -138,15 +138,15 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-reconstructed-market-chart-v3.66.0",
-        "ui": "saleem-reference-chart-ui-v3.66.0",
+        "renderer": "saleem-authentic-educational-overlay-v3.67.0",
+        "ui": "saleem-original-chart-overlay-ui-v3.67.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
         "cache_policy": "M5=4m,M15=14m,H1=55m,H4=4h",
         "cache_path": os.getenv("MARKET_DATA_CACHE_PATH", "/tmp/saleem_market_data_cache.json"),
         "analysis_cache_path": os.getenv("ANALYSIS_SNAPSHOT_CACHE_PATH", "/tmp/saleem_analysis_snapshot_cache.json"),
-        "decision_pipeline": "market-only-decision+image-axis-geometry+source-pattern-visual-match",
+        "decision_pipeline": "original-chart+market-confirmation+reference-scenario+educational-overlay",
         "feedback_store_path": os.getenv("SALEEM_FEEDBACK_STORE_PATH", "/tmp/saleem_feedback_store.json"),
         "system_status_path": os.getenv("SALEEM_SYSTEM_STATUS_PATH", "/tmp/saleem_system_status.json"),
         "system_status_access": "direct-no-pin",
@@ -282,9 +282,8 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                     status_code=400,
                     detail="أبعاد الصورة كبيرة جدًا. استخدم صورة لا تتجاوز 40 مليون بكسل.",
                 )
-            # v3.66 accepts portrait, square and landscape chart references.
-            # The screenshot is no longer the OHLC source; it only guides the
-            # reconstructed chart's aspect/theme/current-price reference.
+            # v3.67 accepts portrait, square and landscape charts. The uploaded
+            # pixels remain the final background for the educational overlay.
             if min(width, height) < 280:
                 raise HTTPException(
                     status_code=400,

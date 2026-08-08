@@ -41,4 +41,5 @@ def test_renderer_no_longer_builds_animation_plan_and_keeps_pattern_arrow_rule()
     assert "def _native_draw_expected_scenario_path" not in renderer
     assert "Mandatory model expectation arrow" in renderer
     assert "_native_draw_pattern_overlays(image, analysis" in renderer
-    assert "_native_draw_trade(image, analysis" not in renderer[renderer.index("def _render_uploaded_chart_with_overlays"):renderer.index("def render_share_snapshot")]
+    assert "_native_draw_trade(image, analysis" in renderer[renderer.index("def _render_uploaded_chart_with_overlays"):renderer.index("def render_share_snapshot")]
+    assert "native_axis_projection_mode" in renderer

@@ -50,9 +50,9 @@ def test_chart_overlay_list_is_m5_only_and_never_exceeds_two():
     assert all(item["timeframe"] == "M5" for item in review["overlay_patterns"])
 
 
-def test_reconstructed_renderer_no_longer_depends_on_uploaded_candle_x_detection(tmp_path: Path):
-    # v3.66 rebuilds the chart from market OHLC, so a blank screenshot may be
-    # accepted as a visual reference without becoming the final pixel canvas.
+def test_original_renderer_keeps_blank_upload_when_geometry_cannot_be_anchored(tmp_path: Path):
+    # v3.67 keeps the exact upload. A blank screenshot cannot support truthful
+    # candle anchors, so the renderer must not invent/rebuild a pattern.
     blank = Image.new("RGB", (800, 1200), "white")
     source = tmp_path / "blank.png"
     blank.save(source)
@@ -76,5 +76,5 @@ def test_reconstructed_renderer_no_longer_depends_on_uploaded_candle_x_detection
     out = tmp_path / "out.png"
     out.write_bytes(rendered)
     with Image.open(out) as result:
-        assert result.height > result.width
-        assert result.convert("RGB").tobytes() != blank.resize(result.size).tobytes()
+        assert result.size == blank.size
+        assert result.convert("RGB").tobytes() == blank.tobytes()

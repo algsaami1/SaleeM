@@ -30,8 +30,8 @@ def test_portrait_upload_is_visual_reference_and_not_landscape_gated(tmp_path):
     Image.new('RGB',(700,1200),'white').save(src)
     _path, meta=_prepare_analysis_image(src)
     assert meta['reference_orientation']=='portrait'
-    assert meta['source_chart_preserved'] is False
-    assert meta['reconstructed_market_chart'] is True
+    assert meta['source_chart_preserved'] is True
+    assert meta['reconstructed_market_chart'] is False
     main=(ROOT/'app'/'main.py').read_text(encoding='utf-8')
     assert 'يجب التقاط صورة الشارت بشكل أفقي' not in main
 
@@ -71,7 +71,7 @@ def test_market_ohlc_is_not_shifted_to_screenshot_price():
     assert result['price_projection_mode']=='market_ohlc_preserved_no_screenshot_translation'
 
 
-def test_render_result_reconstructs_portrait_market_chart_not_uploaded_pixels(tmp_path):
+def test_render_result_preserves_portrait_uploaded_pixels_when_no_overlay(tmp_path):
     source=tmp_path/'source.png'
     Image.new('RGB',(700,1200),(10,10,10)).save(source)
     analysis={
@@ -91,5 +91,6 @@ def test_render_result_reconstructs_portrait_market_chart_not_uploaded_pixels(tm
     png=render_result(analysis, chart_background_path=source)
     with Image.open(BytesIO(png)) as out:
         assert out.height > out.width
-        # It cannot be the literal uploaded all-dark screenshot.
-        assert out.convert('RGB').getpixel((out.width//2,out.height//2)) != (10,10,10)
+        assert out.size == (700, 1200)
+        # With no verified scenario/pattern and no usable S/R, the original pixels remain intact.
+        assert out.convert('RGB').getpixel((out.width//2,out.height//2)) == (10,10,10)

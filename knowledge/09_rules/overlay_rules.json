@@ -1,10 +1,30 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "market": "XAUUSD",
   "entry_timeframe": "M5",
   "usage": "read_only_reference",
   "category": "overlay_rules",
   "drawing_rules": [
+    {
+      "element": "authentic_educational_overlay_v367",
+      "base_layer": "exact uploaded chart pixels; no candle reconstruction",
+      "analysis_source": "market H4/H1/M15/M5 verifies structure and execution only",
+      "selection": "one closest verified reference scenario/pattern",
+      "visual_geometry_gate": "visual_geometry_score >= 68 AND deterministic family/scenario verification",
+      "priority": [
+        "pattern geometry",
+        "entry/activation",
+        "invalidation/stop",
+        "expected arrow",
+        "target",
+        "BOS/CHOCH/MSS/IDM",
+        "OB/FVG/liquidity",
+        "supporting labels"
+      ],
+      "candidate_style": "dashed model + dashed expected path",
+      "confirmed_style": "solid model + solid expected path",
+      "price_linked_rule": "Entry/Stop/TP only when the uploaded price axis is calibrated; otherwise hide them"
+    },
     {
       "element": "source_pattern_match",
       "selection": "compare each uploaded M5 chart with the approved source-model atlas, then verify the family with deterministic closed-candle M5 geometry",
@@ -97,10 +117,14 @@
     "وقف الخسارة من بنية الشارت وليس مسافة ثابتة",
     "تظهر الصورة الناتجة كأن محللًا رسم على لقطة المستخدم نفسها",
     "سهم النموذج المرجعي التوضيحي يجوز أن يظهر متقطعًا في المراقبة، لكنه لا يمثل صفقة تنفيذية ولا ينشئ Entry/Stop/TP",
-    "لا ترسم أكثر من نموذج مرجعي واحد؛ النموذج المختار يجب أن يكون مثبتًا على هندسة M5 حقيقية"
+    "لا ترسم أكثر من نموذج مرجعي واحد؛ النموذج المختار يجب أن يكون مثبتًا على هندسة M5 حقيقية",
+    "ممنوع إعادة رسم شموع الصورة أو استبدالها بشارت مولد؛ الصورة المرفوعة هي الخلفية النهائية",
+    "المطابقة البصرية تحدد موضع الرسم فقط بعد تحقق العائلة أو السيناريو حتميًا من بيانات السوق",
+    "إذا تعذر تثبيت محور السعر تُخفى Entry/Stop/TP بدل تخمين مواضعها",
+    "النتيجة الأساسية سيناريو واحد واضح مثل الصور التعليمية المرجعية، لا لوحة مزدحمة بكل الاكتشافات"
   ],
   "outputs": {
-    "interactive_chart": "الصورة الأصلية مع Overlay ثابت وخفيف قابل للسحب/التكبير داخل التطبيق؛ لا GIF ولا زر تشغيل",
+    "interactive_chart": "الشارت الأصلي نفسه مع Educational Overlay ثابت وخفيف؛ لا إعادة بناء للشموع ولا GIF ولا زر تشغيل",
     "share_snapshot": "صورة مستقلة للحفظ والمشاركة: الشارت مع النموذج الأقرب وسهمه، ثم لوحة القاعدة الأساسية أسفل الشارت مباشرة، ثم بطاقات الإجراء"
   }
 }

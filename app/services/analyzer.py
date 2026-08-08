@@ -895,14 +895,13 @@ def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
 def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
     """Extract only visual-reference metadata from the uploaded chart image.
 
-    v3.66 does not reuse the screenshot as the final chart and does not try to
-    recover historical OHLC from pixels.  The upload supplies current-price
-    context when readable plus presentation hints such as aspect ratio and
-    light/dark background.  Market candles remain the only OHLC source.
+    v3.67 preserves the screenshot as the final visual chart.  This helper reads
+    only presentation metadata; market OHLC remains confirmation data and never
+    replaces or redraws the uploaded candles.
     """
     meta: dict[str, Any] = {
-        "source_chart_preserved": False,
-        "image_input_role": "visual_reference_only",
+        "source_chart_preserved": True,
+        "image_input_role": "final_visual_background",
         "reference_orientation": "unknown",
         "reference_aspect_ratio": 1.0,
         "reference_theme": "light",
@@ -946,13 +945,21 @@ def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
 
 
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
-    """Treat the upload as a visual reference, with portrait fully supported."""
+    """Preserve the user's chart pixels as the final visual background.
+
+    v3.67 accepts portrait, square and landscape uploads.  The screenshot is
+    never rebuilt into synthetic candles.  Market OHLC is confirmation data;
+    all final educational drawings are composited over these exact pixels.
+    """
     meta = _chart_visual_reference_meta(image_path)
     meta.update({
         "used_smart_crop": False,
         "chart_viewport_prepared": False,
-        "smart_crop_mode": "visual_reference_only",
-        "reconstructed_market_chart": True,
+        "source_chart_preserved": True,
+        "smart_crop_mode": "original_pixels_no_crop",
+        "reconstructed_market_chart": False,
+        "original_chart_immutable": True,
+        "educational_overlay_mode": True,
     })
     return image_path, meta
 
@@ -1078,6 +1085,26 @@ GEOMETRY_SCHEMA = {
     ],
 }
 
+VISUAL_STRUCTURE_LINE = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "label": {"type": "string", "enum": ["BOS", "CHOCH", "MSS", "IDM", "NECKLINE"]},
+        "line": LINE,
+    },
+    "required": ["label", "line"],
+}
+
+VISUAL_ZONE = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "kind": {"type": "string", "enum": ["order_block", "fvg", "liquidity_area"]},
+        "rect": LINE,
+    },
+    "required": ["kind", "rect"],
+}
+
 REFERENCE_PATTERN_MATCH_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -1108,6 +1135,13 @@ REFERENCE_PATTERN_MATCH_SCHEMA = {
         "scenario_reference_id": {"type": "string"},
         "scenario_score": {"type": "integer", "minimum": 0, "maximum": 100},
         "scenario_evidence": {"type": "string"},
+        "chart_plot_bounds": LINE,
+        "visual_geometry_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "visual_pattern_path": {"type": "array", "items": POINT, "maxItems": 12},
+        "visual_pattern_lines": {"type": "array", "items": LINE, "maxItems": 6},
+        "visual_structure_lines": {"type": "array", "items": VISUAL_STRUCTURE_LINE, "maxItems": 6},
+        "visual_zones": {"type": "array", "items": VISUAL_ZONE, "maxItems": 4},
+        "visual_expected_path": {"type": "array", "items": POINT, "maxItems": 5},
     },
     "required": [
         "matched",
@@ -1119,6 +1153,13 @@ REFERENCE_PATTERN_MATCH_SCHEMA = {
         "scenario_reference_id",
         "scenario_score",
         "scenario_evidence",
+        "chart_plot_bounds",
+        "visual_geometry_score",
+        "visual_pattern_path",
+        "visual_pattern_lines",
+        "visual_structure_lines",
+        "visual_zones",
+        "visual_expected_path",
     ],
 }
 
@@ -1170,7 +1211,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 8
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 9
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1641,6 +1682,13 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             "scenario_reference_id": "",
             "scenario_score": 0,
             "scenario_evidence": "",
+            "chart_plot_bounds": [0.0, 0.0, 1.0, 1.0],
+            "visual_geometry_score": 0,
+            "visual_pattern_path": [],
+            "visual_pattern_lines": [],
+            "visual_structure_lines": [],
+            "visual_zones": [],
+            "visual_expected_path": [],
         }
 
     prompt = """أنت مرحلة مطابقة صور مرجعية فقط في SaleeM.
@@ -1659,8 +1707,17 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
 7) بالإضافة إلى عائلة النموذج، راجع أمثلة السيناريو التي تحمل result_01 إلى result_09 واختر السيناريو الأقرب بصريًا فقط في scenario_reference_id. إذا لم توجد مطابقة واضحة أعد سلسلة فارغة.
 8) scenario_score من 0 إلى 100 ويحتاج 55 على الأقل ليُستخدم كعامل ترجيح، لكنه لا يستطيع أبدًا تجاوز فشل التحقق الهندسي على شموع M5.
 9) evidence وscenario_evidence جملتان عربيتان قصيرتان تصفان عناصر الشكل التي طابقتها، بلا أسعار.
+10) لأن نتيجة SaleeM ستُرسم فوق الشارت الأصلي نفسه، استخرج هندسة بصرية فقط من البكسلات الظاهرة، ولا تخمّن عناصر غير واضحة:
+   - chart_plot_bounds = [x1,y1,x2,y2] كنسب من الصورة الكاملة لحدود منطقة الشارت الفعلية.
+   - visual_pattern_path = نقاط القمم/القيعان الحقيقية الظاهرة التي تكوّن النموذج الأقرب، مرتبة زمنيًا.
+   - visual_pattern_lines = حدود النموذج/العنق/خطوط الاتجاه الظاهرة التي يمكن تثبيتها على قمم أو قيعان.
+   - visual_structure_lines = BOS/CHOCH/MSS/IDM/NECKLINE فقط عندما يمكن تثبيت الخط بين مستوى ورد فعل واضحين.
+   - visual_zones = Order Block/FVG/Liquidity Area فقط عندما يمكن ربط المستطيل مباشرة بمنطقة شموع ظاهرة.
+   - visual_expected_path يبدأ من آخر نقطة فعلية في النموذج ويتجه في جهة السيناريو المرجعي؛ هو مسار توقع وليس مستوى سعر. إذا لم توجد هندسة كافية أعد القوائم فارغة.
+11) visual_geometry_score يقيس ثقتك بأن النقاط والخطوط تقع فعلًا فوق قمم/قيعان/مناطق مرئية. أقل من 68 يعني أن SaleeM لن يستخدم هذه الهندسة بصريًا.
+12) جميع الإحداثيات نسب 0..1 من الصورة الكاملة، ويجب أن تبقى داخل chart_plot_bounds.
 
-هذه المطابقة لا ترسم شيئًا بنفسها؛ سيقبلها المحرك لاحقًا فقط إذا أكدتها هندسة الشموع المغلقة."""
+هذه المطابقة لا تقرر صفقة ولا أسعارًا؛ المحرك الحتمي يجب أن يؤكد العائلة/السيناريو قبل أن يسمح بعرض هذه الهندسة فوق الشارت الأصلي."""
     try:
         result = _request_structured_openai(
             prompt=prompt,
@@ -1668,7 +1725,7 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             schema_name="saleem_reference_pattern_match",
             image_path=path,
             image_paths=[p for p in (REFERENCE_MODEL_ATLAS_PATH, REFERENCE_SCENARIO_ATLAS_PATH) if p.exists()],
-            max_output_tokens=1200,
+            max_output_tokens=2200,
         )
     except RuntimeError as exc:
         logging.warning("Reference pattern image match failed: %s", exc)
@@ -1682,6 +1739,13 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             "scenario_reference_id": "",
             "scenario_score": 0,
             "scenario_evidence": "",
+            "chart_plot_bounds": [0.0, 0.0, 1.0, 1.0],
+            "visual_geometry_score": 0,
+            "visual_pattern_path": [],
+            "visual_pattern_lines": [],
+            "visual_structure_lines": [],
+            "visual_zones": [],
+            "visual_expected_path": [],
         }
 
     score = max(0, min(100, int(result.get("visual_score") or 0)))
@@ -1703,6 +1767,13 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
         "scenario_reference_id": str(result.get("scenario_reference_id") or "").strip(),
         "scenario_score": max(0, min(100, int(result.get("scenario_score") or 0))),
         "scenario_evidence": str(result.get("scenario_evidence") or "").strip()[:220],
+        "chart_plot_bounds": list(result.get("chart_plot_bounds") or [0.0, 0.0, 1.0, 1.0])[:4],
+        "visual_geometry_score": max(0, min(100, int(result.get("visual_geometry_score") or 0))),
+        "visual_pattern_path": list(result.get("visual_pattern_path") or [])[:12],
+        "visual_pattern_lines": list(result.get("visual_pattern_lines") or [])[:6],
+        "visual_structure_lines": list(result.get("visual_structure_lines") or [])[:6],
+        "visual_zones": list(result.get("visual_zones") or [])[:4],
+        "visual_expected_path": list(result.get("visual_expected_path") or [])[:5],
     }
 
 
@@ -1798,6 +1869,21 @@ def _merge_reference_pattern_review(
             }
         )
     scenario_review = review_reference_scenarios(frames or {}, merged, visual_match)
+    selected_family = _pattern_reference_family((selected or {}).get("name")) if selected is not None else "none"
+    scenario_visual_ok = (
+        bool(scenario_review.get("available"))
+        and str(scenario_review.get("source_reference_id") or "") == str(visual_match.get("scenario_reference_id") or "")
+        and int(visual_match.get("scenario_score") or 0) >= 55
+    )
+    pattern_visual_ok = bool(matched and selected_family == visual_family)
+    visual_geometry_allowed = bool(pattern_visual_ok or scenario_visual_ok)
+    merged["visual_chart_plot_bounds"] = list(visual_match.get("chart_plot_bounds") or [0.0, 0.0, 1.0, 1.0])[:4]
+    merged["visual_geometry_score"] = int(visual_match.get("visual_geometry_score") or 0) if visual_geometry_allowed else 0
+    merged["visual_pattern_path"] = list(visual_match.get("visual_pattern_path") or [])[:12] if visual_geometry_allowed else []
+    merged["visual_pattern_lines"] = list(visual_match.get("visual_pattern_lines") or [])[:6] if visual_geometry_allowed else []
+    merged["visual_structure_lines"] = list(visual_match.get("visual_structure_lines") or [])[:6] if visual_geometry_allowed else []
+    merged["visual_zones"] = list(visual_match.get("visual_zones") or [])[:4] if visual_geometry_allowed else []
+    merged["visual_expected_path"] = list(visual_match.get("visual_expected_path") or [])[:5] if visual_geometry_allowed else []
     merged["reference_scenario"] = scenario_review
     merged["reference_scenario_available"] = bool(scenario_review.get("available"))
     merged["reference_scenario_id"] = str(scenario_review.get("scenario_id") or "none")
@@ -1951,7 +2037,7 @@ def _bind_market_analysis_to_image(
 ) -> dict[str, Any]:
     """Attach screenshot reference metadata without shifting real market OHLC.
 
-    v3.66 changes the old projection model.  Historical candles, levels,
+    v3.67 keeps market decisions numerically independent from screenshot pixels.  Historical candles, levels,
     pattern anchors and trade geometry stay at the prices returned by the
     market provider.  A readable screenshot price is preserved separately as
     ``visual_current_price`` and may be displayed when it remains reasonably
@@ -3753,6 +3839,13 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
     data["pattern_reference_visual_score"] = int(review.get("reference_visual_score") or 0)
     data["pattern_reference_visual_evidence"] = str(review.get("reference_visual_evidence") or "")[:220]
     data["pattern_reference_match_status"] = str(review.get("reference_match_status") or "")
+    data["visual_chart_plot_bounds"] = list(review.get("visual_chart_plot_bounds") or [0.0, 0.0, 1.0, 1.0])[:4]
+    data["visual_geometry_score"] = int(review.get("visual_geometry_score") or 0)
+    data["visual_pattern_path"] = list(review.get("visual_pattern_path") or [])[:12]
+    data["visual_pattern_lines"] = list(review.get("visual_pattern_lines") or [])[:6]
+    data["visual_structure_lines"] = list(review.get("visual_structure_lines") or [])[:6]
+    data["visual_zones"] = list(review.get("visual_zones") or [])[:4]
+    data["visual_expected_path"] = list(review.get("visual_expected_path") or [])[:5]
 
     scenario = review.get("reference_scenario") if isinstance(review.get("reference_scenario"), dict) else {}
     data["reference_scenario_available"] = bool(scenario.get("available"))
@@ -4620,18 +4713,21 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
 
-    # Axis OCR/vision is now a presentation hint only.  Portrait screenshots,
-    # cropped screenshots and incomplete axes remain valid because OHLC comes
-    # from the market provider rather than screenshot pixels.
+    # v3.67 keeps the upload as the literal final chart.  Axis calibration is
+    # used only to place price-linked overlays; failure never causes candle
+    # reconstruction.  Visual pattern anchors may still draw an educational
+    # pattern when the deterministic scenario/pattern family has been verified.
     axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
     analysis["axis_validation_passed"] = bool(axis_ok)
     analysis["axis_warning"] = "" if axis_ok else (
-        "محور الصورة غير مكتمل؛ تم الاعتماد على شموع السوق الحقيقية مع استخدام الصورة كمرجع بصري فقط."
+        "تعذر تثبيت محور السعر كاملًا؛ سيبقى الشارت الأصلي كما هو وتُخفى فقط العناصر السعرية غير الموثوقة."
     )
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
-    analysis["reconstructed_market_chart"] = True
-    analysis["uploaded_chart_role"] = "visual_reference_only"
-    analysis["ohlc_source"] = "market_provider"
+    analysis["reconstructed_market_chart"] = False
+    analysis["uploaded_chart_role"] = "final_visual_background"
+    analysis["ohlc_source"] = "market_provider_confirmation_only"
+    analysis["educational_overlay_mode"] = True
+    analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
@@ -4642,7 +4738,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     # A failed trade-entry rule does not erase a verified educational reference
     # scenario.  It only prevents Entry/SL/TP execution graphics.  The closest
     # verified pattern/scenario and its candidate expectation arrow may still be
-    # drawn as an explanatory overlay on the reconstructed market chart.
+    # drawn as an explanatory overlay on the original uploaded chart.
     if not bool((analysis.get("rule_check") or {}).get("all_pass")):
         analysis["draw_mode"] = "watch"
         analysis["trade_side"] = "مراقبة"
@@ -4652,8 +4748,8 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
-    # v3.66: result image is rebuilt from real market OHLC.  The uploaded image
-    # contributes visual orientation/theme/current-price reference only.
+    # v3.67: the exact uploaded chart pixels are the final background.  Market
+    # OHLC confirms structure; only the verified educational overlay is added.
     png = render_result(analysis, chart_background_path=image_path)
     share_png = render_share_snapshot(analysis, png)
     return {
@@ -4661,7 +4757,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         **visual_meta,
         "symbol": "XAUUSD",
         "timeframe": "M5",
-        "window": f"{len(analysis.get('candles') or [])} شمعة M5 حقيقية من السوق",
+        "window": "الشارت الأصلي + تحقق بنيوي من M5/M15/H1/H4",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
         "share_result_url": "data:image/png;base64," + base64.b64encode(share_png).decode(),
     }
