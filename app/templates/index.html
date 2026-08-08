@@ -32,18 +32,22 @@
       </div>
 
       <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
-        <label class="drop-zone" id="drop-zone" for="image-input">
+        <label class="drop-zone upload-chart-box" id="drop-zone" for="image-input" aria-label="مربع الشارت المرفوع">
           <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-          <span class="upload-cloud" aria-hidden="true">
-            <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
+          <img id="upload-chart-preview" class="upload-chart-preview" alt="معاينة الشارت المرفوع داخل مربع الشارت" hidden>
+          <span class="upload-chart-placeholder" id="upload-chart-placeholder">
+            <span class="upload-cloud" aria-hidden="true">
+              <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
+            </span>
+            <strong>ضع الشارت هنا</strong>
+            <small>الصورة تبقى محصورة داخل مربع الشارت ثم تستبدل بنتيجة التحليل</small>
+            <span class="primary-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+              اختيار صورة الشارت
+            </span>
+            <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
           </span>
-          <strong>اختيار صورة الشارت</strong>
-          <small>PNG أو JPG أو WEBP — الحد الأقصى 12 MB</small>
-          <span class="primary-button">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
-            فتح الصور
-          </span>
-          <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
+          <span class="upload-chart-change" id="upload-chart-change" hidden>تغيير الشارت</span>
         </label>
 
         <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
@@ -144,12 +148,6 @@
     {% set peak = result.most_probable_peak or {} %}
     {% set trough = result.most_probable_trough or {} %}
 
-    <div class="result-page-heading" aria-label="عنوان نتيجة التحليل">
-      <span class="result-page-kicker">نتيجة التحليل</span>
-      <strong>XAUUSD · M5</strong>
-      <small>النموذج الأقرب + مناطق القرار + المسار المتوقع</small>
-    </div>
-
     <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM">
       <header class="terminal-header">
         <a class="terminal-brand" href="/" aria-label="SaleeM"><b>SaleeM</b><small>XAUUSD / M5</small></a>
@@ -168,22 +166,19 @@
 
       <div class="terminal-strength"><span>تطابق القاعدة</span><div class="strength-track"><i style="width:{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}%"></i></div><b>{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}٪</b></div>
 
-      <section class="terminal-chart-card" aria-label="الشارت المتحرك والقابل للتكبير">
+      <section class="terminal-chart-card" aria-label="الشارت التحليلي الثابت والقابل للتكبير">
         <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
           <button type="button" id="chart-zoom-out" aria-label="تصغير الشارت">−</button>
           <output id="chart-zoom-value" aria-live="polite">100%</output>
           <button type="button" id="chart-zoom-in" aria-label="تكبير الشارت">＋</button>
           <button type="button" id="chart-zoom-reset" class="chart-zoom-reset" aria-label="إعادة الشارت للحجم الأصلي">1:1</button>
-          {% if result.animation_plan and result.animation_plan.enabled %}<button type="button" id="chart-animation-replay" class="chart-animation-replay" aria-label="إعادة تشغيل حركة السيناريو">▶</button>{% endif %}
         </div>
         <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
           <div class="chart-pan-canvas" id="chart-pan-canvas">
             <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
             <img id="share-result-image" src="{{ result.share_result_url or result.result_url }}" alt="" hidden aria-hidden="true">
-            {% if result.animation_plan and result.animation_plan.enabled %}<svg id="saleem-animation-overlay" class="saleem-animation-overlay" aria-hidden="true"></svg>{% endif %}
           </div>
         </div>
-        {% if result.animation_plan and result.animation_plan.enabled %}<script type="application/json" id="saleem-animation-plan">{{ result.animation_plan|tojson }}</script>{% endif %}
         <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
       </section>
 
@@ -473,11 +468,6 @@
 
     <p class="experimental-note">نسخة تجريبية قيد التطوير — النتائج لأغراض تعليمية.</p>
     {% endif %}
-    <nav class="saleem-bottom-nav" aria-label="التنقل السريع">
-      <a class="nav-home" href="/" aria-label="الصفحة الرئيسية"><i aria-hidden="true">⌂</i><span>الرئيسية</span></a>
-      {% if result %}<a class="nav-analysis active" href="#result-image" aria-label="نتيجة التحليل"><i aria-hidden="true">⌁</i><span>النتيجة</span></a>{% else %}<a class="nav-analysis active" href="#analysis-form" aria-label="بدء التحليل"><i aria-hidden="true">＋</i><span>التحليل</span></a>{% endif %}
-      {% if result %}<a href="#analysis-notes-card" aria-label="تفاصيل التحليل"><i aria-hidden="true">☷</i><span>التفاصيل</span></a>{% else %}<a href="#capture-help-button" aria-label="مساعدة التصوير"><i aria-hidden="true">?</i><span>المساعدة</span></a>{% endif %}
-    </nav>
   </main>
 
   <button class="system-status-launcher" id="system-status-launcher" type="button" aria-haspopup="dialog" aria-controls="system-status-modal">

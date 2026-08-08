@@ -5412,9 +5412,9 @@ def _native_draw_pattern_overlays(
                     fill = (33, 166, 102, 42) if bias == "صاعد" else (210, 63, 70, 42)
                     outline = (33, 166, 102, 120) if bias == "صاعد" else (210, 63, 70, 120)
                     draw.rectangle((zone_left, top_y, zone_right, bottom_y), fill=fill, outline=outline, width=1)
-                    draw.text((zone_right - 4, (top_y + bottom_y) // 2), "ENTRY ZONE", font=font, fill=outline, anchor="rm")
+                    _draw_rtl(draw, (zone_right - 4, (top_y + bottom_y) // 2), "منطقة التفعيل", font, outline, anchor="rm")
                 _dash_line(draw, (zone_left, trigger_y), (zone_right, trigger_y), (33, 147, 83, 190) if bias == "صاعد" else (212, 62, 70, 190), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
-                draw.text((zone_right - 4, max(12, trigger_y - 6)), "NECKLINE / ACTIVATION", font=font, fill=(33, 147, 83, 200) if bias == "صاعد" else (212, 62, 70, 200), anchor="rs")
+                _draw_rtl(draw, (zone_right - 4, max(12, trigger_y - 6)), "عنق / تفعيل", font, (33, 147, 83, 200) if bias == "صاعد" else (212, 62, 70, 200), anchor="rs")
         # The model's invalidation belongs to the explanation, so the primary
         # selected pattern may show it even while the trade state is watch.
         if rank == 0 and stop is not None:
@@ -5423,7 +5423,7 @@ def _native_draw_pattern_overlays(
                 line_left = max(int(width * 0.66), candle_centers[-1] - spacing * 2)
                 line_right = min(width - 8, future_x)
                 _dash_line(draw, (line_left, stop_y), (line_right, stop_y), (212, 62, 70, 160), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
-                draw.text(((line_left + line_right) // 2, stop_y - 6), "INVALIDATION", font=font, fill=(212, 62, 70, 190), anchor="ms")
+                _draw_rtl(draw, ((line_left + line_right) // 2, stop_y - 6), "إلغاء النموذج", font, (212, 62, 70, 190), anchor="ms")
 
         # Mandatory model expectation arrow.  Confirmed patterns use a solid
         # path from the real breakout.  Candidate patterns use a dashed path
@@ -5755,198 +5755,10 @@ def _native_draw_structure(
 
 
 
-def _native_build_expected_scenario_animation_plan(
-    image: Image.Image,
-    analysis: dict[str, Any],
-    candle_centers: list[int],
-) -> dict[str, Any]:
-    """Build one strict, price-linked break -> retest -> continuation path.
-
-    v3.51 Animation Spec v1 deliberately fails closed.  X comes only from the
-    calibrated screenshot candle map and Y comes only from the strict pixel
-    price model.  The path explains the nearest scenario; it is not stretched
-    to a distant TP merely to make the arrow longer.
-    """
-    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
-    code = str(action.get("code") or "")
-    side = str(action.get("primary_side") or "wait")
-    if code not in {"buy", "sell", "watch_buy", "watch_sell"} or side not in {"buy", "sell"}:
-        return {"enabled": False, "reason": "no_directional_scenario"}
-
-    current = _number(analysis.get("current_price"))
-    trigger = _number(action.get("trigger"))
-    target = _number(action.get("target"))
-    cancel = _number(action.get("cancel"))
-    if current is None or trigger is None:
-        return {"enabled": False, "reason": "missing_price_anchor"}
-
-    x_map = analysis.get("_native_candle_x_map")
-    if not isinstance(x_map, dict) or not x_map:
-        return {"enabled": False, "reason": "untrusted_x"}
-    if not isinstance(analysis.get("_native_axis_pixel_model"), dict):
-        return {"enabled": False, "reason": "untrusted_y"}
-
-    visible_x = sorted(int(v) for v in x_map.values() if isinstance(v, (int, float)))
-    if not visible_x:
-        return {"enabled": False, "reason": "missing_candle_x"}
-    start_x = visible_x[-1]
-    gaps = [b - a for a, b in zip(visible_x[:-1], visible_x[1:]) if 3 <= b - a <= image.width * 0.12]
-    spacing = max(8, int(median(gaps))) if gaps else max(9, int(image.width * 0.018))
-    future_limit = min(image.width - 10, int(image.width * 0.835))
-    available = future_limit - start_x
-    if available < max(30, spacing * 2):
-        return {"enabled": False, "reason": "no_future_space"}
-
-    candles = _valid_renderer_candles(analysis)
-    ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-24:]]
-    atr = max(0.05, float(median(ranges))) if ranges else max(0.10, abs(float(trigger) - float(current)))
-    sign = 1.0 if side == "buy" else -1.0
-
-    target_distance = None
-    if target is not None:
-        td = (float(target) - float(trigger)) * sign
-        if td > 0:
-            target_distance = td
-
-    # The first future leg actually clears the trigger, then returns close to it.
-    break_extension = max(0.05, min(atr * 0.24, (target_distance * 0.18) if target_distance else atr * 0.24))
-    break_price = float(trigger) + sign * break_extension
-    retest_price = float(trigger) + sign * max(0.01, atr * 0.035)
-
-    continuation_distance = max(atr * 0.62, abs(float(trigger) - float(current)) * 0.70)
-    continuation_distance = min(atr * 1.30, continuation_distance)
-    if target_distance is not None:
-        continuation_distance = min(continuation_distance, target_distance)
-    continuation_distance = max(0.08, continuation_distance)
-    continuation_price = float(trigger) + sign * continuation_distance
-
-    price_points = [float(current), break_price, retest_price, continuation_price]
-    y_points = [_native_y(analysis, value, image.height) for value in price_points]
-    trigger_y = _native_y(analysis, float(trigger), image.height)
-    if any(value is None for value in y_points) or trigger_y is None:
-        return {"enabled": False, "reason": "path_outside_axis"}
-
-    # Use the future room proportionally so the arrow remains short and explanatory.
-    fractions = (0.0, 0.40, 0.65, 1.0)
-    xs = [int(round(start_x + available * fraction)) for fraction in fractions]
-    if len(set(xs)) < 4 or xs[-1] <= xs[0] + 18:
-        return {"enabled": False, "reason": "insufficient_path_width"}
-
-    zone_half = max(0.03, atr * 0.055)
-    zone_hi = float(trigger) + zone_half
-    zone_lo = float(trigger) - zone_half
-    zy1 = _native_y(analysis, zone_hi, image.height)
-    zy2 = _native_y(analysis, zone_lo, image.height)
-    zone = None
-    if zy1 is not None and zy2 is not None:
-        zone = {
-            "x": xs[1] - max(8, spacing // 2),
-            "y": min(zy1, zy2),
-            "width": max(18, xs[2] - xs[1] + spacing),
-            "height": max(3, abs(zy2 - zy1)),
-        }
-
-    cancel_y = _native_y(analysis, float(cancel), image.height) if cancel is not None else None
-
-    # Animate only the main W/M skeleton in v1.  Every point must be a proven X/Y anchor.
-    pattern_points: list[list[int]] = []
-    pattern_name = ""
-    overlays = analysis.get("pattern_overlays") if isinstance(analysis.get("pattern_overlays"), list) else []
-    for overlay in overlays[:1]:
-        if not isinstance(overlay, dict) or str(overlay.get("timeframe") or "") != "M5":
-            continue
-        name = str(overlay.get("name") or "")
-        if name not in {"W", "M"}:
-            continue
-        geometry = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
-        candidate: list[list[int]] = []
-        for point in geometry.get("path") or []:
-            if not (isinstance(point, list) and len(point) >= 2):
-                continue
-            try:
-                px = _native_index_x(analysis, geometry, int(point[0]), candle_centers)
-                py = _native_y(analysis, float(point[1]), image.height)
-            except (TypeError, ValueError):
-                px = py = None
-            if px is None or py is None:
-                candidate = []
-                break
-            candidate.append([int(px), int(py)])
-        if len(candidate) >= 3:
-            pattern_points = candidate
-            pattern_name = name
-        break
-
-    state = "confirmed" if code in {"buy", "sell"} else "watch"
-    direction = "up" if side == "buy" else "down"
-    plan = {
-        "enabled": True,
-        "spec": "SaleeM Animation Spec v1",
-        "state": state,
-        "code": code,
-        "direction": direction,
-        "side": side,
-        "width": int(image.width),
-        "height": int(image.height),
-        "duration_ms": 3600,
-        "points": [[int(x), int(y)] for x, y in zip(xs, y_points)],
-        "activation": {"price": round(float(trigger), 2), "y": int(trigger_y), "x1": xs[0], "x2": xs[2]},
-        "retest": {"price": round(float(retest_price), 2), "x": xs[2], "y": int(y_points[2])},
-        "continuation": {"price": round(float(continuation_price), 2), "x": xs[3], "y": int(y_points[3])},
-        "entry_zone": zone,
-        "invalidation": ({"price": round(float(cancel), 2), "y": int(cancel_y), "x1": xs[0], "x2": xs[3]} if cancel is not None and cancel_y is not None else None),
-        "pattern": ({"name": pattern_name, "points": pattern_points} if pattern_points else None),
-    }
-    analysis["expected_scenario_path"] = {
-        "direction": direction,
-        "state": state,
-        "break_price": round(float(trigger), 2),
-        "retest_price": round(float(retest_price), 2),
-        "continuation_price": round(float(continuation_price), 2),
-        "confidence": int(action.get("strength") or 0),
-        "source": "nearest_action_scenario",
-    }
-    return plan
-
-
-def _native_draw_expected_scenario_path(
-    image: Image.Image,
-    analysis: dict[str, Any],
-    width: int,
-    height: int,
-    font,
-) -> None:
-    """Draw the final still frame used by save/share; the browser animates the same geometry."""
-    plan = analysis.get("animation_plan") if isinstance(analysis.get("animation_plan"), dict) else {}
-    if not plan.get("enabled"):
-        return
-    points_raw = plan.get("points") or []
-    points: list[tuple[int, int]] = []
-    for item in points_raw:
-        if isinstance(item, list) and len(item) >= 2:
-            points.append((int(item[0]), int(item[1])))
-    if len(points) < 4:
-        return
-    watch = str(plan.get("state") or "") == "watch"
-    up = str(plan.get("direction") or "") == "up"
-    color = (24, 155, 92, 165 if watch else 210) if up else (211, 55, 62, 165 if watch else 210)
-    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw = ImageDraw.Draw(layer)
-    line_w = max(2, int(height * 0.0022))
-    for a, b in zip(points[:-1], points[1:]):
-        draw.line((a[0], a[1], b[0], b[1]), fill=color, width=line_w)
-    _native_draw_arrow(draw, points[-2], points[-1], color, width=line_w)
-
-    activation = plan.get("activation") if isinstance(plan.get("activation"), dict) else None
-    if activation:
-        y = int(activation["y"])
-        _dash_line(draw, (int(activation["x1"]), y), (int(activation["x2"]), y), (222, 143, 39, 145), width=1, dash=7, gap=5)
-        draw.text((int(activation["x2"]), max(10, y - 5)), "BREAK", font=font, fill=(170, 102, 16, 185), anchor="rs")
-    retest = plan.get("retest") if isinstance(plan.get("retest"), dict) else None
-    if retest:
-        draw.ellipse((int(retest["x"]) - 3, int(retest["y"]) - 3, int(retest["x"]) + 3, int(retest["y"]) + 3), fill=(246, 248, 250, 230), outline=color, width=1)
-        draw.text((int(retest["x"]) + 5, int(retest["y"]) - 4), "RETEST", font=font, fill=color, anchor="ls")
-    image.alpha_composite(layer)
+# v3.63: browser/GIF animation was intentionally removed.
+# The selected source-matched pattern is drawn as one static overlay directly
+# on the untouched uploaded chart; its expectation arrow is produced by
+# _native_draw_pattern_overlays and remains tied to real M5 geometry.
 
 
 def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
@@ -6043,19 +5855,16 @@ def _render_uploaded_chart_with_overlays(
     candle_x_map = _native_build_candle_x_map(image, analysis, candle_centers)
     if candle_x_map:
         analysis["_native_candle_x_map"] = candle_x_map
-    analysis["animation_plan"] = _native_build_expected_scenario_animation_plan(image, analysis, candle_centers)
-    draw = ImageDraw.Draw(image)
-    _native_draw_zones(image, analysis, width, height, font, candle_centers)
+    analysis.pop("animation_plan", None)
+    # v3.63 keeps the result visually close to the uploaded broker chart.
+    # Only the compact S/R/decision context and the single verified reference
+    # pattern are drawn here.  Generic OB/FVG/structure/trade overlays are kept
+    # out of the main image so they cannot obscure the user's candles.
     draw = ImageDraw.Draw(image)
     _native_draw_sr(draw, analysis, width, height, font)
     _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
-    draw = ImageDraw.Draw(image)
-    _native_draw_structure(draw, analysis, width, height, font, candle_centers)
-    _native_draw_trade(image, analysis, width, height, font)
-    # When a source-matched pattern is present, its own mandatory arrow is the
-    # explanatory path.  Do not stack a second generic scenario arrow on top.
-    if not (analysis.get("pattern_overlays") or []):
-        _native_draw_expected_scenario_path(image, analysis, width, height, font)
+    # No generic fallback arrow: if no verified source-model geometry exists,
+    # the original chart remains clean rather than showing a guessed scenario.
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)

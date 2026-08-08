@@ -1,3 +1,5 @@
+> **ملاحظة:** هذا المستند تاريخي فقط. أُلغي التنفيذ المتحرك في v3.63 واستُبدل بـ `V363_STATIC_REFERENCE_OVERLAY.md`.
+
 # SaleeM v3.51 — Animation Spec v1
 
 The result keeps the uploaded broker chart as the original canvas. A live SVG layer sits above it and shares the same pan/zoom transform.

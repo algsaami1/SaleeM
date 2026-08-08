@@ -731,106 +731,6 @@ body[data-has-result="true"] .chart-pan-viewport img{
 .chart-zoom-controls .chart-zoom-reset{min-width:38px;font-size:9px}
 body[data-has-result="true"] .chart-pan-hint{z-index:6;white-space:nowrap}
 
-/* v3.51 — SaleeM Animation Spec v1: live SVG overlay on the untouched chart. */
-body[data-has-result="true"] .chart-pan-canvas{
-  position:relative;
-  display:inline-block;
-  height:100%;
-  width:max-content;
-  min-width:1px;
-  vertical-align:top;
-}
-body[data-has-result="true"] .chart-pan-canvas > img{
-  display:block;
-  height:100%;
-  width:auto;
-  max-width:none;
-}
-.saleem-animation-overlay{
-  position:absolute;
-  inset:0;
-  width:100%;
-  height:100%;
-  pointer-events:none;
-  overflow:visible;
-  z-index:5;
-}
-.chart-animation-replay{font-size:10px!important;min-width:34px!important}
-.animated-pattern-path,
-.animated-scenario-path,
-.animated-activation-line,
-.animated-invalidation-line,
-.animated-entry-zone,
-.animated-retest-dot,
-.animated-retest-label,
-.animated-activation-label{opacity:0}
-.animated-pattern-path{
-  stroke:#596273;
-  stroke-width:2;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-  stroke-dasharray:1;
-  stroke-dashoffset:1;
-  vector-effect:non-scaling-stroke;
-}
-.animated-scenario-path{
-  stroke-width:3;
-  stroke-linecap:round;
-  stroke-linejoin:round;
-  stroke-dasharray:1;
-  stroke-dashoffset:1;
-  vector-effect:non-scaling-stroke;
-  filter:drop-shadow(0 0 2px rgba(0,0,0,.18));
-}
-.animated-scenario-path.up{stroke:#149a61}.animated-scenario-path.down{stroke:#d43b45}
-.animated-scenario-path.watch{stroke-width:2.4;stroke-dasharray:.045 .018}
-.scenario-arrow-head.up{fill:#149a61}.scenario-arrow-head.down{fill:#d43b45}
-.animated-activation-line{
-  stroke:#d89522;
-  stroke-width:1.5;
-  stroke-dasharray:8 6;
-  vector-effect:non-scaling-stroke;
-}
-.animated-activation-label,.animated-retest-label{
-  font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace;
-  paint-order:stroke;
-  stroke:rgba(248,250,252,.92);
-  stroke-width:3px;
-  stroke-linejoin:round;
-}
-.animated-activation-label{fill:#a56613}
-.animated-retest-label{fill:#314154}
-.animated-entry-zone{stroke-width:1;vector-effect:non-scaling-stroke}
-.animated-entry-zone.up{fill:rgba(20,154,97,.10);stroke:rgba(20,154,97,.48)}
-.animated-entry-zone.down{fill:rgba(212,59,69,.10);stroke:rgba(212,59,69,.48)}
-.animated-retest-dot{fill:#f8fafc;stroke-width:2;vector-effect:non-scaling-stroke}
-.animated-retest-dot.up{stroke:#149a61}.animated-retest-dot.down{stroke:#d43b45}
-.animated-invalidation-line{stroke:#d43b45;stroke-width:1.25;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
-.saleem-animation-overlay.is-running .animated-pattern-path{animation:saleemDrawPath .9s ease-out 0s forwards}
-.saleem-animation-overlay.is-running .animated-activation-line,
-.saleem-animation-overlay.is-running .animated-activation-label{animation:saleemFadePulse .45s ease .85s forwards}
-.saleem-animation-overlay.is-running .animated-entry-zone{animation:saleemFadeIn .4s ease 1.15s forwards}
-.saleem-animation-overlay.is-running .animated-scenario-path{animation:saleemDrawPath 1.25s cubic-bezier(.22,.72,.25,1) 1.45s forwards}
-.saleem-animation-overlay.is-running .animated-retest-dot,
-.saleem-animation-overlay.is-running .animated-retest-label{animation:saleemRetestPulse .55s ease 2.18s forwards}
-.saleem-animation-overlay.is-running .animated-invalidation-line{animation:saleemFadeIn .35s ease 2.85s forwards}
-@keyframes saleemDrawPath{0%{opacity:.12;stroke-dashoffset:1}100%{opacity:1;stroke-dashoffset:0}}
-@keyframes saleemFadeIn{0%{opacity:0}100%{opacity:1}}
-@keyframes saleemFadePulse{0%{opacity:0}55%{opacity:1}100%{opacity:.9}}
-@keyframes saleemRetestPulse{0%{opacity:0;transform:scale(.6);transform-origin:center}55%{opacity:1;transform:scale(1.35)}100%{opacity:1;transform:scale(1)}}
-@media (prefers-reduced-motion:reduce){
-  .saleem-animation-overlay .animated-pattern-path,
-  .saleem-animation-overlay .animated-scenario-path,
-  .saleem-animation-overlay .animated-activation-line,
-  .saleem-animation-overlay .animated-invalidation-line,
-  .saleem-animation-overlay .animated-entry-zone,
-  .saleem-animation-overlay .animated-retest-dot,
-  .saleem-animation-overlay .animated-retest-label,
-  .saleem-animation-overlay .animated-activation-label{
-    animation:none!important;opacity:1!important;stroke-dashoffset:0!important
-  }
-}
-
 /* v3.62 — SaleeM Light Four-Color UI
    Visual refresh only: keeps analysis/renderer behavior intact while aligning
    the interface with the approved red/green/blue/orange mobile design system. */
@@ -993,4 +893,109 @@ body[data-has-result="true"] .scenario-answer-block{border-color:#d6ebdd;backgro
   .brand-mark{width:44px;height:44px}.brand-copy b{font-size:19px}
   .upload-card{padding:15px}.upload-heading h1{font-size:20px}.drop-zone{min-height:225px}
   .result-page-heading{grid-template-columns:1fr}.result-page-heading small{text-align:right}
+}
+
+
+/* v3.63 — Static Reference Overlay + fixed chart-box upload
+   Only the red controls on the upload surface move to green. Trading-state
+   colors remain buy=green, sell=red, watch=blue, conditional=orange. */
+body[data-has-result="false"] .brand-mark{
+  background:linear-gradient(145deg,#4fbe75,var(--saleem-green));
+  box-shadow:0 9px 22px rgba(37,154,80,.20)
+}
+body[data-has-result="false"] .eyebrow{color:var(--saleem-green)}
+body[data-has-result="false"] .primary-button,
+body[data-has-result="false"] .analyze-button{
+  background:linear-gradient(135deg,#43b96e,var(--saleem-green));
+  box-shadow:0 9px 20px rgba(37,154,80,.20)
+}
+
+/* The upload surface IS the chart box. The user's image never escapes it. */
+.upload-chart-box{
+  position:relative;
+  width:100%;
+  min-height:0;
+  aspect-ratio:16/9;
+  padding:10px;
+  overflow:hidden;
+  display:grid;
+  place-items:center;
+  border:1.5px dashed #b9dfc5;
+  background:#fff;
+}
+.upload-chart-placeholder{
+  width:100%;height:100%;
+  min-height:220px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:18px;text-align:center
+}
+.upload-chart-preview{
+  display:block;
+  width:100%;height:100%;
+  max-width:100%;max-height:100%;
+  object-fit:contain;
+  object-position:center;
+  border-radius:12px;
+  background:#fff
+}
+.upload-chart-box.has-preview{border-style:solid;border-color:#d9e8de;background:#f8fbf9;cursor:pointer}
+.upload-chart-box.has-preview:hover{border-color:var(--saleem-green);background:#f8fbf9;transform:none}
+.upload-chart-change{
+  position:absolute;right:14px;bottom:14px;
+  padding:8px 11px;border-radius:10px;
+  background:rgba(23,92,48,.90);color:#fff;
+  font-size:9px;font-weight:700;
+  box-shadow:0 5px 16px rgba(20,70,38,.16);
+  backdrop-filter:blur(8px)
+}
+
+/* Result: compact fixed metrics — no horizontal drift/scrolling. */
+body[data-has-result="true"] .app-shell{padding-bottom:30px}
+body[data-has-result="true"] .saleem-terminal{overflow:visible}
+body[data-has-result="true"] .terminal-metrics-top{
+  grid-template-columns:repeat(5,minmax(0,1fr))!important;
+  overflow:visible!important;
+  padding-bottom:0!important;
+}
+body[data-has-result="true"] .terminal-metrics-bottom{
+  grid-template-columns:repeat(4,minmax(0,1fr))!important;
+  overflow:visible!important;
+  padding:7px 0 2px!important;
+}
+body[data-has-result="true"] .terminal-metrics article{
+  min-width:0!important;
+  min-height:68px!important;
+  height:68px;
+  padding:7px 5px!important;
+  border-radius:13px!important;
+  overflow:hidden
+}
+body[data-has-result="true"] .terminal-metrics article>span{font-size:7px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body[data-has-result="true"] .terminal-metrics article>b{font-size:11px!important;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+body[data-has-result="true"] .terminal-metrics article>small{font-size:6.6px!important;line-height:1.25;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+body[data-has-result="true"] .recommendation-tile>b{font-size:12px!important;padding:5px 5px!important}
+
+/* Static chart only: no replay control, no animation layer, no motion UI. */
+body[data-has-result="true"] .terminal-chart-card{isolation:isolate}
+body[data-has-result="true"] .chart-pan-viewport{overflow:auto;overscroll-behavior:contain}
+body[data-has-result="true"] .chart-pan-canvas{position:relative;height:100%;min-width:100%}
+body[data-has-result="true"] #result-image{position:relative;z-index:1}
+
+/* The old bottom navigation is intentionally removed in v3.63. */
+.saleem-bottom-nav{display:none!important}
+.system-status-launcher{margin-bottom:14px}
+
+@media(max-width:640px){
+  body[data-has-result="true"] .terminal-metrics-top{grid-template-columns:repeat(5,minmax(0,1fr))!important}
+  body[data-has-result="true"] .terminal-metrics-bottom{grid-template-columns:repeat(4,minmax(0,1fr))!important}
+  body[data-has-result="true"] .terminal-metrics article{height:64px;min-height:64px!important;padding:6px 3px!important}
+  body[data-has-result="true"] .terminal-metrics article>b{font-size:10px!important}
+  .upload-chart-box{aspect-ratio:16/10}
+  .upload-chart-placeholder{min-height:190px;padding:12px}
+}
+@media(max-width:430px){
+  body[data-has-result="true"] .terminal-metrics article{height:61px;min-height:61px!important}
+  body[data-has-result="true"] .terminal-metrics article>span{font-size:6.2px!important}
+  body[data-has-result="true"] .terminal-metrics article>b{font-size:9.2px!important}
+  body[data-has-result="true"] .terminal-metrics article>small{font-size:5.8px!important}
 }
