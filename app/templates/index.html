@@ -130,6 +130,13 @@
     {% set action_strength = action.get('strength') or result.trade_probability or result.pattern_confidence or 0 %}
     {% set action_confirmed = action.get('is_confirmed', false) %}
     {% set explanation = result.result_explanation or {} %}
+    {% set decision_zone = result.decision_zone or {} %}
+    {% set zone_up = decision_zone.get('up_trigger') %}
+    {% set zone_down = decision_zone.get('down_trigger') %}
+    {% set buy_trigger = buy_plan.get('trigger_price') %}
+    {% set sell_trigger = sell_plan.get('trigger_price') %}
+    {% set display_up_trigger = zone_up if decision_zone.get('active') else buy_trigger %}
+    {% set display_down_trigger = zone_down if decision_zone.get('active') else sell_trigger %}
     {% set peak = result.most_probable_peak or {} %}
     {% set trough = result.most_probable_trough or {} %}
 
@@ -142,14 +149,14 @@
       </header>
 
       <div class="terminal-metrics terminal-metrics-top" aria-label="قراءة السوق">
-        <article><span>السلوك</span><b class="tone-orange">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
-        <article><span>النمط</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_status == 'confirmed' %}مؤكد · {{ result.pattern_confidence }}٪{% elif result.pattern_status == 'candidate' %}مرشح · {{ result.pattern_confidence }}٪{% elif result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
-        <article><span>شكل شمعة</span><b class="tone-green">{{ result.candle_shape or 'مراقبة' }}</b><small>{{ result.confirmation or 'بانتظار إغلاق' }}</small></article>
-        <article><span>الإغلاق</span><b class="tone-gold">{% if action_confirmed %}مؤكد{% else %}محايد{% endif %}</b><small>{% if action_confirmed %}مفعّل{% else %}منتظر{% endif %}</small></article>
-        <article><span>المنطقة</span><b class="tone-blue">{{ result.zone_behavior or 'بين مستويات' }}</b><small>{{ action_badge }}</small></article>
+        <article><span>الاتجاه العام</span><b class="{% if (result.higher_timeframe_direction or result.direction) == 'صاعد' %}tone-green{% elif (result.higher_timeframe_direction or result.direction) == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.higher_timeframe_direction or result.direction or 'غير واضح' }}</b><small>من H4 / H1</small></article>
+        <article><span>الحركة الحالية</span><b class="{% if result.current_movement == 'صاعد' %}tone-green{% elif result.current_movement == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
+        <article><span>منطقة القرار</span><b class="{% if decision_zone.get('active') %}tone-gold{% else %}tone-blue{% endif %}">{% if decision_zone.get('active') %}{{ '%.2f'|format(decision_zone.low) }} - {{ '%.2f'|format(decision_zone.high) }}{% else %}{{ result.zone_behavior or 'بين مستويات' }}{% endif %}</b><small>{% if decision_zone.get('active') %}لا دخول داخلها{% else %}{{ action_badge }}{% endif %}</small></article>
+        <article><span>التفعيل</span><b class="tone-orange">{% if decision_zone.get('active') %}انتظار خروج{% elif action_confirmed %}مفعّل{% else %}منتظر{% endif %}</b><small>{% if decision_zone.get('active') %}إغلاق M5 خارج المنطقة{% else %}{{ action_instruction|truncate(34, True, '…') }}{% endif %}</small></article>
+        <article><span>النموذج</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_status == 'confirmed' %}مؤكد · {{ result.pattern_confidence }}٪{% elif result.pattern_status == 'candidate' %}مرشح · {{ result.pattern_confidence }}٪{% elif result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
       </div>
 
-      <div class="terminal-strength"><span>قوة السوق</span><div class="strength-track"><i style="width:{{ action_strength|int }}%"></i></div><b>{{ action_strength }}٪</b></div>
+      <div class="terminal-strength"><span>تطابق القاعدة</span><div class="strength-track"><i style="width:{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}%"></i></div><b>{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}٪</b></div>
 
       <section class="terminal-chart-card" aria-label="الشارت المتحرك والقابل للتكبير">
         <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
@@ -162,6 +169,7 @@
         <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
           <div class="chart-pan-canvas" id="chart-pan-canvas">
             <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
+            <img id="share-result-image" src="{{ result.share_result_url or result.result_url }}" alt="" hidden aria-hidden="true">
             {% if result.animation_plan and result.animation_plan.enabled %}<svg id="saleem-animation-overlay" class="saleem-animation-overlay" aria-hidden="true"></svg>{% endif %}
           </div>
         </div>
@@ -172,14 +180,14 @@
       <nav class="terminal-timeframes" aria-label="الفريمات"><span>M1</span><strong>M5</strong><span>M15</span><span>H1</span><span>H4</span><span>D1</span></nav>
 
       <div class="terminal-metrics terminal-metrics-bottom" aria-label="ملخص القرار">
-        <article><span>السبريد</span><b class="tone-green">{{ result.spread_value or '—' }}</b><small>{{ result.spread_status or 'من السوق' }}</small></article>
-        <article><span>السيولة</span><b class="tone-green">{{ result.liquidity_status or 'مراقبة' }}</b><small>{{ (explanation.liquidity or 'تحت المتابعة')|truncate(28, True, '…') }}</small></article>
-        <article class="recommendation-tile"><span>التوصية</span><b>{{ action_title }}</b><small>{{ action_instruction }}</small></article>
-        <article><span>مدى الساعة</span><div class="range-lines"><em>الأعلى <b>{{ '%.2f'|format(peak.price) if peak and peak.price is defined else '—' }}</b></em><em>الأدنى <b>{{ '%.2f'|format(trough.price) if trough and trough.price is defined else '—' }}</b></em></div></article>
+        <article class="recommendation-tile"><span>القرار الآن</span><b>{{ action_title }}</b><small>{{ action_instruction }}</small></article>
+        <article><span>تفعيل صعود</span><b class="tone-green">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
+        <article><span>تفعيل هبوط</span><b class="tone-red">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
+        <article><span>سبب الانتظار</span><b class="tone-gold">{% if decision_zone.get('active') %}داخل منطقة قرار{% elif result.rule_check and result.rule_check.first_missing %}{{ result.rule_check.first_missing }}{% else %}{{ action_badge }}{% endif %}</b><small>{{ action_reason|truncate(32, True, '…') }}</small></article>
       </div>
 
       <div class="result-actions terminal-actions" aria-label="خيارات النتيجة">
-        <button class="result-action save-button" id="save-image-button" type="button">حفظ الشارت</button>
+        <button class="result-action save-button" id="save-image-button" type="button">حفظ النتيجة</button>
         <button class="result-action share-button" id="share-image-button" type="button">مشاركة</button>
       </div>
       <p class="result-action-status" id="result-action-status" aria-live="polite"></p>
@@ -213,6 +221,20 @@
             <div><span>المطلوب الآن</span><b>{{ action_instruction }}</b></div>
           </div>
         </section>
+
+        {% if result.rule_check %}
+        <section class="explanation-block rule-audit-block">
+          <h3><span aria-hidden="true">✓</span> فحص القاعدة</h3>
+          <div class="quick-reading-grid rule-audit-grid">
+            <div><span>1. البنية</span><b>{{ 'متحقق' if result.rule_check.structure == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>2. الموقع</span><b>{{ 'متحقق' if result.rule_check.location == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>3. التفعيل</span><b>{{ 'متحقق' if result.rule_check.trigger == 'pass' else 'غير متحقق' }}</b></div>
+            <div><span>4. المخاطرة</span><b>{{ 'متحقق' if result.rule_check.risk == 'pass' else 'غير متحقق' }}</b></div>
+          </div>
+          {% if result.rule_check.first_missing %}<p><strong>توقف عند:</strong> {{ result.rule_check.first_missing }}.</p>{% endif %}
+          <p>درجة الثقة: {{ result.rule_check.confidence_label or 'منخفضة' }} — تطابق {{ result.rule_check.match_percent or 0 }}٪.</p>
+        </section>
+        {% endif %}
 
         <section class="explanation-block">
           <h3><span aria-hidden="true">H</span> اتجاه الفريمات</h3>

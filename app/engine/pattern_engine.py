@@ -618,7 +618,9 @@ def review_market_patterns(frames: Any) -> dict[str, Any]:
     overlay: list[PatternCandidate] = []
     seen: set[str] = set()
     for item in m5:
-        # At most two chart overlays, and avoid duplicating near-identical families.
+        # v3.61: one closest model only.  The visual source-atlas matcher may
+        # later replace this primary choice, but the renderer never receives a
+        # stack of competing patterns.
         family = (
             "multi_top_bottom" if item.name in {"M", "W", "قمة ثلاثية", "قاع ثلاثي"}
             else "hs" if "رأس" in item.name
@@ -629,7 +631,7 @@ def review_market_patterns(frames: Any) -> dict[str, Any]:
             continue
         overlay.append(item)
         seen.add(family)
-        if len(overlay) >= 2:
+        if len(overlay) >= 1:
             break
 
     return {

@@ -72,4 +72,3 @@ def test_mobile_css_prevents_page_overflow_and_respects_safe_area():
     assert "overflow-x:hidden" in css
     assert ".recommendation-type-grid" in css
     assert ".combined-feedback-card" in css
-ck-card" in css

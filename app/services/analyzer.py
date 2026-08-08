@@ -25,6 +25,7 @@ from app.engine.renderer import (
     detect_market_zone_presence,
     prepare_chart_viewport_image,
     render_result,
+    render_share_snapshot,
     validate_uploaded_axis,
 )
 from app.services.market_data import (
@@ -39,6 +40,9 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 KNOWLEDGE_DIR = BASE_DIR / "knowledge"
 SPEC_PATH = BASE_DIR / "SALEEM_FINAL_SPEC.md"
 PERMANENT_PROMPT_PATH = KNOWLEDGE_DIR / "09_rules" / "PERMANENT_ANALYSIS_PROMPT.md"
+REFERENCE_MODEL_DIR = KNOWLEDGE_DIR / "10_reference_images" / "source_models"
+REFERENCE_MODEL_ATLAS_PATH = REFERENCE_MODEL_DIR / "source_model_atlas.webp"
+REFERENCE_MODEL_CATALOG_PATH = REFERENCE_MODEL_DIR / "source_model_catalog.json"
 
 
 def load_final_spec() -> str:
@@ -57,7 +61,7 @@ def load_permanent_analysis_prompt() -> str:
     return PERMANENT_PROMPT_PATH.read_text(encoding="utf-8").strip()
 
 
-CONFIRMED_PROBABILITY = 64
+CONFIRMED_PROBABILITY = 70
 CONDITIONAL_PROBABILITY = 55
 MAX_ENTRY_DISTANCE = 8.0
 MIN_STOP_DISTANCE = 0.6
@@ -1029,6 +1033,44 @@ GEOMETRY_SCHEMA = {
     ],
 }
 
+REFERENCE_PATTERN_MATCH_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "matched": {"type": "boolean"},
+        "pattern_family": {
+            "type": "string",
+            "enum": [
+                "triangles",
+                "head_shoulders",
+                "wedges",
+                "double_top_bottom",
+                "triple_top_bottom",
+                "pennant",
+                "flag",
+                "rectangle",
+                "break_retest",
+                "channels",
+                "market_structure",
+                "liquidity_orderblock",
+                "none",
+            ],
+        },
+        "source_reference_id": {"type": "string"},
+        "visual_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "bias": {"type": "string", "enum": ["صاعد", "هابط", "محايد"]},
+        "evidence": {"type": "string"},
+    },
+    "required": [
+        "matched",
+        "pattern_family",
+        "source_reference_id",
+        "visual_score",
+        "bias",
+        "evidence",
+    ],
+}
+
 MARKET_DECISION_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -1077,7 +1119,7 @@ MARKET_DECISION_SCHEMA = {
     ],
 }
 
-ANALYSIS_SNAPSHOT_CACHE_VERSION = 7
+ANALYSIS_SNAPSHOT_CACHE_VERSION = 8
 _TIMEFRAME_SECONDS = {"M5": 300, "M15": 900, "H1": 3600, "H4": 14400}
 _ANALYSIS_SNAPSHOT_CACHE_LOCK = threading.Lock()
 _ANALYSIS_SNAPSHOT_DECISION_LOCK = threading.Lock()
@@ -1107,6 +1149,7 @@ def _request_structured_openai(
     schema: dict[str, Any],
     schema_name: str,
     image_path: Path | None = None,
+    image_paths: list[Path] | None = None,
     max_output_tokens: int = 5000,
 ) -> dict[str, Any]:
     """Send one strict structured-output request with shared retry handling."""
@@ -1117,6 +1160,10 @@ def _request_structured_openai(
     content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
     if image_path is not None:
         content.append({"type": "input_image", "image_url": _data_url(image_path)})
+    for extra_image in image_paths or []:
+        if extra_image is None or (image_path is not None and extra_image == image_path):
+            continue
+        content.append({"type": "input_image", "image_url": _data_url(extra_image)})
 
     body = {
         "model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
@@ -1328,6 +1375,13 @@ def _analysis_rules_fingerprint() -> str:
                 digest.update(path.read_bytes())
             except OSError:
                 continue
+    # The visual source atlas is a rule input in v3.61.  Hash only the compact
+    # atlas (not all 82 raw images) so replacing the approved reference board
+    # invalidates cached analysis snapshots without adding large per-request IO.
+    try:
+        digest.update(REFERENCE_MODEL_ATLAS_PATH.read_bytes())
+    except OSError:
+        digest.update(str(REFERENCE_MODEL_ATLAS_PATH).encode("utf-8"))
     return digest.hexdigest()[:20]
 
 
@@ -1457,6 +1511,227 @@ def _extract_chart_geometry(path: Path) -> dict[str, Any]:
     )
     geometry["image_axis_labels"] = _normalize_axis_labels(geometry.get("image_axis_labels"))
     return geometry
+
+
+_REFERENCE_FAMILY_SOURCE_IDS = {
+    "triangles": "archive_2_01",
+    "head_shoulders": "archive_2_02",
+    "wedges": "archive_2_04",
+    "double_top_bottom": "archive_2_05",
+    "triple_top_bottom": "archive_2_06",
+    "pennant": "archive_2_07",
+    "flag": "archive_2_08",
+    "rectangle": "archive_2_09",
+    "break_retest": "archive_2_20",
+    "channels": "archive_3_06",
+    "market_structure": "archive_3_07",
+    "liquidity_orderblock": "archive_4_08",
+}
+
+
+def _pattern_reference_family(name: Any) -> str:
+    value = str(name or "").strip()
+    if value in {"M", "W"}:
+        return "double_top_bottom"
+    if value in {"قمة ثلاثية", "قاع ثلاثي"}:
+        return "triple_top_bottom"
+    if "رأس وكتفين" in value:
+        return "head_shoulders"
+    if "مثلث" in value:
+        return "triangles"
+    if "وتد" in value:
+        return "wedges"
+    if "قناة" in value:
+        return "channels"
+    if value == "مستطيل":
+        return "rectangle"
+    if "علم" in value:
+        return "flag"
+    if "راية" in value:
+        return "pennant"
+    if value == "كسر وإعادة اختبار":
+        return "break_retest"
+    return "none"
+
+
+def _reference_catalog_by_family() -> dict[str, dict[str, Any]]:
+    try:
+        payload = json.loads(REFERENCE_MODEL_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for item in payload.get("families") or []:
+        if not isinstance(item, dict):
+            continue
+        family = str(item.get("family") or "").strip()
+        if family:
+            result[family] = item
+    return result
+
+
+def _match_reference_pattern(path: Path) -> dict[str, Any]:
+    """Compare the uploaded M5 chart with the user-approved source-model atlas.
+
+    This stage is deliberately advisory: it may choose the closest *family*,
+    but it cannot invent anchors, price levels, or a trade.  The selected family
+    is accepted only if the deterministic closed-candle detector finds matching
+    geometry on the same M5 market window.
+    """
+    if not REFERENCE_MODEL_ATLAS_PATH.exists():
+        return {
+            "matched": False,
+            "pattern_family": "none",
+            "source_reference_id": "",
+            "visual_score": 0,
+            "bias": "محايد",
+            "evidence": "أطلس صور النماذج المرجعية غير متوفر.",
+        }
+
+    prompt = """أنت مرحلة مطابقة صور مرجعية فقط في SaleeM.
+
+الصورة الأولى هي شارت GOLD/XAUUSD M5 المرفوع من المستخدم.
+الصورة الثانية هي أطلس مبني من صور المصادر التي اعتمدها المستخدم، وتحت كل مرجع يظهر source id واسم العائلة.
+
+المطلوب:
+1) راجع شكل الحركة المرئي في الشارت، خصوصًا آخر ثلث إلى نصف الشارت، وقارنه بعائلات النماذج الموجودة في أطلس المصادر.
+2) اختر عائلة واحدة فقط هي الأقرب بصريًا. إذا لم توجد مطابقة واضحة فأعد none.
+3) لا تستخرج أسعارًا، ولا تحدد دخولًا أو وقفًا أو أهدافًا، ولا تستنتج صفقة.
+4) لا تختر نموذجًا بسبب الاسم أو اللون؛ طابق هندسة القمم/القيعان/الخطوط فقط.
+5) لا تعتبر المطابقة مؤكدة إذا كانت مجرد جزء صغير أو تشابه ضعيف. matched=true يحتاج visual_score لا يقل عن 55.
+6) source_reference_id يجب أن يكون معرف المرجع المكتوب في الأطلس، مثل archive_2_05.
+7) evidence جملة عربية قصيرة تصف عناصر الشكل التي طابقتها، بلا أسعار.
+
+هذه المطابقة لا ترسم شيئًا بنفسها؛ سيقبلها المحرك لاحقًا فقط إذا أكدتها هندسة الشموع المغلقة."""
+    try:
+        result = _request_structured_openai(
+            prompt=prompt,
+            schema=REFERENCE_PATTERN_MATCH_SCHEMA,
+            schema_name="saleem_reference_pattern_match",
+            image_path=path,
+            image_paths=[REFERENCE_MODEL_ATLAS_PATH],
+            max_output_tokens=1200,
+        )
+    except RuntimeError as exc:
+        logging.warning("Reference pattern image match failed: %s", exc)
+        return {
+            "matched": False,
+            "pattern_family": "none",
+            "source_reference_id": "",
+            "visual_score": 0,
+            "bias": "محايد",
+            "evidence": "تعذرت المطابقة البصرية؛ استُخدم فحص الشموع الحتمي فقط.",
+        }
+
+    score = max(0, min(100, int(result.get("visual_score") or 0)))
+    family = str(result.get("pattern_family") or "none")
+    matched = bool(result.get("matched")) and family != "none" and score >= 55
+    source_id = str(result.get("source_reference_id") or "").strip()
+    expected_source = _REFERENCE_FAMILY_SOURCE_IDS.get(family, "")
+    if matched and expected_source and source_id != expected_source:
+        # The atlas has one approved representative per family.  Normalize an
+        # imperfect OCR/read of the tiny source label back to the approved id.
+        source_id = expected_source
+    return {
+        "matched": matched,
+        "pattern_family": family if matched else "none",
+        "source_reference_id": source_id if matched else "",
+        "visual_score": score if matched else 0,
+        "bias": str(result.get("bias") or "محايد") if matched else "محايد",
+        "evidence": str(result.get("evidence") or "").strip()[:220],
+    }
+
+
+def _merge_reference_pattern_review(
+    review: dict[str, Any],
+    visual_match: dict[str, Any],
+) -> dict[str, Any]:
+    """Select one drawable model by visual-source match + real M5 geometry."""
+    merged = copy.deepcopy(review if isinstance(review, dict) else {})
+    candidates = [item for item in merged.get("candidates") or [] if isinstance(item, dict)]
+    visual_family = str(visual_match.get("pattern_family") or "none")
+    visual_score = max(0, min(100, int(visual_match.get("visual_score") or 0)))
+    matched = bool(visual_match.get("matched")) and visual_family != "none" and visual_score >= 55
+
+    selected: dict[str, Any] | None = None
+    if matched:
+        same_family = [
+            item
+            for item in candidates
+            if str(item.get("timeframe") or "") == "M5"
+            and _pattern_reference_family(item.get("name")) == visual_family
+            and int(item.get("confidence") or 0) >= 60
+        ]
+        if same_family:
+            same_family.sort(
+                key=lambda item: (
+                    str(item.get("status") or "candidate") == "confirmed",
+                    int(item.get("confidence") or 0),
+                ),
+                reverse=True,
+            )
+            selected = copy.deepcopy(same_family[0])
+            base_conf = int(selected.get("confidence") or 0)
+            # Agreement with the source atlas may strengthen confidence modestly,
+            # but the image match can never rescue weak candle geometry.
+            selected["confidence"] = min(96, max(base_conf, round(base_conf * 0.82 + visual_score * 0.18)))
+            merged["reference_match_status"] = "matched_and_verified"
+        else:
+            merged["reference_match_status"] = "visual_match_not_verified_by_m5_geometry"
+
+    if selected is None:
+        # Fallback remains deterministic.  Pick the strongest drawable M5
+        # candidate and still associate it with its source-model family.
+        m5_candidates = [
+            item for item in candidates
+            if str(item.get("timeframe") or "") == "M5" and int(item.get("confidence") or 0) >= 60
+        ]
+        if m5_candidates:
+            selected = copy.deepcopy(m5_candidates[0])
+            merged.setdefault("reference_match_status", "deterministic_fallback")
+        else:
+            merged.setdefault("reference_match_status", "no_drawable_reference_pattern")
+
+    catalog = _reference_catalog_by_family()
+    if selected is not None:
+        family = _pattern_reference_family(selected.get("name"))
+        reference = catalog.get(family, {})
+        source_id = str(reference.get("representative_source_id") or _REFERENCE_FAMILY_SOURCE_IDS.get(family, ""))
+        merged.update(
+            {
+                "available": int(selected.get("confidence") or 0) >= 60,
+                "pattern_type": str(selected.get("name") or "لا يوجد"),
+                "pattern_confidence": int(selected.get("confidence") or 0),
+                "pattern_timeframe": str(selected.get("timeframe") or "M5"),
+                "pattern_bias": str(selected.get("bias") or "محايد"),
+                "pattern_status": str(selected.get("status") or "candidate"),
+                "pattern_evidence": str(selected.get("evidence") or ""),
+                # The new v3.61 rule is one closest pattern only.
+                "overlay_patterns": [selected],
+                "reference_family": family,
+                "reference_source_id": source_id,
+                "reference_rule": str(reference.get("rule_ar") or ""),
+                "reference_visual_score": visual_score if matched and family == visual_family else 0,
+                "reference_visual_evidence": str(visual_match.get("evidence") or "") if matched else "",
+            }
+        )
+    else:
+        merged.update(
+            {
+                "available": False,
+                "pattern_type": "لا يوجد",
+                "pattern_confidence": 0,
+                "pattern_timeframe": "",
+                "pattern_bias": "محايد",
+                "pattern_status": "none",
+                "overlay_patterns": [],
+                "reference_family": "none",
+                "reference_source_id": "",
+                "reference_rule": "",
+                "reference_visual_score": visual_score if matched else 0,
+                "reference_visual_evidence": str(visual_match.get("evidence") or "") if matched else "",
+            }
+        )
+    return merged
 
 
 def _market_decision_prompt(
@@ -2478,6 +2753,135 @@ def _scenario_priority(analysis: dict[str, Any], scenario: dict[str, Any], *, si
     return round(score + higher_bonus + lower_bonus + activation_bonus - proximity_penalty, 2)
 
 
+
+def _build_decision_zone(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Merge a tight support/resistance cluster around price into one decision zone.
+
+    A dense cluster is not rendered as several contradictory horizontal lines.
+    Instead, it becomes a neutral range with two explicit activation edges. The
+    threshold adapts to recent M5 volatility through ATR, so quiet and volatile
+    sessions do not share one hard-coded dollar distance.
+    """
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return {"active": False, "reason": "no_current_price"}
+
+    try:
+        candles = _normalize_candles(analysis.get("candles"))
+    except RuntimeError:
+        candles = []
+    atr = max(0.05, _atr(candles)) if candles else 1.0
+    proximity = max(0.45, min(2.50, atr * 0.55))
+    max_span = max(1.00, min(3.40, atr * 0.85))
+
+    supports: list[float] = []
+    resistances: list[float] = []
+    for item in analysis.get("support_levels") or []:
+        value = _number(item.get("price")) if isinstance(item, dict) else None
+        if value is not None and float(value) <= float(current) and float(current) - float(value) <= proximity:
+            supports.append(float(value))
+    for item in analysis.get("resistance_levels") or []:
+        value = _number(item.get("price")) if isinstance(item, dict) else None
+        if value is not None and float(value) >= float(current) and float(value) - float(current) <= proximity:
+            resistances.append(float(value))
+
+    if not supports or not resistances:
+        return {
+            "active": False,
+            "reason": "no_mixed_cluster",
+            "atr": round(float(atr), 3),
+            "merge_distance": round(float(proximity), 3),
+        }
+
+    low = min(supports)
+    high = max(resistances)
+    span = high - low
+    if not (low <= float(current) <= high) or span > max_span:
+        return {
+            "active": False,
+            "reason": "cluster_not_tight",
+            "atr": round(float(atr), 3),
+            "span": round(float(span), 3),
+            "merge_distance": round(float(proximity), 3),
+        }
+
+    buffer = max(0.08, min(0.35, atr * 0.07))
+    return {
+        "active": True,
+        "kind": "decision",
+        "label": "منطقة قرار",
+        "low": round(float(low), 2),
+        "high": round(float(high), 2),
+        "mid": round((float(low) + float(high)) / 2.0, 2),
+        "current": round(float(current), 2),
+        "contains_current": True,
+        "up_trigger": round(float(high) + buffer, 2),
+        "down_trigger": round(float(low) - buffer, 2),
+        "buffer": round(float(buffer), 3),
+        "span": round(float(span), 3),
+        "atr": round(float(atr), 3),
+        "merged_supports": [round(value, 2) for value in sorted(supports, reverse=True)],
+        "merged_resistances": [round(value, 2) for value in sorted(resistances)],
+        "reason": "support_resistance_cluster_around_price",
+    }
+
+
+def _build_rule_check(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Expose the strict four-gate audit used by the result UI."""
+    evidence = analysis.get("confirmation_evidence") if isinstance(analysis.get("confirmation_evidence"), dict) else {}
+    zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
+    higher = str(analysis.get("higher_timeframe_direction") or "غير واضح")
+    structure_ok = bool(
+        higher in {"صاعد", "هابط"}
+        and evidence.get("higher_frames_aligned")
+        and int(evidence.get("alignment") or 0) >= 75
+    )
+    location_ok = bool(
+        (analysis.get("support_levels") or analysis.get("resistance_levels"))
+        and str(analysis.get("entry_kind") or "مراقبة") != "مراقبة"
+    )
+    trigger_ok = bool(evidence.get("m15_m5_aligned") and evidence.get("closed_m5_confirmed"))
+    risk_ok = bool(evidence.get("geometry_valid"))
+    blocked_by_zone = bool(zone.get("active") and zone.get("contains_current"))
+
+    first_missing = None
+    if not structure_ok:
+        first_missing = "الاتجاه العام غير واضح"
+    elif not location_ok:
+        first_missing = "لا توجد منطقة سعرية صالحة"
+    elif blocked_by_zone:
+        first_missing = "السعر داخل منطقة قرار"
+    elif not trigger_ok:
+        first_missing = "ينقص تفعيل M15/M5 بإغلاق M5"
+    elif not risk_ok:
+        first_missing = "هندسة الدخول والوقف والأهداف غير صالحة"
+
+    effective_location_ok = bool(location_ok and not blocked_by_zone)
+    effective_trigger_ok = bool(trigger_ok and not blocked_by_zone)
+    if not structure_ok:
+        match_percent = 0
+    elif not effective_location_ok:
+        match_percent = 25
+    elif not effective_trigger_ok:
+        match_percent = 50
+    elif not risk_ok:
+        match_percent = 75
+    else:
+        match_percent = 100
+    confidence_label = "مرتفعة" if match_percent == 100 else "متوسطة" if match_percent >= 75 else "منخفضة"
+
+    return {
+        "structure": "pass" if structure_ok else "wait",
+        "location": "pass" if effective_location_ok else "wait",
+        "trigger": "pass" if effective_trigger_ok else "wait",
+        "risk": "pass" if risk_ok else "wait",
+        "first_missing": first_missing,
+        "match_percent": match_percent,
+        "confidence_label": confidence_label,
+        "all_pass": bool(structure_ok and effective_location_ok and effective_trigger_ok and risk_ok),
+    }
+
+
 def _build_action_summary(analysis: dict[str, Any]) -> dict[str, Any]:
     """Build one concise, deterministic answer for the result page.
 
@@ -2500,6 +2904,48 @@ def _build_action_summary(analysis: dict[str, Any]) -> dict[str, Any]:
             "target": None,
             "cancel": None,
             "strength": 0,
+            "primary_side": "wait",
+            "is_confirmed": False,
+        }
+
+    decision_zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
+    if decision_zone.get("active") and decision_zone.get("contains_current"):
+        up_trigger = _number(decision_zone.get("up_trigger"))
+        down_trigger = _number(decision_zone.get("down_trigger"))
+        instruction = "لا تدخل حتى يخرج السعر من منطقة القرار بإغلاق M5 واضح"
+        if up_trigger is not None and down_trigger is not None:
+            instruction = (
+                f"لا تدخل؛ انتظر إغلاق M5 فوق {up_trigger:.2f} للصعود "
+                f"أو تحت {down_trigger:.2f} للهبوط"
+            )
+        return {
+            "code": "watch_zone",
+            "title": "مراقبة — منطقة قرار",
+            "badge": "السعر بين دعم ومقاومة متقاربين",
+            "instruction": instruction,
+            "reason": "تم دمج المستويات المتقاربة في نطاق واحد؛ لا توجد إشارة تنفيذية داخل النطاق.",
+            "trigger": None,
+            "target": None,
+            "cancel": None,
+            "strength": max(int(buy.get("score") or 0), int(sell.get("score") or 0)),
+            "primary_side": "wait",
+            "is_confirmed": False,
+            "decision_zone": decision_zone,
+        }
+
+    rule_check = analysis.get("rule_check") if isinstance(analysis.get("rule_check"), dict) else {}
+    if rule_check and not rule_check.get("all_pass"):
+        missing = str(rule_check.get("first_missing") or "شروط القاعدة غير مكتملة")
+        return {
+            "code": "no_signal",
+            "title": "الإشارة غير متوفرة حالياً",
+            "badge": missing,
+            "instruction": f"توقف: {missing}",
+            "reason": "لم تكتمل القاعدة، لذلك لا يعرض SaleeM تحليلاً بديلاً أو صفقة اتجاهية.",
+            "trigger": None,
+            "target": None,
+            "cancel": None,
+            "strength": max(int(buy.get("score") or 0), int(sell.get("score") or 0)),
             "primary_side": "wait",
             "is_confirmed": False,
         }
@@ -3235,7 +3681,14 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
             confidence = min(94, confidence + 4)
         timeframe = str(review.get("pattern_timeframe") or "M5")
         evidence = str(review.get("pattern_evidence") or "اكتمل النموذج على الشموع المغلقة")
-        summary = f"رُوجعت {len(checked)} نماذج؛ الأقرب {pattern_type} على {timeframe} بثقة {confidence}٪: {evidence}."
+        source_id = str(review.get("reference_source_id") or "").strip()
+        visual_score = int(review.get("reference_visual_score") or 0)
+        source_note = f"؛ مرجع الصور {source_id}" if source_id else ""
+        visual_note = f" وتطابق بصري {visual_score}٪" if visual_score > 0 else ""
+        summary = (
+            f"رُوجعت {len(checked)} نماذج؛ الأقرب {pattern_type} على {timeframe} بثقة {confidence}٪"
+            f"{source_note}{visual_note}: {evidence}."
+        )
         data["pattern_type"] = pattern_type
         data["pattern_confidence"] = confidence
         data["pattern_lines"] = []
@@ -3243,7 +3696,7 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
         data["pattern_bias"] = str(review.get("pattern_bias") or "محايد")
         data["pattern_timeframe"] = timeframe
         data["pattern_status"] = str(review.get("pattern_status") or "candidate")
-        data["pattern_overlays"] = list(review.get("overlay_patterns") or [])[:2]
+        data["pattern_overlays"] = list(review.get("overlay_patterns") or [])[:1]
         data["pattern_checked_extended"] = list(review.get("extended_checked_patterns") or [])
     else:
         data["pattern_type"] = "لا يوجد"
@@ -3256,6 +3709,13 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
         data["pattern_overlays"] = []
         data["pattern_checked_extended"] = list(review.get("extended_checked_patterns") or [])
         summary = f"رُوجعت {len(checked)} نماذج على M5 وM15 وH1، ولم يكتمل نموذج هندسي بشروط كافية."
+
+    data["pattern_reference_family"] = str(review.get("reference_family") or "none")
+    data["pattern_reference_source_id"] = str(review.get("reference_source_id") or "")
+    data["pattern_reference_rule"] = str(review.get("reference_rule") or "")[:320]
+    data["pattern_reference_visual_score"] = int(review.get("reference_visual_score") or 0)
+    data["pattern_reference_visual_evidence"] = str(review.get("reference_visual_evidence") or "")[:220]
+    data["pattern_reference_match_status"] = str(review.get("reference_match_status") or "")
 
     data["pattern_review_summary"] = summary[:260]
     data["pattern_candidates_checked"] = checked
@@ -3694,6 +4154,10 @@ def _validate_analysis(
     m15_direction = str((frames.get("M15") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     m5_direction = str((frames.get("M5") or {}).get("direction") or "غير واضح") if isinstance(frames, dict) else "غير واضح"
     alignment = int((market_summary or {}).get("alignment") or 0) if isinstance(market_summary, dict) else 0
+    # Backward compatibility for older/internal summaries that represented
+    # alignment as a 0..4 matching-frame count instead of a percentage.
+    if 0 < alignment <= 4:
+        alignment *= 25
     higher_aligned = direction in {"صاعد", "هابط"} and h4_direction == direction and h1_direction == direction
     lower_aligned = direction in {"صاعد", "هابط"} and m15_direction == direction and m5_direction == direction
     lower_support = direction in {"صاعد", "هابط"} and (m15_direction == direction or m5_direction == direction)
@@ -3764,6 +4228,8 @@ def _validate_analysis(
     context_acceptable = not higher_both_opposed or probability >= 76 or aligned_pattern
     confirmation_complete = (
         probability >= CONFIRMED_PROBABILITY
+        and higher_aligned
+        and alignment >= 75
         and lower_aligned
         and price_action_confirmed
         and entry_activated
@@ -3796,6 +4262,10 @@ def _validate_analysis(
         draw_mode = "watch"
 
     missing_confirmation: list[str] = []
+    if not higher_aligned:
+        missing_confirmation.append("توافق H4 وH1")
+    if alignment < 75:
+        missing_confirmation.append("توافق الفريمات 75٪ فأعلى")
     if not lower_aligned:
         missing_confirmation.append("توافق M15 وM5")
     if not price_action_confirmed:
@@ -3934,6 +4404,8 @@ def _validate_analysis(
                 else "مراقبة"
             ),
             "confirmation_evidence": {
+                "higher_frames_aligned": bool(higher_aligned),
+                "alignment": int(alignment),
                 "m15_m5_aligned": bool(lower_aligned),
                 "closed_m5_confirmed": bool(price_action_confirmed),
                 "higher_frame_supportive": bool(higher_supportive),
@@ -4023,14 +4495,23 @@ def _analyze(path: Path) -> dict[str, Any]:
     if live_m5:
         provider_live_price = float(_number(live_m5[-1].get("close")) or provider_closed_price)
 
-    # Two isolated inputs: geometry from the screenshot, decision from CLOSED market data.
+    # Three isolated inputs:
+    # 1) geometry from the screenshot,
+    # 2) visual source-pattern family match from the screenshot + approved atlas,
+    # 3) decision from CLOSED market data.
+    # The visual match is never allowed to invent geometry; it must be verified
+    # by the deterministic closed-candle M5 detector before anything is drawn.
     geometry = _extract_chart_geometry(path)
+    visual_pattern_match = _match_reference_pattern(path)
     market_decision, snapshot_key, snapshot_reused = _get_market_decision(
         market_context,
         market_summary,
     )
 
-    pattern_review = review_market_patterns(market_context.get("frames") or {})
+    pattern_review = _merge_reference_pattern_review(
+        review_market_patterns(market_context.get("frames") or {}),
+        visual_pattern_match,
+    )
 
     canonical_input = {
         **market_decision,
@@ -4060,7 +4541,8 @@ def _analyze(path: Path) -> dict[str, Any]:
             "analysis_rules_hash": _analysis_rules_fingerprint(),
             "rules_audit_summary": (
                 f"طُبقت قواعد H4/H1/M15/M5، ورُوجعت {len(pattern_review.get('checked_patterns') or [])} "
-                "نماذج على الشموع المغلقة، ثم فُرضت قواعد منع الانحياز والتأكيد برمجيًا."
+                "نماذج على الشموع المغلقة، وطُبق مرجع صور المصادر على الشارت ثم ثُبت النموذج الأقرب "
+                "بهندسة M5 حقيقية قبل الرسم."
             ),
             "provider_closed_m5_price": round(provider_closed_price, 3),
             "provider_live_price": round(provider_live_price, 3),
@@ -4096,12 +4578,26 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
     analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
+    analysis["decision_zone"] = _build_decision_zone(analysis)
+    analysis["rule_check"] = _build_rule_check(analysis)
+
+    # Strict visual gate: a failed rule can never leave confirmed/conditional
+    # execution graphics active. Preserve the computed levels in the analysis
+    # object for explanation, but the visible chart becomes neutral monitoring.
+    if not bool((analysis.get("rule_check") or {}).get("all_pass")):
+        analysis["draw_mode"] = "watch"
+        analysis["trade_side"] = "مراقبة"
+        analysis["confirmation_status"] = "مراقبة"
+        analysis["directional_path_enabled"] = False
+        analysis["show_targets_as_active"] = False
+
     analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
-    # The smart crop is used only to help read prices. The final image always uses
-    # the original upload so the fixed production layout remains identical.
+    # Keep the interactive chart clean and movable, while save/share receives a
+    # separate decision-first snapshot with fixed information around the chart.
     png = render_result(analysis, chart_background_path=image_path)
+    share_png = render_share_snapshot(analysis, png)
     return {
         **analysis,
         **crop_meta,
@@ -4109,4 +4605,5 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         "timeframe": "M5",
         "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
+        "share_result_url": "data:image/png;base64," + base64.b64encode(share_png).decode(),
     }

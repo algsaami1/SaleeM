@@ -73,7 +73,9 @@
     },
     {
       "folder": "10_reference_images",
-      "json_files": [],
+      "json_files": [
+        "source_models/source_model_catalog.json"
+      ],
       "reference_files": [
         "bearish_breakout_retest.svg",
         "bos_choch.svg",
@@ -83,8 +85,11 @@
         "market_structure_hh_hl.svg",
         "market_structure_lh_ll.svg",
         "range_market.svg",
-        "support_resistance.svg"
-      ]
+        "support_resistance.svg",
+        "source_models/source_model_atlas.webp"
+      ],
+      "source_library_count": 82,
+      "source_library_path": "source_models/raw/"
     }
   ]
 }

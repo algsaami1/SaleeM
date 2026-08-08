@@ -1,21 +1,37 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.3",
   "market": "XAUUSD",
   "entry_timeframe": "M5",
   "usage": "read_only_reference",
   "category": "overlay_rules",
   "drawing_rules": [
     {
+      "element": "source_pattern_match",
+      "selection": "compare each uploaded M5 chart with the approved source-model atlas, then verify the family with deterministic closed-candle M5 geometry",
+      "maximum_drawn_patterns": 1,
+      "candidate_style": "dashed rule lines + dashed expectation arrow",
+      "confirmed_style": "solid rule lines + solid expectation arrow",
+      "invalidation": "show only when derived from model geometry",
+      "footer": "the basic rule explanation is placed directly below the saved/shared chart image"
+    },
+    {
       "element": "support",
       "color": "blue",
-      "style": "thin solid line",
-      "label": "SUP"
+      "style": "thin solid line outside decision zone only",
+      "label": "S"
     },
     {
       "element": "resistance",
       "color": "orange-red",
-      "style": "thin solid line",
-      "label": "RES"
+      "style": "thin solid line outside decision zone only",
+      "label": "R"
+    },
+    {
+      "element": "decision_zone",
+      "color": "neutral-gold translucent",
+      "style": "narrow transparent band with dashed upper/lower borders",
+      "label": "ZONE",
+      "rule": "merge only real mixed support/resistance levels close to current price using an ATR-adaptive distance"
     },
     {
       "element": "buy",
@@ -57,7 +73,8 @@
     {
       "element": "expected_path",
       "color_rule": "green bullish / red bearish",
-      "style": "curved or segmented dashed path"
+      "style": "source-pattern arrow: dashed when candidate / solid when confirmed",
+      "rule": "mandatory for the single selected reference pattern; explanatory only and not a trade entry signal"
     },
     {
       "element": "single_best_trade",
@@ -75,10 +92,15 @@
   ],
   "constraints": [
     "لا تغطِ الشموع قدر الإمكان",
-    "لا توجد لوحة جانبية أو لوحة سفلية",
-    "ارسم صفقة واحدة فقط وهي الأعلى احتمالًا",
+    "داخل الشارت التفاعلي لا توجد لوحة جانبية أو سفلية تغطي الشموع؛ لوحات القرار تكون خارج مساحة الشارت في الواجهة أو في صورة الحفظ المستقلة",
+    "ارسم صفقة تنفيذية واحدة فقط بعد اجتياز بوابات التأكيد؛ في المراقبة اعرض الحدود الشرطية بدل صفقة",
     "وقف الخسارة من بنية الشارت وليس مسافة ثابتة",
-    "لا يُرسم سهم؛ تُرسم شموع سيناريو من Entry إلى TP1 ثم TP2 ثم TP3",
-    "تظهر الصورة الناتجة كأن محللًا رسم على لقطة المستخدم نفسها"
-  ]
+    "تظهر الصورة الناتجة كأن محللًا رسم على لقطة المستخدم نفسها",
+    "سهم النموذج المرجعي التوضيحي يجوز أن يظهر متقطعًا في المراقبة، لكنه لا يمثل صفقة تنفيذية ولا ينشئ Entry/Stop/TP",
+    "لا ترسم أكثر من نموذج مرجعي واحد؛ النموذج المختار يجب أن يكون مثبتًا على هندسة M5 حقيقية"
+  ],
+  "outputs": {
+    "interactive_chart": "الصورة الأصلية مع Overlay خفيف قابل للتحريك/التكبير داخل التطبيق",
+    "share_snapshot": "صورة مستقلة للحفظ والمشاركة: الشارت مع النموذج الأقرب وسهمه، ثم لوحة القاعدة الأساسية أسفل الشارت مباشرة، ثم بطاقات الإجراء"
+  }
 }

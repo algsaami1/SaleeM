@@ -10,6 +10,7 @@
   const analyzeButton = document.getElementById('analyze-button');
   const steps = processingCard ? [...processingCard.querySelectorAll('.steps span')] : [];
   const resultImage = document.getElementById('result-image');
+  const shareResultImage = document.getElementById('share-result-image');
   const saveImageButton = document.getElementById('save-image-button');
   const shareImageButton = document.getElementById('share-image-button');
   const resultActionStatus = document.getElementById('result-action-status');
@@ -210,11 +211,12 @@
   });
 
   const imageFile = () => {
-    if (!resultImage?.src) throw new Error('الصورة غير متاحة.');
+    const sourceImage = shareResultImage?.src ? shareResultImage : resultImage;
+    if (!sourceImage?.src) throw new Error('الصورة غير متاحة.');
     const name = `SaleeM-XAUUSD-M5-${Date.now()}.png`;
 
-    if (resultImage.src.startsWith('data:')) {
-      const [header, encoded] = resultImage.src.split(',', 2);
+    if (sourceImage.src.startsWith('data:')) {
+      const [header, encoded] = sourceImage.src.split(',', 2);
       const mime = header.match(/^data:([^;]+)/)?.[1] || 'image/png';
       const binary = window.atob(encoded);
       const bytes = new Uint8Array(binary.length);
@@ -224,7 +226,7 @@
       return new File([bytes], name, { type: mime });
     }
 
-    return fetch(resultImage.src)
+    return fetch(sourceImage.src)
       .then((response) => {
         if (!response.ok) throw new Error('تعذر تجهيز الصورة.');
         return response.blob();

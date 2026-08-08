@@ -865,4 +865,3 @@ def test_monitoring_arrow_uses_trigger_until_activation_close_exists():
     assert origin is not None
     _x, _y, start_price = origin
     assert start_price == analysis["entry"]
-

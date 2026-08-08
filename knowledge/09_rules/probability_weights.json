@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "market": "XAUUSD",
   "entry_timeframe": "M5",
   "usage": "read_only_reference",
@@ -55,12 +55,25 @@
     {
       "factor": "المستوى اختُبر مرات كثيرة",
       "points": -6
+    },
+    {
+      "factor": "السعر داخل منطقة قرار مختلطة من دعم ومقاومة متقاربين",
+      "points": -12
+    },
+    {
+      "factor": "تعارض M15 وM5 عند لحظة التفعيل",
+      "points": -15
+    },
+    {
+      "factor": "إغلاق M5 مؤكد خارج منطقة القرار في اتجاه السيناريو",
+      "points": 8
     }
   ],
   "limits": {
     "minimum": 5,
     "maximum": 95,
-    "preferred_maximum": 90
+    "preferred_maximum": 90,
+    "confirmed_threshold": 70
   },
-  "normalization": "تُحوّل النقاط إلى BUY وSELL بحيث يكون المجموع 100، مع منع 0 و100."
+  "normalization": "تُحوّل النقاط إلى BUY وSELL بحيث يكون المجموع 100، مع منع 0 و100. لا تكفي النسبة وحدها للحالة المؤكدة؛ يجب اجتياز بوابات القاعدة."
 }

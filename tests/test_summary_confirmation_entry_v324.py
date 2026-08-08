@@ -137,4 +137,3 @@ def test_ui_explanation_hides_target_numbers_and_renderer_separates_entry_from_r
     assert "لا يوجد كسر مؤكد حاليًا." not in html
     assert "entry_gap = 7" in renderer
     assert "Entry is the boundary" in renderer
-nderer

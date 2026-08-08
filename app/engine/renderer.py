@@ -357,6 +357,40 @@ def _fit_text(draw: ImageDraw.ImageDraw, text: str, font, max_width: int, rtl: b
     return cleaned.rstrip() + "…"
 
 
+def _wrap_text_by_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font,
+    max_width: int,
+    *,
+    rtl: bool = True,
+    max_lines: int = 4,
+) -> list[str]:
+    """Wrap short UI prose deterministically without external layout engines."""
+    words = " ".join(str(text or "").split()).split()
+    if not words:
+        return []
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        candidate = word if not current else current + " " + word
+        if _text_width(draw, candidate, font, rtl) <= max_width:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+        current = word
+        if len(lines) >= max_lines:
+            break
+    if current and len(lines) < max_lines:
+        lines.append(current)
+    if len(lines) == max_lines and words:
+        consumed = sum(len(line.split()) for line in lines)
+        if consumed < len(words):
+            lines[-1] = _fit_text(draw, lines[-1] + " " + " ".join(words[consumed:]), font, max_width, rtl=rtl)
+    return lines[:max_lines]
+
+
 def _shadow_card(image: Image.Image, rect: tuple[int, int, int, int], radius: int = 22, shadow: int = 7) -> None:
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     d = ImageDraw.Draw(layer)
@@ -5229,12 +5263,13 @@ def _native_draw_pattern_overlays(
     font,
     candle_centers: list[int],
 ) -> None:
-    """Draw at most two M5 patterns anchored to detected screenshot candles.
+    """Draw the single closest source-matched M5 pattern on the real chart.
 
-    Candidate patterns are dashed and never receive a forecast arrow.  A solid
-    forecast arrow is allowed only after deterministic breakout confirmation.
-    No X fallback is used: if candle positions are not detectable, the pattern
-    is hidden rather than shifted to a cosmetically convenient location.
+    v3.61 makes the explanatory arrow mandatory for the chosen pattern:
+    candidate = dashed expectation, confirmed = solid expectation.  The arrow
+    explains the model and never turns a watch state into an executable trade.
+    All anchors/lines still come from real closed M5 candles; no X fallback is
+    allowed when screenshot candle positions cannot be detected reliably.
     """
     overlays = analysis.get("pattern_overlays")
     if not isinstance(overlays, list) or not overlays or len(candle_centers) < 6:
@@ -5250,7 +5285,7 @@ def _native_draw_pattern_overlays(
             spacing = max(8, int(median(gaps)))
     future_x = min(int(width * 0.80), candle_centers[-1] + spacing * 5)
 
-    for rank, overlay in enumerate(overlays[:2]):
+    for rank, overlay in enumerate(overlays[:1]):
         if not isinstance(overlay, dict) or str(overlay.get("timeframe") or "") != "M5":
             continue
         geometry = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
@@ -5321,12 +5356,24 @@ def _native_draw_pattern_overlays(
         if not anchor_points and visible_lines == 0:
             continue
 
-        # Tiny label only; detailed pattern explanation stays in the fixed UI.
+        # Make the selected source-model family obvious on the chart without
+        # hiding candles.  The rule itself remains below the saved image.
         name = str(overlay.get("name") or "")
         if name and anchor_points:
-            lx, ly = anchor_points[-1]
-            text = f"{name}{' ✓' if confirmed else ''}"
-            draw.text((min(width - 8, lx + dot + 4), max(8, ly - dot - 2)), text, font=font, fill=(45, 52, 62, min(235, opacity + 20)), anchor="ls")
+            center_x = int(sum(point[0] for point in anchor_points) / len(anchor_points))
+            if bias == "هابط":
+                label_y = max(18, min(point[1] for point in anchor_points) - dot * 5)
+            else:
+                label_y = min(height - 18, max(point[1] for point in anchor_points) + dot * 5)
+            text = f"{name}{' ✓' if confirmed else ' — مرشح'}"
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw = max(1, bbox[2] - bbox[0]); th = max(1, bbox[3] - bbox[1])
+            lx = max(6, min(width - tw - 16, center_x - tw // 2))
+            ly = max(6, min(height - th - 12, label_y - th // 2))
+            label_fill = (252, 253, 255, 222)
+            label_outline = (208, 62, 70, 180) if bias == "هابط" else (25, 151, 92, 180)
+            draw.rounded_rectangle((lx - 6, ly - 4, lx + tw + 6, ly + th + 4), radius=5, fill=label_fill, outline=label_outline, width=1)
+            draw.text((lx, ly), text, font=font, fill=(40, 48, 58, 235))
 
         trigger = _number(geometry.get("trigger"))
         stop = _number(geometry.get("stop"))
@@ -5368,7 +5415,9 @@ def _native_draw_pattern_overlays(
                     draw.text((zone_right - 4, (top_y + bottom_y) // 2), "ENTRY ZONE", font=font, fill=outline, anchor="rm")
                 _dash_line(draw, (zone_left, trigger_y), (zone_right, trigger_y), (33, 147, 83, 190) if bias == "صاعد" else (212, 62, 70, 190), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
                 draw.text((zone_right - 4, max(12, trigger_y - 6)), "NECKLINE / ACTIVATION", font=font, fill=(33, 147, 83, 200) if bias == "صاعد" else (212, 62, 70, 200), anchor="rs")
-        if execution_allowed and stop is not None:
+        # The model's invalidation belongs to the explanation, so the primary
+        # selected pattern may show it even while the trade state is watch.
+        if rank == 0 and stop is not None:
             stop_y = _native_y(analysis, float(stop), height)
             if stop_y is not None:
                 line_left = max(int(width * 0.66), candle_centers[-1] - spacing * 2)
@@ -5376,23 +5425,61 @@ def _native_draw_pattern_overlays(
                 _dash_line(draw, (line_left, stop_y), (line_right, stop_y), (212, 62, 70, 160), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
                 draw.text(((line_left + line_right) // 2, stop_y - 6), "INVALIDATION", font=font, fill=(212, 62, 70, 190), anchor="ms")
 
-        # Forecast arrow starts at the real breakout only for an active,
-        # direction-compatible primary scenario. Watch/closed/conflict = no arrow.
-        if execution_allowed and trigger is not None and target is not None and breakout_idx is not None:
-            try:
-                sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
-            except (TypeError, ValueError):
-                sx = None
-            sy = _native_y(analysis, float(trigger), height)
-            ty = _native_y(analysis, float(target), height)
+        # Mandatory model expectation arrow.  Confirmed patterns use a solid
+        # path from the real breakout.  Candidate patterns use a dashed path
+        # from the latest visible candle toward the activation/nearest real
+        # structural level.  This is explanatory, not an Entry signal.
+        if rank == 0 and bias in {"صاعد", "هابط"}:
+            current = _number(analysis.get("current_price"))
+            arrow_target = target
+            if arrow_target is None or _native_y(analysis, float(arrow_target), height) is None:
+                level_key = "resistance_levels" if bias == "صاعد" else "support_levels"
+                real_levels: list[float] = []
+                for level in analysis.get(level_key) or []:
+                    if not isinstance(level, dict):
+                        continue
+                    price = _number(level.get("price"))
+                    if price is None or current is None:
+                        continue
+                    if bias == "صاعد" and float(price) > float(current):
+                        real_levels.append(float(price))
+                    elif bias == "هابط" and float(price) < float(current):
+                        real_levels.append(float(price))
+                if real_levels:
+                    arrow_target = min(real_levels, key=lambda price: abs(price - float(current)))
+
+            ty = _native_y(analysis, float(arrow_target), height) if arrow_target is not None else None
             arrow_end_x = min(width - 10, max(future_x, candle_centers[-1] + spacing * 6))
-            if sx is not None and sy is not None and ty is not None and arrow_end_x > sx + 6:
-                arrow_color = (18, 155, 92, 210) if bias == "صاعد" else (211, 55, 62, 210)
-                _native_draw_arrow(draw, (sx, sy), (arrow_end_x, ty), arrow_color, width=max(2, line_w + 1))
+            arrow_color = (18, 155, 92, 220) if bias == "صاعد" else (211, 55, 62, 220)
+
+            if confirmed and trigger is not None and breakout_idx is not None and ty is not None:
+                try:
+                    sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
+                except (TypeError, ValueError):
+                    sx = None
+                sy = _native_y(analysis, float(trigger), height)
+                if sx is not None and sy is not None and arrow_end_x > sx + 6:
+                    _native_draw_arrow(draw, (sx, sy), (arrow_end_x, ty), arrow_color, width=max(3, line_w + 2))
+            elif current is not None and ty is not None:
+                sx = candle_centers[-1]
+                sy = _native_y(analysis, float(current), height)
+                if sy is not None and arrow_end_x > sx + 8:
+                    trigger_y = _native_y(analysis, float(trigger), height) if trigger is not None else None
+                    bend_x = min(arrow_end_x - spacing, sx + spacing * 2)
+                    bend_y = trigger_y if trigger_y is not None else int(round((sy + ty) / 2))
+                    _dash_line(draw, (sx, sy), (bend_x, bend_y), arrow_color, width=max(2, line_w + 1), dash=max(7, spacing // 2), gap=max(5, spacing // 3))
+                    _dash_line(draw, (bend_x, bend_y), (arrow_end_x, ty), arrow_color, width=max(2, line_w + 1), dash=max(7, spacing // 2), gap=max(5, spacing // 3))
+                    _native_draw_arrow(draw, (bend_x, bend_y), (arrow_end_x, ty), arrow_color, width=max(2, line_w + 1))
 
     image.alpha_composite(layer)
 
 def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    """Draw a low-noise S/R plan on the untouched broker chart.
+
+    v3.60: when support and resistance are tightly packed around the live price,
+    render one neutral decision zone instead of multiple contradictory lines.
+    Outside that cluster, show only the nearest meaningful level on each side.
+    """
     current = _number(analysis.get("current_price"))
     if current is None:
         return
@@ -5400,33 +5487,58 @@ def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: 
     right = int(width * 0.855)
     pad_x = max(4, int(width * 0.004))
     pad_y = max(2, int(height * 0.003))
+    line_w = max(1, int(round(height * 0.0018)))
+
+    decision_zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
+    zone_low = _number(decision_zone.get("low")) if decision_zone.get("active") else None
+    zone_high = _number(decision_zone.get("high")) if decision_zone.get("active") else None
+    if zone_low is not None and zone_high is not None and float(zone_low) < float(zone_high):
+        y_high = _native_y(analysis, float(zone_high), height)
+        y_low = _native_y(analysis, float(zone_low), height)
+        if y_high is not None and y_low is not None:
+            top, bottom = sorted((y_high, y_low))
+            layer_fill = (214, 151, 45, 24)
+            boundary = (184, 124, 32, 150)
+            draw.rectangle((left, top, right, bottom), fill=layer_fill)
+            _dash_line(draw, (left, top), (right, top), boundary, width=line_w, dash=9, gap=7)
+            _dash_line(draw, (left, bottom), (right, bottom), boundary, width=line_w, dash=9, gap=7)
+
+    def in_decision_zone(price: float) -> bool:
+        return zone_low is not None and zone_high is not None and float(zone_low) - 1e-9 <= price <= float(zone_high) + 1e-9
+
     specs = (
-        ("resistance_levels", "R", (226, 50, 60, 190), lambda p: p > current),
-        ("support_levels", "S", (38, 112, 230, 190), lambda p: p < current),
+        ("resistance_levels", "R", (210, 64, 72, 180), lambda p: p > current),
+        ("support_levels", "S", (44, 111, 214, 180), lambda p: p < current),
     )
     for key, prefix, color, side_ok in specs:
-        rank = 0
+        candidates: list[tuple[float, int]] = []
         for item in analysis.get(key) or []:
             price = _number(item.get("price")) if isinstance(item, dict) else None
-            if price is None or not side_ok(float(price)):
+            strength = int(item.get("strength") or 0) if isinstance(item, dict) else 0
+            if price is None or not side_ok(float(price)) or in_decision_zone(float(price)):
                 continue
-            y = _native_y(analysis, float(price), height)
-            if y is None or y < int(height * 0.03) or y > int(height * 0.97):
-                continue
-            rank += 1
-            draw.line((left, y, right, y), fill=color, width=max(1, int(height * 0.0022)))
-            _native_tag(
-                draw,
-                left + max(3, int(width * 0.006)),
-                y,
-                f"{prefix}{rank} {_fmt_axis_price(float(price))}",
-                fill=(color[0], color[1], color[2], 160),
-                font=font,
-                pad_x=pad_x,
-                pad_y=pad_y,
-            )
-            if rank >= 2:
-                break
+            candidates.append((float(price), strength))
+        if not candidates:
+            continue
+        candidates.sort(key=lambda pair: abs(pair[0] - float(current)))
+        price, strength = candidates[0]
+        y = _native_y(analysis, price, height)
+        if y is None or y < int(height * 0.03) or y > int(height * 0.97):
+            continue
+        alpha = 205 if strength >= 75 else 165
+        line_color = (color[0], color[1], color[2], alpha)
+        draw.line((left, y, right, y), fill=line_color, width=line_w)
+        strength_text = f" {strength}%" if strength > 0 else ""
+        _native_tag(
+            draw,
+            left + max(3, int(width * 0.006)),
+            y,
+            f"{prefix} {_fmt_axis_price(price)}{strength_text}",
+            fill=(color[0], color[1], color[2], 170),
+            font=font,
+            pad_x=pad_x,
+            pad_y=pad_y,
+        )
 
 
 def _native_draw_zones(
@@ -5933,13 +6045,249 @@ def _render_uploaded_chart_with_overlays(
         analysis["_native_candle_x_map"] = candle_x_map
     analysis["animation_plan"] = _native_build_expected_scenario_animation_plan(image, analysis, candle_centers)
     draw = ImageDraw.Draw(image)
-    _native_draw_sr(draw, analysis, width, height, font)
     _native_draw_zones(image, analysis, width, height, font, candle_centers)
+    draw = ImageDraw.Draw(image)
+    _native_draw_sr(draw, analysis, width, height, font)
     _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
     draw = ImageDraw.Draw(image)
     _native_draw_structure(draw, analysis, width, height, font, candle_centers)
     _native_draw_trade(image, analysis, width, height, font)
-    _native_draw_expected_scenario_path(image, analysis, width, height, font)
+    # When a source-matched pattern is present, its own mandatory arrow is the
+    # explanatory path.  Do not stack a second generic scenario arrow on top.
+    if not (analysis.get("pattern_overlays") or []):
+        _native_draw_expected_scenario_path(image, analysis, width, height, font)
+
+    out = io.BytesIO()
+    image.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+
+def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
+    """Create a pattern-first image for Save/Share without polluting the chart.
+
+    The interactive chart remains the untouched broker screenshot plus minimal
+    price-linked overlays.  v3.61 keeps the chart readable at its native aspect
+    ratio, then places the *source-model rule explanation directly below the
+    chart*, followed by compact action cards.
+    """
+    try:
+        with Image.open(io.BytesIO(chart_png)) as source:
+            chart = source.convert("RGBA").copy()
+    except Exception:
+        chart = Image.new("RGBA", (1320, 620), (245, 247, 250, 255))
+
+    pad = 28
+    canvas_w = min(1900, max(1320, chart.width + pad * 2))
+    chart_target_w = canvas_w - pad * 2
+    scale = min(1.0, chart_target_w / max(1, chart.width))
+    chart_w = max(1, int(round(chart.width * scale)))
+    chart_h = max(1, int(round(chart.height * scale)))
+    if (chart_w, chart_h) != chart.size:
+        chart = chart.resize((chart_w, chart_h), Image.Resampling.LANCZOS)
+
+    header_h = 360
+    rule_h = 250
+    bottom_h = 230
+    footer_h = 58
+    canvas_h = header_h + chart_h + rule_h + bottom_h + footer_h + pad * 4
+    image = Image.new("RGBA", (canvas_w, canvas_h), (4, 12, 24, 255))
+    draw = ImageDraw.Draw(image)
+
+    f_brand = _font(46, True, True)
+    f_sub = _font(21, False, True)
+    f_state = _font(34, True)
+    f_instruction = _font(24, True)
+    f_card_label = _font(18, True)
+    f_card_value = _font(27, True)
+    f_card_value_latin = _font(27, True, True)
+    f_small = _font(17, False)
+    f_small_latin = _font(17, False, True)
+    f_rule_title = _font(28, True)
+    f_rule = _font(20, False)
+    f_rule_bold = _font(20, True)
+    f_rule_latin = _font(17, True, True)
+
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    code = str(action.get("code") or analysis.get("draw_mode") or "watch")
+    side = str(action.get("primary_side") or "wait")
+    confirmed = bool(action.get("is_confirmed"))
+    if confirmed and side == "buy":
+        accent = (28, 184, 106, 255)
+    elif confirmed and side == "sell":
+        accent = (225, 71, 78, 255)
+    elif code == "inactive":
+        accent = (202, 151, 45, 255)
+    elif code.startswith("watch") or code in {"no_trade", "no_signal"}:
+        accent = (65, 132, 242, 255)
+    else:
+        accent = (230, 147, 43, 255)
+
+    # Identity row.
+    draw.text((pad, 34), "SaleeM", font=f_brand, fill=(248, 250, 252, 255), anchor="la")
+    draw.text((pad, 83), "XAUUSD  /  M5", font=f_sub, fill=(156, 174, 199, 255), anchor="la")
+    last_update = str(analysis.get("analysis_last_closed_m5_time") or analysis.get("market_m5_latest_candle_time") or "—")
+    draw.text((canvas_w - pad, 84), last_update, font=f_small_latin, fill=(145, 163, 187, 255), anchor="ra")
+
+    # Primary answer banner.
+    banner = (pad, 118, canvas_w - pad, 236)
+    draw.rounded_rectangle(banner, radius=20, fill=(8, 24, 43, 255), outline=(accent[0], accent[1], accent[2], 220), width=2)
+    draw.rectangle((banner[0], banner[1], banner[0] + 8, banner[3]), fill=accent)
+    title = str(action.get("title") or "مراقبة")
+    instruction = str(action.get("instruction") or "انتظر إغلاق M5 واضح قبل أي قرار")
+    _draw_rtl(draw, (banner[2] - 24, banner[1] + 28), title, f_state, accent, anchor="ra")
+    fitted_instruction = _fit_text(draw, instruction, f_instruction, banner[2] - banner[0] - 60, rtl=True)
+    _draw_rtl(draw, (banner[2] - 24, banner[1] + 78), fitted_instruction, f_instruction, (236, 242, 250, 255), anchor="ra")
+
+    direction = str(analysis.get("higher_timeframe_direction") or analysis.get("direction") or "غير واضح")
+    movement = str(analysis.get("current_movement") or "غير واضح")
+    pattern = str(analysis.get("pattern_type") or "لا يوجد")
+    strength = int(action.get("strength") or analysis.get("trade_probability") or 0)
+    rule_check = analysis.get("rule_check") if isinstance(analysis.get("rule_check"), dict) else {}
+    rule_match = int(rule_check.get("match_percent") if rule_check.get("match_percent") is not None else strength)
+    zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
+    zone_value = "بين مستويات"
+    if zone.get("active"):
+        lo = _number(zone.get("low")); hi = _number(zone.get("high"))
+        if lo is not None and hi is not None:
+            zone_value = f"{_fmt_axis_price(lo)} - {_fmt_axis_price(hi)}"
+
+    metrics = [
+        ("الاتجاه العام", direction, GREEN if direction == "صاعد" else RED if direction == "هابط" else BLUE, False),
+        ("الحركة الحالية", movement, GREEN if movement == "صاعد" else RED if movement == "هابط" else BLUE, False),
+        ("منطقة القرار", zone_value, GOLD if zone.get("active") else CYAN, True),
+        ("تطابق القاعدة", f"{rule_match}%", GREEN if rule_match == 100 else GOLD if rule_match >= 75 else BLUE, True),
+    ]
+    cards_y1, cards_y2 = 252, 342
+    gap = 12
+    card_w = (canvas_w - pad * 2 - gap * 3) // 4
+    for i, (label, value, color, latin_value) in enumerate(metrics):
+        x1 = pad + i * (card_w + gap)
+        x2 = x1 + card_w
+        draw.rounded_rectangle((x1, cards_y1, x2, cards_y2), radius=14, fill=(7, 21, 37, 255), outline=(46, 66, 88, 220), width=1)
+        _draw_rtl(draw, (x2 - 14, cards_y1 + 20), label, f_card_label, (151, 169, 194, 255), anchor="ra")
+        if latin_value:
+            draw.text((x2 - 14, cards_y2 - 20), value, font=f_card_value_latin, fill=color, anchor="rs")
+        else:
+            fitted = _fit_text(draw, value, f_card_value, card_w - 28, rtl=True)
+            _draw_rtl(draw, (x2 - 14, cards_y2 - 20), fitted, f_card_value, color, anchor="ra")
+
+    # Exact chart area (preserve aspect ratio and do not crop candles or axis).
+    chart_y = header_h + pad
+    chart_x = (canvas_w - chart_w) // 2
+    draw.rounded_rectangle((chart_x - 4, chart_y - 4, chart_x + chart_w + 4, chart_y + chart_h + 4), radius=8, fill=(255, 255, 255, 255), outline=(61, 82, 108, 255), width=2)
+    image.alpha_composite(chart, dest=(chart_x, chart_y))
+
+    # The user's approved rule explanation is always directly below the chart.
+    rule_y1 = chart_y + chart_h + pad
+    rule_y2 = rule_y1 + rule_h
+    draw.rounded_rectangle(
+        (pad, rule_y1, canvas_w - pad, rule_y2),
+        radius=18,
+        fill=(247, 250, 254, 255),
+        outline=(72, 113, 170, 255),
+        width=2,
+    )
+    _draw_rtl(draw, (canvas_w // 2, rule_y1 + 34), "القاعدة الأساسية", f_rule_title, (28, 74, 126, 255), anchor="ma")
+
+    pattern_name = str(analysis.get("pattern_type") or "لا يوجد")
+    pattern_status = str(analysis.get("pattern_status") or "none")
+    reference_id = str(analysis.get("pattern_reference_source_id") or "").strip()
+    reference_rule = str(analysis.get("pattern_reference_rule") or "").strip()
+    evidence = str(analysis.get("pattern_reference_visual_evidence") or analysis.get("pattern_review_summary") or "").strip()
+    if pattern_name != "لا يوجد":
+        intro = f"تمت مراجعة الشارت مع صور النماذج المرجعية، والنموذج الأقرب هو: {pattern_name}."
+        rule_text = reference_rule or evidence or "يُقبل النموذج فقط عندما ترتبط نقاطه بقمم وقيعان حقيقية على M5."
+        arrow_text = (
+            "السهم المتصل يوضح مسار النموذج بعد التأكيد، وخط الإلغاء يبين موضع بطلان النموذج."
+            if pattern_status == "confirmed"
+            else "السهم المتقطع يوضح السيناريو المتوقع للنموذج المرشح؛ لا يصبح مؤكدًا إلا عند تحقق شرط الكسر أو التفعيل."
+        )
+    else:
+        intro = "تمت مراجعة الشارت مع صور النماذج المرجعية، ولم توجد مطابقة هندسية كافية للرسم."
+        rule_text = "لا يُرسم نموذج تقريبي ولا تُختلق نقاط أو خطوط إذا لم تثبت المطابقة على شموع M5 الحقيقية."
+        arrow_text = "عند غياب نموذج صالح لا يظهر سهم نموذج؛ تبقى قراءة السوق العامة فقط."
+
+    mechanism = "آلية التطبيق: لكل شارت جديد تُراجع صور المصادر، ثم يُرسم النموذج الأقرب فقط بعد تثبيت هندسته على الشارت."
+    if reference_id:
+        draw.text(
+            (pad + 28, rule_y1 + 38),
+            f"SOURCE  {reference_id}",
+            font=f_rule_latin,
+            fill=(80, 100, 125, 255),
+            anchor="la",
+        )
+    text_right = canvas_w - pad - 28
+    text_width = canvas_w - pad * 2 - 56
+    y_cursor = rule_y1 + 76
+    for text, font_obj, fill, max_lines in (
+        (intro, f_rule_bold, (29, 44, 62, 255), 2),
+        ("القاعدة: " + rule_text, f_rule, (46, 60, 78, 255), 2),
+        (arrow_text, f_rule, (72, 83, 98, 255), 1),
+        (mechanism, f_rule_bold, (29, 79, 134, 255), 1),
+    ):
+        lines = _wrap_text_by_width(draw, text, font_obj, text_width, rtl=True, max_lines=max_lines)
+        for line in lines:
+            _draw_rtl(draw, (text_right, y_cursor), line, font_obj, fill, anchor="ra")
+            y_cursor += 29
+        y_cursor += 3
+
+    # Bottom action row changes with the current state.
+    bottom_y1 = rule_y2 + pad
+    bottom_y2 = bottom_y1 + bottom_h
+    draw.rounded_rectangle((pad, bottom_y1, canvas_w - pad, bottom_y2), radius=20, fill=(5, 18, 33, 255), outline=(39, 60, 82, 255), width=1)
+
+    bottom_items: list[tuple[str, str, tuple[int, int, int, int]]] = []
+    if zone.get("active"):
+        up = _number(zone.get("up_trigger")); down = _number(zone.get("down_trigger"))
+        bottom_items = [
+            ("القرار الآن", "لا دخول داخل المنطقة", BLUE),
+            ("تفعيل صعود", f"> {_fmt_axis_price(up)}" if up is not None else "—", GREEN),
+            ("تفعيل هبوط", f"< {_fmt_axis_price(down)}" if down is not None else "—", RED),
+            ("القاعدة", "إغلاق M5 خارج المنطقة", GOLD),
+        ]
+    elif confirmed:
+        entry = _number(analysis.get("entry")); stop = _number(analysis.get("stop_loss")); tp1 = _number(analysis.get("target_1")); tp2 = _number(analysis.get("target_2"))
+        bottom_items = [
+            ("Entry", _fmt_axis_price(entry) if entry is not None else "—", ENTRY_CARD),
+            ("Stop", _fmt_axis_price(stop) if stop is not None else "—", STOP_CARD),
+            ("TP1", _fmt_axis_price(tp1) if tp1 is not None else "—", TP1_CARD),
+            ("TP2", _fmt_axis_price(tp2) if tp2 is not None else "—", TP2_CARD),
+        ]
+    else:
+        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+        buy_trigger = _number(buy.get("trigger_price")); sell_trigger = _number(sell.get("trigger_price")); current = _number(analysis.get("current_price"))
+        bottom_items = [
+            ("السعر الآن", _fmt_axis_price(current) if current is not None else "—", WHITE),
+            ("شراء بعد", f"> {_fmt_axis_price(buy_trigger)}" if buy_trigger is not None else "—", GREEN),
+            ("بيع بعد", f"< {_fmt_axis_price(sell_trigger)}" if sell_trigger is not None else "—", RED),
+            ("الحالة", str(action.get("badge") or "مراقبة"), accent),
+        ]
+
+    inner_pad = 16
+    bx1, bx2 = pad + inner_pad, canvas_w - pad - inner_pad
+    gap = 12
+    card_w = (bx2 - bx1 - gap * 3) // 4
+    card_top = bottom_y1 + 24
+    card_bottom = bottom_y2 - 24
+    for i, (label, value, color) in enumerate(bottom_items[:4]):
+        x1 = bx1 + i * (card_w + gap)
+        x2 = x1 + card_w
+        draw.rounded_rectangle((x1, card_top, x2, card_bottom), radius=14, fill=(10, 28, 47, 255), outline=(48, 70, 93, 220), width=1)
+        if any("\u0600" <= ch <= "\u06ff" for ch in label):
+            _draw_rtl(draw, (x2 - 14, card_top + 24), label, f_card_label, (151, 169, 194, 255), anchor="ra")
+        else:
+            draw.text((x2 - 14, card_top + 24), label, font=f_card_label, fill=(151, 169, 194, 255), anchor="ra")
+        if any("\u0600" <= ch <= "\u06ff" for ch in value):
+            fitted = _fit_text(draw, value, f_card_value, card_w - 28, rtl=True)
+            _draw_rtl(draw, (x2 - 14, card_bottom - 26), fitted, f_card_value, color, anchor="ra")
+        else:
+            draw.text((x2 - 14, card_bottom - 26), value, font=f_card_value_latin, fill=color, anchor="rs")
+
+    footer_y = bottom_y2 + 28
+    _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
+    draw.text((pad, footer_y), "SaleeM v3.61", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
