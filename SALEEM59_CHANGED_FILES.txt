@@ -16,3 +16,24 @@ Rules:
 - X must come from calibrated screenshot candles; Y must come from strict pixel-axis mapping.
 - W/M is the only pattern skeleton animated in v1.
 - One main scenario only; no guessed geometry.
+
+v3.66
+- app/__init__.py
+- app/main.py
+- app/services/analyzer.py
+- app/engine/renderer.py
+- app/templates/index.html
+- knowledge/09_rules/PERMANENT_ANALYSIS_PROMPT.md
+- SALEEM_RECONSTRUCTED_MARKET_CHART_SPEC_V366.md
+- V366_CHANGELOG_AR.md
+- README.md
+- SALEEM_FINAL_SPEC.md
+- SALEEM_CONSISTENCY_PROGRAMMING_SPEC.md
+- SALEEM_FINAL_IMAGE_PROGRAMMING_SPEC.md
+- SALEEM_REFERENCE_SCENARIO_ENGINE_SPEC_V364.md
+- tests/test_reconstructed_chart_v366.py
+- tests/test_analysis_consistency_lock.py
+- tests/test_pattern_overlay_v345.py
+- tests/test_renderer_v38.py
+- tests/test_health.py
+- tests/test_system_status_panel_v325.py

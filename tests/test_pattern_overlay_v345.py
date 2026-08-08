@@ -50,47 +50,31 @@ def test_chart_overlay_list_is_m5_only_and_never_exceeds_two():
     assert all(item["timeframe"] == "M5" for item in review["overlay_patterns"])
 
 
-def test_candle_x_detection_and_safe_no_anchor_fallback(tmp_path: Path):
-    chart = Image.new("RGBA", (1000, 500), (248, 250, 252, 255))
-    draw = ImageDraw.Draw(chart)
-    for i in range(12):
-        x = 80 + i * 55
-        color = (20, 165, 125, 255) if i % 2 == 0 else (235, 70, 70, 255)
-        draw.line((x, 120, x, 230), fill=color, width=2)
-        draw.rectangle((x - 7, 150, x + 7, 205), fill=color)
-    centers = _native_detect_candle_centers(chart)
-    assert len(centers) == 12
-
-    # A blank source has no safe candle X anchors. Pattern geometry must be
-    # hidden rather than guessed onto a convenient X position.
-    blank = Image.new("RGB", (800, 400), "white")
+def test_reconstructed_renderer_no_longer_depends_on_uploaded_candle_x_detection(tmp_path: Path):
+    # v3.66 rebuilds the chart from market OHLC, so a blank screenshot may be
+    # accepted as a visual reference without becoming the final pixel canvas.
+    blank = Image.new("RGB", (800, 1200), "white")
     source = tmp_path / "blank.png"
     blank.save(source)
+    rows = _double_top_rows()
+    review = review_market_patterns({"M5": rows, "M15": rows, "H1": rows})
     analysis = {
-        "candles": [],
-        "current_price": 100.0,
-        "image_axis_labels": [],
+        "candles": rows,
+        "current_price": float(rows[-1]["close"]),
+        "visual_current_price": float(rows[-1]["close"]),
         "support_levels": [],
         "resistance_levels": [],
-        "pattern_overlays": [{
-            "name": "W",
-            "timeframe": "M5",
-            "status": "confirmed",
-            "bias": "صاعد",
-            "geometry": {
-                "window_size": 20,
-                "anchors": [{"index": 10, "price": 99.0, "role": "pivot"}],
-                "lines": [],
-                "path": [],
-                "trigger": 100.0,
-                "target": 102.0,
-                "breakout_index": 19,
-            },
-        }],
-        "action_summary": {"code": "watch", "primary_side": "wait"},
+        "pattern_overlays": review["overlay_patterns"],
+        "reference_scenario_available": False,
+        "chart_reference_meta": {
+            "reference_aspect_ratio": 800 / 1200,
+            "reference_orientation": "portrait",
+            "reference_theme": "light",
+        },
     }
     rendered = render_result(analysis, chart_background_path=source)
     out = tmp_path / "out.png"
     out.write_bytes(rendered)
     with Image.open(out) as result:
-        assert result.convert("RGB").tobytes() == blank.tobytes()
+        assert result.height > result.width
+        assert result.convert("RGB").tobytes() != blank.resize(result.size).tobytes()

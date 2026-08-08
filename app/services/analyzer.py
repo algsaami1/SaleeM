@@ -892,25 +892,68 @@ def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
     return enhanced
 
 
-def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
-    """Keep a landscape upload as the literal chart source.
+def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
+    """Extract only visual-reference metadata from the uploaded chart image.
 
-    v3.44 stops converting the user's landscape screenshot into the old
-    portrait canonical viewport. Geometry extraction, axis calibration and
-    final rendering now inspect the same original pixels, so the chart shown
-    in the result is the chart the user actually uploaded.
+    v3.66 does not reuse the screenshot as the final chart and does not try to
+    recover historical OHLC from pixels.  The upload supplies current-price
+    context when readable plus presentation hints such as aspect ratio and
+    light/dark background.  Market candles remain the only OHLC source.
     """
     meta: dict[str, Any] = {
-        "used_smart_crop": False,
-        "chart_viewport_prepared": False,
-        "source_chart_preserved": True,
-        "smart_crop_mode": "original_landscape",
+        "source_chart_preserved": False,
+        "image_input_role": "visual_reference_only",
+        "reference_orientation": "unknown",
+        "reference_aspect_ratio": 1.0,
+        "reference_theme": "light",
+        "reference_background_rgb": [248, 250, 252],
     }
     try:
         with Image.open(image_path) as source:
-            meta["source_chart_size"] = [int(source.width), int(source.height)]
+            image = source.convert("RGB")
+            width, height = image.size
+            meta["source_chart_size"] = [int(width), int(height)]
+            ratio = float(width) / max(1.0, float(height))
+            meta["reference_aspect_ratio"] = round(ratio, 4)
+            if ratio >= 1.18:
+                meta["reference_orientation"] = "landscape"
+            elif ratio <= 0.85:
+                meta["reference_orientation"] = "portrait"
+            else:
+                meta["reference_orientation"] = "square"
+
+            # Sample only quiet border/corner regions; this is a style hint,
+            # never a market-data input and never an OCR substitute.
+            samples = []
+            probes = [
+                (0.02, 0.02), (0.50, 0.02), (0.98, 0.02),
+                (0.02, 0.50), (0.98, 0.50),
+                (0.02, 0.98), (0.50, 0.98), (0.98, 0.98),
+            ]
+            for xr, yr in probes:
+                x = min(width - 1, max(0, int((width - 1) * xr)))
+                y = min(height - 1, max(0, int((height - 1) * yr)))
+                samples.append(image.getpixel((x, y)))
+            if samples:
+                channels = list(zip(*samples))
+                rgb = [int(statistics.median(ch)) for ch in channels]
+                meta["reference_background_rgb"] = rgb
+                luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
+                meta["reference_theme"] = "dark" if luminance < 105 else "light"
     except Exception:
         pass
+    return meta
+
+
+def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
+    """Treat the upload as a visual reference, with portrait fully supported."""
+    meta = _chart_visual_reference_meta(image_path)
+    meta.update({
+        "used_smart_crop": False,
+        "chart_viewport_prepared": False,
+        "smart_crop_mode": "visual_reference_only",
+        "reconstructed_market_chart": True,
+    })
     return image_path, meta
 
 NUM_NULL = {"type": ["number", "null"]}
@@ -1906,93 +1949,49 @@ def _bind_market_analysis_to_image(
     snapshot_key: str,
     snapshot_reused: bool,
 ) -> dict[str, Any]:
-    """Project one immutable market decision onto the uploaded broker axis."""
+    """Attach screenshot reference metadata without shifting real market OHLC.
+
+    v3.66 changes the old projection model.  Historical candles, levels,
+    pattern anchors and trade geometry stay at the prices returned by the
+    market provider.  A readable screenshot price is preserved separately as
+    ``visual_current_price`` and may be displayed when it remains reasonably
+    close to the live/closed market price.  This prevents stale screenshots
+    from translating the entire market structure by an artificial offset.
+    """
     result = copy.deepcopy(canonical)
     provider_current = float(canonical.get("current_price") or canonical.get("market_last_close") or 0.0)
     image_current = _number(geometry.get("current_price"))
     chart_readable = bool(geometry.get("chart_readable") and image_current is not None)
-    displayed_current = float(image_current) if image_current is not None else provider_current
-    offset = displayed_current - provider_current
 
-    shifted_candles: list[dict[str, Any]] = []
-    for candle in result.get("candles") or []:
-        if not isinstance(candle, dict):
-            continue
-        shifted = dict(candle)
-        for key in ("open", "high", "low", "close"):
-            shifted[key] = _shift_numeric_price(candle.get(key), offset)
-        shifted_candles.append(shifted)
-    result["candles"] = shifted_candles
-
-    for level_key in ("support_levels", "resistance_levels"):
-        shifted_levels: list[dict[str, Any]] = []
-        for level in result.get(level_key) or []:
-            if not isinstance(level, dict):
-                continue
-            shifted = dict(level)
-            shifted["price"] = _shift_numeric_price(level.get("price"), offset)
-            shifted_levels.append(shifted)
-        result[level_key] = shifted_levels
-
-    swings = result.get("confirmed_limit_swings")
-    if isinstance(swings, dict):
-        shifted_swings: dict[str, list[dict[str, Any]]] = {"troughs": [], "peaks": []}
-        for swing_key in ("troughs", "peaks"):
-            for item in swings.get(swing_key) or []:
-                if not isinstance(item, dict):
-                    continue
-                shifted = dict(item)
-                shifted["price"] = _shift_numeric_price(item.get("price"), offset)
-                shifted_swings[swing_key].append(shifted)
-        result["confirmed_limit_swings"] = shifted_swings
-
-    for key in ("entry", "stop_loss", "target_1", "target_2", "target_3"):
-        result[key] = _shift_numeric_price(result.get(key), offset)
-
-    # Pattern geometry is detected before the broker-image offset is known.
-    # Shift its Y-price coordinates by the exact same offset as candles/levels.
-    result["pattern_overlays"] = _shift_pattern_overlays(result.get("pattern_overlays"), offset)
-
-    pressure = result.get("level_pressure")
-    if isinstance(pressure, dict):
-        pressure = dict(pressure)
-        for key in ("nearest_resistance", "nearest_support"):
-            pressure[key] = _shift_numeric_price(pressure.get(key), offset)
-        result["level_pressure"] = pressure
+    # Keep the real market decision anchored to market prices.
+    result["current_price"] = round(provider_current, 2)
+    result["provider_market_last_close"] = round(provider_current, 2)
+    result["visual_current_price"] = round(float(image_current), 2) if image_current is not None else None
+    result["visual_current_price_source"] = "chart_image" if image_current is not None else "unavailable"
+    result["current_price_source"] = "market_closed_m5"
 
     labels = _normalize_axis_labels(geometry.get("image_axis_labels"))
+    image_high = _number(geometry.get("image_price_high"))
+    image_low = _number(geometry.get("image_price_low"))
     current_y = _number(geometry.get("current_price_y_ratio")) if image_current is not None else None
     if current_y is not None:
         current_y = max(0.0, min(1.0, float(current_y)))
 
-    image_high = _number(geometry.get("image_price_high"))
-    image_low = _number(geometry.get("image_price_low"))
-    if len(labels) >= 2:
-        image_high = max(float(labels[0]["price"]), image_high or float("-inf"))
-        image_low = min(float(labels[-1]["price"]), image_low or float("inf"))
-    if image_high is None or image_high <= displayed_current:
-        image_high = max(float(candle["high"]) for candle in shifted_candles)
-    if image_low is None or image_low >= displayed_current:
-        image_low = min(float(candle["low"]) for candle in shifted_candles)
-
     result.update(
         {
             "chart_readable": chart_readable,
-            "current_price": round(displayed_current, 2),
             "current_price_y_ratio": round(current_y, 4) if current_y is not None else None,
-            "current_price_source": "chart_image" if image_current is not None else "market_fallback",
-            "image_price_high": round(float(image_high), 2),
-            "image_price_low": round(float(image_low), 2),
+            "image_price_high": round(float(image_high), 2) if image_high is not None else None,
+            "image_price_low": round(float(image_low), 2) if image_low is not None else None,
             "image_axis_labels": labels,
-            "price_range_source": "chart_image" if len(labels) >= 2 else "market_candles_fallback",
-            "provider_market_last_close": round(provider_current, 2),
-            "market_price_offset": round(offset, 3),
+            "price_range_source": "market_ohlc_with_image_range_hint",
+            "market_price_offset": round(float(image_current) - provider_current, 3) if image_current is not None else 0.0,
             "analysis_snapshot_key": snapshot_key,
             "analysis_snapshot_reused": bool(snapshot_reused),
             "analysis_consistency_lock": "last_closed_m5",
             "analysis_input_role": "market_data_only",
-            "image_input_role": "axis_geometry_only",
-            "price_projection_mode": "closed_m5_decision_projected_once_to_broker_axis",
+            "image_input_role": "visual_reference_current_price_axis_style",
+            "price_projection_mode": "market_ohlc_preserved_no_screenshot_translation",
         }
     )
 
@@ -2017,6 +2016,7 @@ def _bind_market_analysis_to_image(
             f"إلغاء السيناريو عند تجاوز وقف الخسارة {float(result['stop_loss']):.1f}"
         )
     return result
+
 
 def _number(value: Any) -> float | None:
     if isinstance(value, bool):
@@ -4543,7 +4543,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     raw_m5 = raw_frames.get("M5") if isinstance(raw_frames, dict) else None
     live_m5 = [c for c in raw_m5 if isinstance(c, dict)] if isinstance(raw_m5, list) else []
     closed_m5 = (market_context.get("frames") or {}).get("M5") or []
-    display_count = max(12, min(48, int(os.getenv("CHART_CANDLE_COUNT", "30"))))
+    display_count = max(24, min(60, int(os.getenv("CHART_CANDLE_COUNT", "48"))))
     normalized_market = _normalize_candles(closed_m5[-display_count:])
     if not normalized_market:
         raise RuntimeError("لا توجد شموع M5 مغلقة كافية للتحليل.")
@@ -4617,22 +4617,21 @@ def _analyze(path: Path) -> dict[str, Any]:
 
 
 def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
-    prepared_image_path, crop_meta = _prepare_analysis_image(image_path)
+    prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
-    axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
-    if not axis_ok:
-        analysis["axis_warning"] = (
-            "تم استخدام وضع احتياطي لأن قراءة محور الأسعار من الصورة لم تكن كاملة: " + axis_reason
-        )
-        analysis["axis_validation_passed"] = False
-    else:
-        analysis["axis_warning"] = ""
-        analysis["axis_validation_passed"] = True
 
-    if crop_meta.get("used_smart_crop"):
-        analysis["axis_warning"] = (
-            (analysis.get("axis_warning") + " ") if analysis.get("axis_warning") else ""
-        ) + "استخدم التطبيق نافذة موحدة للشارت ومحور الأسعار، وأزال شريط أمر التداول العلوي بالقص عند ظهوره قبل معايرة الأسعار."
+    # Axis OCR/vision is now a presentation hint only.  Portrait screenshots,
+    # cropped screenshots and incomplete axes remain valid because OHLC comes
+    # from the market provider rather than screenshot pixels.
+    axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
+    analysis["axis_validation_passed"] = bool(axis_ok)
+    analysis["axis_warning"] = "" if axis_ok else (
+        "محور الصورة غير مكتمل؛ تم الاعتماد على شموع السوق الحقيقية مع استخدام الصورة كمرجع بصري فقط."
+    )
+    analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
+    analysis["reconstructed_market_chart"] = True
+    analysis["uploaded_chart_role"] = "visual_reference_only"
+    analysis["ohlc_source"] = "market_provider"
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
@@ -4640,29 +4639,29 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["decision_zone"] = _build_decision_zone(analysis)
     analysis["rule_check"] = _build_rule_check(analysis)
 
-    # Strict visual gate: a failed rule can never leave confirmed/conditional
-    # execution graphics active. Preserve the computed levels in the analysis
-    # object for explanation, but the visible chart becomes neutral monitoring.
+    # A failed trade-entry rule does not erase a verified educational reference
+    # scenario.  It only prevents Entry/SL/TP execution graphics.  The closest
+    # verified pattern/scenario and its candidate expectation arrow may still be
+    # drawn as an explanatory overlay on the reconstructed market chart.
     if not bool((analysis.get("rule_check") or {}).get("all_pass")):
         analysis["draw_mode"] = "watch"
         analysis["trade_side"] = "مراقبة"
         analysis["confirmation_status"] = "مراقبة"
-        analysis["directional_path_enabled"] = False
         analysis["show_targets_as_active"] = False
 
     analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
-    # Keep the interactive chart clean and movable, while save/share receives a
-    # separate decision-first snapshot with fixed information around the chart.
+    # v3.66: result image is rebuilt from real market OHLC.  The uploaded image
+    # contributes visual orientation/theme/current-price reference only.
     png = render_result(analysis, chart_background_path=image_path)
     share_png = render_share_snapshot(analysis, png)
     return {
         **analysis,
-        **crop_meta,
+        **visual_meta,
         "symbol": "XAUUSD",
         "timeframe": "M5",
-        "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
+        "window": f"{len(analysis.get('candles') or [])} شمعة M5 حقيقية من السوق",
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
         "share_result_url": "data:image/png;base64," + base64.b64encode(share_png).decode(),
     }

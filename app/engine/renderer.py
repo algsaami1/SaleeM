@@ -6002,13 +6002,479 @@ def _render_uploaded_chart_with_overlays(
 
 
 
+
+def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
+    """Choose a chart size from the uploaded reference aspect ratio.
+
+    Portrait, square and landscape uploads are all valid.  Extreme phone
+    screenshot ratios are gently capped so the actual market chart remains
+    readable while still feeling visually related to the uploaded reference.
+    """
+    meta = analysis.get("chart_reference_meta") if isinstance(analysis.get("chart_reference_meta"), dict) else {}
+    try:
+        ratio = float(meta.get("reference_aspect_ratio") or 1.55)
+    except (TypeError, ValueError):
+        ratio = 1.55
+    ratio = max(0.62, min(1.90, ratio))
+    if ratio < 0.90:
+        width = 1080
+    elif ratio > 1.28:
+        width = 1600
+    else:
+        width = 1280
+    height = int(round(width / ratio))
+    height = max(760, min(1740, height))
+    return width, height
+
+
+def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int, int, int]]:
+    meta = analysis.get("chart_reference_meta") if isinstance(analysis.get("chart_reference_meta"), dict) else {}
+    theme = str(meta.get("reference_theme") or "light")
+    if theme == "dark":
+        return {
+            "bg": (12, 20, 30, 255),
+            "plot": (15, 25, 37, 255),
+            "grid": (104, 126, 148, 42),
+            "text": (220, 228, 236, 255),
+            "muted": (148, 164, 180, 255),
+            "border": (68, 88, 108, 180),
+            "bull": (29, 184, 139, 255),
+            "bear": (239, 79, 79, 255),
+        }
+    return {
+        "bg": (246, 248, 251, 255),
+        "plot": (255, 255, 255, 255),
+        "grid": (77, 115, 153, 30),
+        "text": (55, 64, 74, 255),
+        "muted": (112, 124, 138, 255),
+        "border": (192, 202, 213, 210),
+        "bull": (32, 169, 139, 255),
+        "bear": (235, 78, 78, 255),
+    }
+
+
+def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
+    """Return a useful market-candle window and its offset in analysis.candles."""
+    all_candles = _valid_renderer_candles(analysis)
+    if not all_candles:
+        return [], 0
+    desired = 42
+    scenario_geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
+    try:
+        desired = max(desired, int(scenario_geom.get("window_size") or 0) + 6)
+    except (TypeError, ValueError):
+        pass
+    for item in analysis.get("pattern_overlays") or []:
+        if not isinstance(item, dict):
+            continue
+        geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+        try:
+            desired = max(desired, int(geom.get("window_size") or 0) + 6)
+        except (TypeError, ValueError):
+            pass
+    desired = max(24, min(60, desired))
+    window = all_candles[-desired:]
+    return window, len(all_candles) - len(window)
+
+
+def _reconstructed_price_range(analysis: dict[str, Any], candles: list[dict[str, Any]]) -> tuple[float, float]:
+    values: list[float] = []
+    for candle in candles:
+        values.extend((float(candle["low"]), float(candle["high"])))
+    for key in ("current_price", "entry", "stop_loss", "target_1", "target_2", "target_3"):
+        value = _number(analysis.get(key))
+        if value is not None:
+            values.append(float(value))
+    for key in ("support_levels", "resistance_levels"):
+        for item in analysis.get(key) or []:
+            if isinstance(item, dict):
+                price = _number(item.get("price"))
+                if price is not None:
+                    values.append(float(price))
+    if not values:
+        return 0.0, 1.0
+    lo, hi = min(values), max(values)
+    span = max(0.2, hi - lo)
+
+    # The screenshot axis is a visual hint only.  Use it when it surrounds the
+    # market window without being wildly wider; never force market OHLC to it.
+    ref_lo = _number(analysis.get("image_price_low"))
+    ref_hi = _number(analysis.get("image_price_high"))
+    market_current = _number(analysis.get("current_price"))
+    if ref_lo is not None and ref_hi is not None and ref_hi > ref_lo and market_current is not None:
+        ref_span = float(ref_hi) - float(ref_lo)
+        if float(ref_lo) <= float(market_current) <= float(ref_hi) and ref_span <= span * 3.2:
+            lo = min(lo, float(ref_lo))
+            hi = max(hi, float(ref_hi))
+            span = max(0.2, hi - lo)
+    pad = span * 0.08
+    return lo - pad, hi + pad
+
+
+def _recon_index_to_actual(index: int, window_size: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    offset = max(0, total - max(1, window_size))
+    return max(0, min(total - 1, offset + int(index)))
+
+
+def _recon_arrow(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], color, *, width: int, dashed: bool) -> None:
+    if len(points) < 2:
+        return
+    for a, b in zip(points[:-1], points[1:]):
+        if dashed:
+            _dash_line(draw, a, b, color, width=width, dash=max(8, width * 3), gap=max(6, width * 2))
+        else:
+            draw.line((*a, *b), fill=color, width=width)
+    a, b = points[-2], points[-1]
+    ang = math.atan2(b[1] - a[1], b[0] - a[0])
+    size = max(12, width * 4)
+    left = (int(b[0] - size * math.cos(ang - math.pi / 6)), int(b[1] - size * math.sin(ang - math.pi / 6)))
+    right = (int(b[0] - size * math.cos(ang + math.pi / 6)), int(b[1] - size * math.sin(ang + math.pi / 6)))
+    draw.polygon([b, left, right], fill=color)
+
+
+def _reconstructed_scenario_target(analysis: dict[str, Any], candles: list[dict[str, Any]], bias: str) -> float | None:
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        return None
+    candidates: list[float] = []
+    direct = _number(analysis.get("target_1"))
+    if direct is not None:
+        candidates.append(float(direct))
+    for item in analysis.get("pattern_overlays") or []:
+        if not isinstance(item, dict):
+            continue
+        geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+        value = _number(geom.get("target"))
+        if value is not None:
+            candidates.append(float(value))
+    level_key = "resistance_levels" if bias == "صاعد" else "support_levels"
+    for level in analysis.get(level_key) or []:
+        if isinstance(level, dict):
+            value = _number(level.get("price"))
+            if value is not None:
+                candidates.append(float(value))
+    highs, lows = _simple_swing_points(candles, window=2)
+    candidates.extend(price for _idx, price in (highs if bias == "صاعد" else lows))
+    if bias == "صاعد":
+        valid = [v for v in candidates if v > float(current)]
+    else:
+        valid = [v for v in candidates if v < float(current)]
+    return min(valid, key=lambda v: abs(v - float(current))) if valid else None
+
+
+def _draw_reconstructed_pattern(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    candle_x: list[int],
+    price_y,
+    palette: dict[str, tuple[int, int, int, int]],
+    font,
+) -> None:
+    overlays = [x for x in (analysis.get("pattern_overlays") or []) if isinstance(x, dict)]
+    if not overlays:
+        return
+    for overlay in overlays[:1]:
+        geom = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
+        try:
+            window_size = int(geom.get("window_size") or len(candles))
+        except (TypeError, ValueError):
+            window_size = len(candles)
+        color = (39, 93, 173, 230)
+        for line in geom.get("lines") or []:
+            if not isinstance(line, dict):
+                continue
+            p1, p2 = line.get("p1"), line.get("p2")
+            if not (isinstance(p1, list) and isinstance(p2, list) and len(p1) >= 2 and len(p2) >= 2):
+                continue
+            try:
+                i1 = _recon_index_to_actual(int(p1[0]), window_size, len(candles))
+                i2 = _recon_index_to_actual(int(p2[0]), window_size, len(candles))
+                y1, y2 = price_y(float(p1[1])), price_y(float(p2[1]))
+            except (TypeError, ValueError):
+                continue
+            draw.line((candle_x[i1], y1, candle_x[i2], y2), fill=color, width=2)
+        for anchor in geom.get("anchors") or []:
+            if not isinstance(anchor, dict):
+                continue
+            try:
+                idx = _recon_index_to_actual(int(anchor.get("index")), window_size, len(candles))
+                y = price_y(float(anchor.get("price")))
+            except (TypeError, ValueError):
+                continue
+            x = candle_x[idx]
+            r = 7
+            draw.ellipse((x-r, y-r, x+r, y+r), fill=palette["plot"], outline=color, width=2)
+        label = str(overlay.get("name") or analysis.get("pattern_type") or "").strip()
+        if label:
+            x = candle_x[max(0, len(candles) - 12)]
+            y = max(28, price_y(max(float(c["high"]) for c in candles[-12:])) - 28)
+            _draw_rtl(draw, (x, y), label, font, color, anchor="ma")
+
+
+def _draw_reconstructed_reference_scenario(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    candle_x: list[int],
+    price_y,
+    plot: tuple[int, int, int, int],
+    palette: dict[str, tuple[int, int, int, int]],
+    font,
+) -> None:
+    if not bool(analysis.get("reference_scenario_available")):
+        _draw_reconstructed_pattern(ImageDraw.Draw(image), analysis, candles, candle_x, price_y, palette, font)
+        return
+    components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
+    geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
+    try:
+        window_size = int(geom.get("window_size") or len(candles))
+    except (TypeError, ValueError):
+        window_size = len(candles)
+    bias = str(analysis.get("reference_scenario_bias") or "محايد")
+    status = str(analysis.get("reference_scenario_status") or "candidate")
+    confirmed = status == "confirmed"
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    left, top, right, bottom = plot
+    label_color = (24, 145, 88, 230) if bias == "صاعد" else (207, 61, 69, 230) if bias == "هابط" else (42, 104, 196, 230)
+
+    if "pattern" in components:
+        _draw_reconstructed_pattern(draw, analysis, candles, candle_x, price_y, palette, font)
+
+    if "structure" in components:
+        for event in geom.get("structure_events") or []:
+            if not isinstance(event, dict):
+                continue
+            try:
+                swing = _recon_index_to_actual(int(event.get("swing_index")), window_size, len(candles))
+                brk = _recon_index_to_actual(int(event.get("break_index")), window_size, len(candles))
+                price = float(event.get("price"))
+            except (TypeError, ValueError):
+                continue
+            y = price_y(price)
+            x1, x2 = sorted((candle_x[swing], candle_x[brk]))
+            _dash_line(draw, (x1, y), (x2, y), (47, 55, 64, 210) if palette["plot"][0] > 200 else (210, 220, 230, 210), width=2, dash=9, gap=5)
+            draw.text(((x1 + x2)//2, y-6), str(event.get("label") or "BOS"), font=font, fill=palette["text"], anchor="ms")
+
+    if "order_block" in components:
+        block = geom.get("order_block") if isinstance(geom.get("order_block"), dict) else None
+        if block:
+            try:
+                idx = _recon_index_to_actual(int(block.get("index")), window_size, len(candles))
+                y1, y2 = price_y(float(block.get("high"))), price_y(float(block.get("low")))
+            except (TypeError, ValueError):
+                idx = -1
+            if idx >= 0:
+                x1 = max(left, candle_x[idx] - 8)
+                x2 = min(right, candle_x[-1] + max(30, (right-left)//9))
+                fill = (55, 84, 102, 55)
+                outline = (70, 91, 105, 170)
+                draw.rectangle((x1, min(y1,y2), x2, max(y1,y2)), fill=fill, outline=outline, width=2)
+                draw.text(((x1+x2)//2, (y1+y2)//2), "Order Block", font=font, fill=palette["text"], anchor="mm")
+
+    if "fvg" in components:
+        gap = geom.get("fvg") if isinstance(geom.get("fvg"), dict) else None
+        if gap:
+            try:
+                idx = _recon_index_to_actual(int(gap.get("index")), window_size, len(candles))
+                y1, y2 = price_y(float(gap.get("high"))), price_y(float(gap.get("low")))
+            except (TypeError, ValueError):
+                idx = -1
+            if idx >= 0:
+                x1 = max(left, candle_x[max(0, idx-2)])
+                x2 = min(right, candle_x[-1] + max(22, (right-left)//12))
+                draw.rectangle((x1, min(y1,y2), x2, max(y1,y2)), fill=(244, 158, 11, 42), outline=(211, 139, 31, 175), width=2)
+                draw.text(((x1+x2)//2, (y1+y2)//2), "FVG", font=font, fill=(151, 96, 22, 235), anchor="mm")
+
+    if "liquidity" in components:
+        sweep = geom.get("liquidity_sweep") if isinstance(geom.get("liquidity_sweep"), dict) else None
+        if sweep:
+            try:
+                idx = _recon_index_to_actual(int(sweep.get("index")), window_size, len(candles))
+                y = price_y(float(sweep.get("price")))
+            except (TypeError, ValueError):
+                idx = -1
+            if idx >= 0:
+                x2 = candle_x[idx]
+                x1 = max(left, x2 - max(100, (right-left)//5))
+                _dash_line(draw, (x1,y), (x2,y), label_color, width=2, dash=8, gap=5)
+                draw.text(((x1+x2)//2, y-5), "Liquidity Sweep", font=font, fill=label_color, anchor="ms")
+
+    if "engulfing" in components:
+        engulf = geom.get("engulfing") if isinstance(geom.get("engulfing"), dict) else None
+        if engulf:
+            try:
+                idx = _recon_index_to_actual(int(engulf.get("index")), window_size, len(candles))
+            except (TypeError, ValueError):
+                idx = -1
+            if 0 <= idx < len(candles):
+                c = candles[idx]
+                x = candle_x[idx]
+                y1, y2 = price_y(float(c["high"])), price_y(float(c["low"]))
+                r = max(8, (right-left)//140)
+                draw.rounded_rectangle((x-r, min(y1,y2)-3, x+r, max(y1,y2)+3), radius=4, outline=label_color, width=2)
+                draw.text((x, min(y1,y2)-7), "Engulfing", font=font, fill=label_color, anchor="ms")
+
+    label = str(analysis.get("reference_scenario_label") or "").strip()
+    if label:
+        suffix = " ✓" if confirmed else " — مرشح"
+        _draw_rtl(draw, ((left+right)//2, top+20), label + suffix, font, label_color, anchor="ma")
+
+    if "expectation_arrow" in components and bias in {"صاعد", "هابط"}:
+        target = _reconstructed_scenario_target(analysis, candles, bias)
+        current = _number(analysis.get("current_price"))
+        if target is not None and current is not None:
+            sx = candle_x[-1]
+            sy = price_y(float(current))
+            ex = min(right - 18, sx + max(80, (right-left)//7))
+            ty = price_y(float(target))
+            # Educational reference style: a slight retest bend before the main move.
+            bend_x = min(ex - 24, sx + max(35, (ex-sx)//2))
+            retrace = max(10, int(abs(ty-sy) * 0.18))
+            bend_y = sy - retrace if bias == "هابط" else sy + retrace
+            bend_y = max(top + 20, min(bottom - 20, bend_y))
+            _recon_arrow(draw, [(sx,sy),(bend_x,bend_y),(ex,ty)], label_color, width=3, dashed=not confirmed)
+
+    image.alpha_composite(layer)
+
+
+def _render_reconstructed_market_chart(
+    analysis: dict[str, Any],
+    chart_background_path: str | os.PathLike[str] | None = None,
+) -> bytes:
+    """Render a clean market-OHLC chart guided by the upload's visual style.
+
+    The screenshot is not pasted into the output.  Every historical candle is
+    drawn from market-provider OHLC.  The uploaded file controls only aspect,
+    light/dark style hints and a separate current-price reference when readable.
+    """
+    # Normal production analysis already carries chart_reference_meta.  Keep a
+    # path-only fallback for tests/older callers so portrait references still
+    # influence the reconstructed aspect without ever becoming chart pixels.
+    if not isinstance(analysis.get("chart_reference_meta"), dict) and chart_background_path:
+        try:
+            with Image.open(chart_background_path) as ref:
+                rw, rh = ref.size
+                ratio = float(rw) / max(1.0, float(rh))
+            analysis = dict(analysis)
+            analysis["chart_reference_meta"] = {
+                "reference_aspect_ratio": ratio,
+                "reference_orientation": "portrait" if ratio <= 0.85 else "landscape" if ratio >= 1.18 else "square",
+                "reference_theme": "light",
+            }
+        except Exception:
+            pass
+    width, height = _reconstructed_dimensions(analysis)
+    palette = _reconstructed_palette(analysis)
+    image = Image.new("RGBA", (width, height), palette["bg"])
+    draw = ImageDraw.Draw(image)
+    candles, _offset = _reconstructed_window(analysis)
+    if not candles:
+        out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
+
+    # Leave more future room in landscape and slightly less in portrait.
+    portrait = height > width * 1.15
+    margin_l = int(width * 0.045)
+    margin_r = int(width * (0.16 if portrait else 0.13))
+    margin_t = int(height * 0.055)
+    margin_b = int(height * 0.10)
+    plot = (margin_l, margin_t, width - margin_r, height - margin_b)
+    left, top, right, bottom = plot
+    draw.rounded_rectangle((left-6, top-6, width-margin_l, bottom+6), radius=14, fill=palette["plot"], outline=palette["border"], width=2)
+
+    price_min, price_max = _reconstructed_price_range(analysis, candles)
+    def price_y(price: float) -> int:
+        ratio = (price_max - float(price)) / max(1e-9, price_max - price_min)
+        return int(round(top + ratio * (bottom - top)))
+
+    # Grid + right axis.
+    axis_x = right + 16
+    f_axis = _font(max(14, int(width * 0.012)), False, True)
+    f_label = _font(max(14, int(width * 0.012)), True, True)
+    for i in range(8):
+        r = i / 7
+        y = int(round(top + r * (bottom-top)))
+        price = price_max - r * (price_max-price_min)
+        draw.line((left, y, right, y), fill=palette["grid"], width=1)
+        draw.text((axis_x, y), _fmt_axis_price(price), font=f_axis, fill=palette["muted"], anchor="lm")
+    for i in range(1, 7):
+        x = int(round(left + (right-left) * i / 7))
+        draw.line((x, top, x, bottom), fill=palette["grid"], width=1)
+
+    # Candles occupy roughly 82% of the plot, leaving scenario space on the right.
+    candle_right = int(left + (right-left) * (0.82 if portrait else 0.80))
+    slot = (candle_right-left) / max(1, len(candles))
+    body_w = max(5, min(15, int(slot * 0.58)))
+    candle_x: list[int] = []
+    for i, c in enumerate(candles):
+        x = int(round(left + slot * (i + 0.5)))
+        candle_x.append(x)
+        oy, cy = price_y(float(c["open"])), price_y(float(c["close"]))
+        hy, ly = price_y(float(c["high"])), price_y(float(c["low"]))
+        bullish = float(c["close"]) >= float(c["open"])
+        color = palette["bull"] if bullish else palette["bear"]
+        draw.line((x, hy, x, ly), fill=color, width=max(1, body_w//5))
+        y1, y2 = sorted((oy, cy))
+        if y2-y1 < 3: y2 = y1+3
+        draw.rectangle((x-body_w//2, y1, x+body_w//2, y2), fill=color, outline=color)
+
+    # Time labels from the real market candles.
+    count_labels = 4 if portrait else 6
+    for j in range(count_labels):
+        idx = round(j * (len(candles)-1) / max(1, count_labels-1))
+        x = candle_x[idx]
+        draw.text((x, bottom+24), _time_label(candles[idx].get("time")), font=f_axis, fill=palette["muted"], anchor="ma")
+
+    # Compact nearest S/R only, keeping the chart educational rather than crowded.
+    current = _number(analysis.get("current_price"))
+    for key, color, prefix in (("resistance_levels", (210,61,69,215), "R"), ("support_levels", (44,105,202,215), "S")):
+        levels = []
+        for item in analysis.get(key) or []:
+            if isinstance(item, dict):
+                value = _number(item.get("price"))
+                if value is not None and price_min <= float(value) <= price_max:
+                    levels.append(float(value))
+        if current is not None:
+            levels.sort(key=lambda v: abs(v-float(current)))
+        for rank, value in enumerate(levels[:1], 1):
+            y = price_y(value)
+            draw.line((left, y, candle_right, y), fill=color, width=2)
+            draw.text((left+8, y-4), f"{prefix}{rank} {_fmt_axis_price(value)}", font=f_label, fill=color, anchor="ls")
+
+    # Display the screenshot's current-price reference only when it remains near
+    # the real market window.  Otherwise the market current price is used.
+    visual_current = _number(analysis.get("visual_current_price"))
+    display_current = float(current) if current is not None else float(candles[-1]["close"])
+    if visual_current is not None:
+        atr = median([max(0.01, float(c["high"])-float(c["low"])) for c in candles[-14:]])
+        if abs(float(visual_current)-display_current) <= max(atr*4.0, display_current*0.0025):
+            display_current = float(visual_current)
+    if price_min <= display_current <= price_max:
+        y = price_y(display_current)
+        _dash_line(draw, (left,y), (right,y), (25,164,135,210), width=2, dash=9, gap=6)
+        tag = _fmt_axis_price(display_current)
+        box_w = max(100, int(width*0.085))
+        draw.rounded_rectangle((right-box_w, y-22, right, y+22), radius=6, fill=(25,164,135,235))
+        draw.text((right-10, y), tag, font=f_label, fill=(255,255,255,255), anchor="rm")
+
+    _draw_reconstructed_reference_scenario(image, analysis, candles, candle_x, price_y, plot, palette, f_label)
+
+    # Minimal identity, not a large educational headline.
+    draw.text((left, max(8, top-34)), "XAUUSD · M5", font=_font(max(16, int(width*0.014)), True, True), fill=palette["text"], anchor="la")
+    out = io.BytesIO()
+    image.convert("RGB").save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
 def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
     """Create a pattern-first image for Save/Share without polluting the chart.
 
-    The interactive chart remains the untouched broker screenshot plus minimal
-    price-linked overlays.  v3.61 keeps the chart readable at its native aspect
-    ratio, then places the *source-model rule explanation directly below the
-    chart*, followed by compact action cards.
+    The interactive chart is reconstructed from real market OHLC and keeps the
+    uploaded screenshot only as a visual reference.  The source/scenario rule
+    explanation remains directly below the chart, followed by compact cards.
     """
     try:
         with Image.open(io.BytesIO(chart_png)) as source:
@@ -6237,7 +6703,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v3.65", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v3.66", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
@@ -6245,11 +6711,12 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """Use the user's uploaded chart itself as the pannable chart canvas.
+    """Render SaleeM v3.66 from real market OHLC, guided by the upload style.
 
-    The fixed application UI stays outside this image. Only price-linked chart
-    drawings are added here, so panning moves the screenshot and every overlay
-    together without recreating the candles or price axis.
+    The uploaded chart is a visual reference only.  It is never pasted as the
+    final chart and never supplies historical candles.  Portrait and landscape
+    uploads therefore produce the same deterministic market structure while
+    keeping a familiar aspect/style.
     """
-    return _render_uploaded_chart_with_overlays(analysis, chart_background_path)
+    return _render_reconstructed_market_chart(analysis, chart_background_path)
 

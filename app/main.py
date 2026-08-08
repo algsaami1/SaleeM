@@ -138,8 +138,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-reference-scenario-overlay-v3.65.0",
-        "ui": "saleem-static-chart-box-ui-v3.65.0",
+        "renderer": "saleem-reconstructed-market-chart-v3.66.0",
+        "ui": "saleem-reference-chart-ui-v3.66.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
@@ -282,10 +282,13 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                     status_code=400,
                     detail="أبعاد الصورة كبيرة جدًا. استخدم صورة لا تتجاوز 40 مليون بكسل.",
                 )
-            if width <= height or (width / max(1, height)) < 1.20:
+            # v3.66 accepts portrait, square and landscape chart references.
+            # The screenshot is no longer the OHLC source; it only guides the
+            # reconstructed chart's aspect/theme/current-price reference.
+            if min(width, height) < 280:
                 raise HTTPException(
                     status_code=400,
-                    detail="يجب التقاط صورة الشارت بشكل أفقي (Landscape) مع إظهار الشموع ومحور الأسعار اليميني بوضوح.",
+                    detail="أبعاد صورة الشارت صغيرة جدًا. ارفع صورة أوضح لقراءة السعر والشكل العام.",
                 )
 
         result = await run_in_threadpool(

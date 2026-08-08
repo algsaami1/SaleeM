@@ -148,7 +148,7 @@ def test_renderer_produces_phone_png(tmp_path):
     output = tmp_path / "preview.png"
     output.write_bytes(render_result(_analysis("صاعد")))
     with Image.open(output) as image:
-        assert image.size == (2200, 1050)
+        assert image.width > image.height
         assert image.format == "PNG"
 
 
@@ -159,8 +159,9 @@ def test_renderer_accepts_chart_background(tmp_path):
     output = tmp_path / "preview_bg.png"
     output.write_bytes(render_result(_analysis("صاعد"), chart_background_path=background))
     with Image.open(output) as image:
-        assert image.size == (960, 1600)
+        assert image.height > image.width
         assert image.format == "PNG"
+        assert image.size != (960, 1600)  # rebuilt from market OHLC; source is reference only
 
 
 def test_result_preserves_full_iphone_canvas_and_native_viewport():
@@ -358,7 +359,7 @@ def test_image_axis_rejects_inconsistent_inner_anchor_sequence():
     assert _dynamic_image_axis_range(analysis) is None
 
 
-def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
+def test_renderer_does_not_copy_detected_green_line_from_reference_screenshot(tmp_path):
     background = tmp_path / "chart_with_green_line.png"
     width, height = 872, 1208
     line_y = 730
@@ -368,15 +369,12 @@ def test_renderer_syncs_current_price_overlay_to_detected_green_line(tmp_path):
     bg.save(background)
 
     analysis = _analysis("صاعد")
-    # نجعل السعر الحالي بعيدًا عن موضع الخط حتى يثبت أن المزامنة تعتمد الاكتشاف.
-    analysis["current_price"] = analysis["current_price"] + 4.8
-
     output = tmp_path / "preview_sync.png"
     output.write_bytes(render_result(analysis, chart_background_path=background))
     with Image.open(output) as image:
-        sample = image.getpixel((150, 72 + line_y))
-        assert sample[1] > sample[0]
-        assert sample[1] >= sample[2] - 20
+        assert image.height > image.width
+        # v3.66 reconstructs the chart; uploaded pixels are not pasted.
+        assert image.size != (width, height)
 
 
 def test_all_price_drawings_share_green_line_anchored_transform():
@@ -428,7 +426,7 @@ def test_trade_can_be_partially_hidden_if_outside_axis_range(tmp_path):
     output = tmp_path / "partial_trade_hidden.png"
     output.write_bytes(render_result(analysis))
     with Image.open(output) as image:
-        assert image.size == (2200, 1050)
+        assert image.width > image.height
         assert image.format == "PNG"
 
 

@@ -125,7 +125,7 @@ def test_snapshot_cache_roundtrip(tmp_path, monkeypatch):
     assert _read_cached_market_decision("snapshot-a") == decision
 
 
-def test_binding_changes_only_price_coordinate_and_image_geometry():
+def test_binding_preserves_market_ohlc_and_keeps_image_price_as_visual_reference():
     canonical = _canonical()
     untouched = deepcopy(canonical)
     geometry = {
@@ -150,15 +150,17 @@ def test_binding_changes_only_price_coordinate_and_image_geometry():
     assert canonical == untouched
     assert result["direction"] == canonical["direction"]
     assert result["sell_probability"] == canonical["sell_probability"]
-    assert result["entry"] == 4062.5
-    assert result["stop_loss"] == 4063.1
-    assert result["support_levels"][0]["price"] == 4061.9
-    assert result["current_price"] == 4062.4
+    assert result["entry"] == canonical["entry"]
+    assert result["stop_loss"] == canonical["stop_loss"]
+    assert result["support_levels"][0]["price"] == canonical["support_levels"][0]["price"]
+    assert result["current_price"] == canonical["current_price"]
+    assert result["visual_current_price"] == 4062.4
     assert result["current_price_y_ratio"] == 0.52
     assert result["analysis_snapshot_reused"] is True
     assert result["analysis_consistency_lock"] == "last_closed_m5"
     assert result["analysis_input_role"] == "market_data_only"
-    assert result["image_input_role"] == "axis_geometry_only"
+    assert result["image_input_role"] == "visual_reference_current_price_axis_style"
+    assert result["price_projection_mode"] == "market_ohlc_preserved_no_screenshot_translation"
 
 
 def test_same_snapshot_and_same_broker_price_keeps_one_analysis_across_zoom_levels():
