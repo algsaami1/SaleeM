@@ -531,13 +531,17 @@
 
   // v3.46: the original chart image and every overlay move/zoom as one canvas.
   const chartPanViewport = document.getElementById('chart-pan-viewport');
+  const chartPanCanvas = document.getElementById('chart-pan-canvas');
+  const animationOverlay = document.getElementById('saleem-animation-overlay');
+  const animationPlanNode = document.getElementById('saleem-animation-plan');
+  const animationReplay = document.getElementById('chart-animation-replay');
   const chartPanHint = document.getElementById('chart-pan-hint');
   const chartZoomIn = document.getElementById('chart-zoom-in');
   const chartZoomOut = document.getElementById('chart-zoom-out');
   const chartZoomReset = document.getElementById('chart-zoom-reset');
   const chartZoomValue = document.getElementById('chart-zoom-value');
 
-  if (chartPanViewport && resultImage) {
+  if (chartPanViewport && chartPanCanvas && resultImage) {
     const MIN_ZOOM = 1;
     const MAX_ZOOM = 3.5;
     const ZOOM_STEP = 0.25;
@@ -580,7 +584,8 @@
       const scaleRatio = newZoom / oldZoom;
 
       zoom = newZoom;
-      resultImage.style.height = `${Math.round(baseHeight * zoom)}px`;
+      chartPanCanvas.style.height = `${Math.round(baseHeight * zoom)}px`;
+      resultImage.style.height = '100%';
       resultImage.style.width = 'auto';
       updateZoomValue();
 
@@ -592,7 +597,8 @@
     };
     const scrollToLatest = () => {
       measureBaseHeight();
-      resultImage.style.height = `${baseHeight}px`;
+      chartPanCanvas.style.height = `${baseHeight}px`;
+      resultImage.style.height = '100%';
       resultImage.style.width = 'auto';
       chartPanViewport.scrollLeft = chartPanViewport.scrollWidth;
       chartPanViewport.scrollTop = 0;
@@ -601,7 +607,8 @@
     const resetZoom = () => {
       zoom = 1;
       measureBaseHeight();
-      resultImage.style.height = `${baseHeight}px`;
+      chartPanCanvas.style.height = `${baseHeight}px`;
+      resultImage.style.height = '100%';
       resultImage.style.width = 'auto';
       updateZoomValue();
       requestAnimationFrame(() => {
@@ -616,7 +623,8 @@
     window.addEventListener('resize', () => {
       if (zoom === 1) {
         baseHeight = Math.max(1, chartPanViewport.clientHeight);
-        resultImage.style.height = `${baseHeight}px`;
+        chartPanCanvas.style.height = `${baseHeight}px`;
+        resultImage.style.height = '100%';
       }
     });
 
@@ -691,7 +699,8 @@
         const midY = (a.clientY + b.clientY) / 2 - rect.top;
         const ratio = nextZoom / oldZoom;
         zoom = nextZoom;
-        resultImage.style.height = `${Math.round(baseHeight * zoom)}px`;
+        chartPanCanvas.style.height = `${Math.round(baseHeight * zoom)}px`;
+        resultImage.style.height = '100%';
         resultImage.style.width = 'auto';
         updateZoomValue();
         requestAnimationFrame(() => {
@@ -721,6 +730,107 @@
       event.preventDefault();
       applyZoom(zoom + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP), event.clientX, event.clientY);
     }, { passive: false });
+
+    const buildScenarioAnimation = () => {
+      if (!animationOverlay || !animationPlanNode) return null;
+      let plan = null;
+      try {
+        plan = JSON.parse(animationPlanNode.textContent || '{}');
+      } catch {
+        return null;
+      }
+      if (!plan?.enabled || !Array.isArray(plan.points) || plan.points.length < 4) return null;
+
+      const width = Number(plan.width) || resultImage.naturalWidth || 1;
+      const height = Number(plan.height) || resultImage.naturalHeight || 1;
+      animationOverlay.setAttribute('viewBox', `0 0 ${width} ${height}`);
+      animationOverlay.replaceChildren();
+      const ns = 'http://www.w3.org/2000/svg';
+      const make = (tag, attrs = {}) => {
+        const node = document.createElementNS(ns, tag);
+        Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, String(value)));
+        return node;
+      };
+
+      const defs = make('defs');
+      const marker = make('marker', {
+        id: 'saleem-arrow-head', markerWidth: 10, markerHeight: 10,
+        refX: 8.5, refY: 5, orient: 'auto', markerUnits: 'strokeWidth',
+      });
+      marker.appendChild(make('path', { d: 'M 0 0 L 10 5 L 0 10 z', class: `scenario-arrow-head ${plan.direction === 'up' ? 'up' : 'down'}` }));
+      defs.appendChild(marker);
+      animationOverlay.appendChild(defs);
+
+      if (plan.pattern?.points?.length >= 3) {
+        const pattern = make('polyline', {
+          points: plan.pattern.points.map((p) => `${p[0]},${p[1]}`).join(' '),
+          class: 'animated-pattern-path', fill: 'none', pathLength: 1,
+        });
+        animationOverlay.appendChild(pattern);
+      }
+
+      if (plan.entry_zone) {
+        const zone = plan.entry_zone;
+        animationOverlay.appendChild(make('rect', {
+          x: zone.x, y: zone.y, width: zone.width, height: zone.height,
+          rx: 3, class: `animated-entry-zone ${plan.direction === 'up' ? 'up' : 'down'}`,
+        }));
+      }
+
+      if (plan.activation) {
+        const a = plan.activation;
+        animationOverlay.appendChild(make('line', {
+          x1: a.x1, y1: a.y, x2: a.x2, y2: a.y,
+          class: 'animated-activation-line',
+        }));
+        const label = make('text', { x: a.x2, y: Math.max(12, a.y - 6), class: 'animated-activation-label', 'text-anchor': 'end' });
+        label.textContent = 'BREAK';
+        animationOverlay.appendChild(label);
+      }
+
+      const pathD = plan.points.map((p, index) => `${index ? 'L' : 'M'} ${p[0]} ${p[1]}`).join(' ');
+      const scenarioPath = make('path', {
+        d: pathD, fill: 'none',
+        class: `animated-scenario-path ${plan.direction === 'up' ? 'up' : 'down'} ${plan.state === 'watch' ? 'watch' : 'confirmed'}`,
+        'marker-end': 'url(#saleem-arrow-head)', pathLength: 1,
+      });
+      animationOverlay.appendChild(scenarioPath);
+
+      if (plan.retest) {
+        animationOverlay.appendChild(make('circle', {
+          cx: plan.retest.x, cy: plan.retest.y, r: 4.2,
+          class: `animated-retest-dot ${plan.direction === 'up' ? 'up' : 'down'}`,
+        }));
+        const label = make('text', { x: plan.retest.x + 7, y: plan.retest.y - 7, class: 'animated-retest-label' });
+        label.textContent = 'RETEST';
+        animationOverlay.appendChild(label);
+      }
+
+      if (plan.invalidation) {
+        const i = plan.invalidation;
+        animationOverlay.appendChild(make('line', {
+          x1: i.x1, y1: i.y, x2: i.x2, y2: i.y,
+          class: 'animated-invalidation-line',
+        }));
+      }
+
+      const replay = () => {
+        animationOverlay.classList.remove('is-running');
+        // Restart CSS animations reliably in Safari/iOS.
+        void animationOverlay.getBoundingClientRect();
+        animationOverlay.classList.add('is-running');
+      };
+      return replay;
+    };
+
+    let replayScenarioAnimation = null;
+    const startScenarioAnimation = () => {
+      replayScenarioAnimation = buildScenarioAnimation();
+      if (replayScenarioAnimation) replayScenarioAnimation();
+    };
+    if (resultImage.complete) startScenarioAnimation();
+    else resultImage.addEventListener('load', startScenarioAnimation, { once: true });
+    animationReplay?.addEventListener('click', () => replayScenarioAnimation?.());
 
     chartPanViewport.addEventListener('scroll', hideHint, { once: true });
     window.setTimeout(() => chartPanHint?.classList.add('hidden'), 5200);

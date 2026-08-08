@@ -157,10 +157,15 @@
           <output id="chart-zoom-value" aria-live="polite">100%</output>
           <button type="button" id="chart-zoom-in" aria-label="تكبير الشارت">＋</button>
           <button type="button" id="chart-zoom-reset" class="chart-zoom-reset" aria-label="إعادة الشارت للحجم الأصلي">1:1</button>
+          {% if result.animation_plan and result.animation_plan.enabled %}<button type="button" id="chart-animation-replay" class="chart-animation-replay" aria-label="إعادة تشغيل حركة السيناريو">▶</button>{% endif %}
         </div>
         <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
-          <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
+          <div class="chart-pan-canvas" id="chart-pan-canvas">
+            <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
+            {% if result.animation_plan and result.animation_plan.enabled %}<svg id="saleem-animation-overlay" class="saleem-animation-overlay" aria-hidden="true"></svg>{% endif %}
+          </div>
         </div>
+        {% if result.animation_plan and result.animation_plan.enabled %}<script type="application/json" id="saleem-animation-plan">{{ result.animation_plan|tojson }}</script>{% endif %}
         <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
       </section>
 

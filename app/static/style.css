@@ -730,3 +730,103 @@ body[data-has-result="true"] .chart-pan-viewport img{
 .chart-zoom-controls output{min-width:44px;background:transparent;color:#9fb3c7;font-size:9px}
 .chart-zoom-controls .chart-zoom-reset{min-width:38px;font-size:9px}
 body[data-has-result="true"] .chart-pan-hint{z-index:6;white-space:nowrap}
+
+/* v3.51 — SaleeM Animation Spec v1: live SVG overlay on the untouched chart. */
+body[data-has-result="true"] .chart-pan-canvas{
+  position:relative;
+  display:inline-block;
+  height:100%;
+  width:max-content;
+  min-width:1px;
+  vertical-align:top;
+}
+body[data-has-result="true"] .chart-pan-canvas > img{
+  display:block;
+  height:100%;
+  width:auto;
+  max-width:none;
+}
+.saleem-animation-overlay{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  pointer-events:none;
+  overflow:visible;
+  z-index:5;
+}
+.chart-animation-replay{font-size:10px!important;min-width:34px!important}
+.animated-pattern-path,
+.animated-scenario-path,
+.animated-activation-line,
+.animated-invalidation-line,
+.animated-entry-zone,
+.animated-retest-dot,
+.animated-retest-label,
+.animated-activation-label{opacity:0}
+.animated-pattern-path{
+  stroke:#596273;
+  stroke-width:2;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  stroke-dasharray:1;
+  stroke-dashoffset:1;
+  vector-effect:non-scaling-stroke;
+}
+.animated-scenario-path{
+  stroke-width:3;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+  stroke-dasharray:1;
+  stroke-dashoffset:1;
+  vector-effect:non-scaling-stroke;
+  filter:drop-shadow(0 0 2px rgba(0,0,0,.18));
+}
+.animated-scenario-path.up{stroke:#149a61}.animated-scenario-path.down{stroke:#d43b45}
+.animated-scenario-path.watch{stroke-width:2.4;stroke-dasharray:.045 .018}
+.scenario-arrow-head.up{fill:#149a61}.scenario-arrow-head.down{fill:#d43b45}
+.animated-activation-line{
+  stroke:#d89522;
+  stroke-width:1.5;
+  stroke-dasharray:8 6;
+  vector-effect:non-scaling-stroke;
+}
+.animated-activation-label,.animated-retest-label{
+  font:700 10px ui-monospace,SFMono-Regular,Menlo,monospace;
+  paint-order:stroke;
+  stroke:rgba(248,250,252,.92);
+  stroke-width:3px;
+  stroke-linejoin:round;
+}
+.animated-activation-label{fill:#a56613}
+.animated-retest-label{fill:#314154}
+.animated-entry-zone{stroke-width:1;vector-effect:non-scaling-stroke}
+.animated-entry-zone.up{fill:rgba(20,154,97,.10);stroke:rgba(20,154,97,.48)}
+.animated-entry-zone.down{fill:rgba(212,59,69,.10);stroke:rgba(212,59,69,.48)}
+.animated-retest-dot{fill:#f8fafc;stroke-width:2;vector-effect:non-scaling-stroke}
+.animated-retest-dot.up{stroke:#149a61}.animated-retest-dot.down{stroke:#d43b45}
+.animated-invalidation-line{stroke:#d43b45;stroke-width:1.25;stroke-dasharray:7 5;vector-effect:non-scaling-stroke}
+.saleem-animation-overlay.is-running .animated-pattern-path{animation:saleemDrawPath .9s ease-out 0s forwards}
+.saleem-animation-overlay.is-running .animated-activation-line,
+.saleem-animation-overlay.is-running .animated-activation-label{animation:saleemFadePulse .45s ease .85s forwards}
+.saleem-animation-overlay.is-running .animated-entry-zone{animation:saleemFadeIn .4s ease 1.15s forwards}
+.saleem-animation-overlay.is-running .animated-scenario-path{animation:saleemDrawPath 1.25s cubic-bezier(.22,.72,.25,1) 1.45s forwards}
+.saleem-animation-overlay.is-running .animated-retest-dot,
+.saleem-animation-overlay.is-running .animated-retest-label{animation:saleemRetestPulse .55s ease 2.18s forwards}
+.saleem-animation-overlay.is-running .animated-invalidation-line{animation:saleemFadeIn .35s ease 2.85s forwards}
+@keyframes saleemDrawPath{0%{opacity:.12;stroke-dashoffset:1}100%{opacity:1;stroke-dashoffset:0}}
+@keyframes saleemFadeIn{0%{opacity:0}100%{opacity:1}}
+@keyframes saleemFadePulse{0%{opacity:0}55%{opacity:1}100%{opacity:.9}}
+@keyframes saleemRetestPulse{0%{opacity:0;transform:scale(.6);transform-origin:center}55%{opacity:1;transform:scale(1.35)}100%{opacity:1;transform:scale(1)}}
+@media (prefers-reduced-motion:reduce){
+  .saleem-animation-overlay .animated-pattern-path,
+  .saleem-animation-overlay .animated-scenario-path,
+  .saleem-animation-overlay .animated-activation-line,
+  .saleem-animation-overlay .animated-invalidation-line,
+  .saleem-animation-overlay .animated-entry-zone,
+  .saleem-animation-overlay .animated-retest-dot,
+  .saleem-animation-overlay .animated-retest-label,
+  .saleem-animation-overlay .animated-activation-label{
+    animation:none!important;opacity:1!important;stroke-dashoffset:0!important
+  }
+}
