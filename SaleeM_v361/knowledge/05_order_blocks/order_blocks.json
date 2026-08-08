@@ -1,0 +1,124 @@
+{
+  "schema_version": "1.0",
+  "market": "XAUUSD",
+  "entry_timeframe": "M5",
+  "usage": "read_only_reference",
+  "category": "order_blocks",
+  "items": [
+    {
+      "id": "bullish_order_block",
+      "name_ar": "أوردر بلوك صاعد",
+      "name_en": "Bullish Order Block",
+      "direction": "bullish",
+      "definition": "آخر شمعة هابطة أو نطاق هابط صغير قبل دفع صاعد أدى إلى BOS أو توسع واضح.",
+      "conditions": [
+        "دفع صاعد قوي بعد المنطقة",
+        "يفضل أن ينتج عنه BOS",
+        "المنطقة لم تُختبر عدة مرات"
+      ],
+      "usage": [
+        "منطقة طلب محتملة عند العودة"
+      ],
+      "invalid_if": [
+        "إغلاق واضح أسفل المنطقة"
+      ],
+      "tags": [
+        "order_block",
+        "bullish"
+      ]
+    },
+    {
+      "id": "bearish_order_block",
+      "name_ar": "أوردر بلوك هابط",
+      "name_en": "Bearish Order Block",
+      "direction": "bearish",
+      "definition": "آخر شمعة صاعدة أو نطاق صاعد صغير قبل دفع هابط أدى إلى BOS أو توسع واضح.",
+      "conditions": [
+        "دفع هابط قوي بعد المنطقة",
+        "يفضل أن ينتج عنه BOS",
+        "المنطقة لم تُختبر عدة مرات"
+      ],
+      "usage": [
+        "منطقة عرض محتملة عند العودة"
+      ],
+      "invalid_if": [
+        "إغلاق واضح أعلى المنطقة"
+      ],
+      "tags": [
+        "order_block",
+        "bearish"
+      ]
+    },
+    {
+      "id": "mitigation_block",
+      "name_ar": "منطقة تخفيف Mitigation",
+      "name_en": "Mitigation Block",
+      "direction": "contextual",
+      "definition": "منطقة يعود إليها السعر لاختبار أو تخفيف أوامر قبل استمرار محتمل.",
+      "conditions": [
+        "وجود دفع سابق واضح",
+        "عودة منظمة للمنطقة"
+      ],
+      "caution": "لا يعتمد المصطلح وحده؛ الأهم رد الفعل والبنية.",
+      "tags": [
+        "mitigation",
+        "retest"
+      ]
+    },
+    {
+      "id": "breaker_block_bullish",
+      "name_ar": "بريكر صاعد",
+      "name_en": "Bullish Breaker Block",
+      "direction": "bullish",
+      "definition": "منطقة عرض سابقة فشلت وتم اختراقها ثم تعمل كدعم.",
+      "conditions": [
+        "فشل السيناريو الهابط",
+        "إغلاق فوق المنطقة",
+        "إعادة اختبار ناجحة"
+      ],
+      "tags": [
+        "breaker",
+        "bullish",
+        "flip"
+      ]
+    },
+    {
+      "id": "breaker_block_bearish",
+      "name_ar": "بريكر هابط",
+      "name_en": "Bearish Breaker Block",
+      "direction": "bearish",
+      "definition": "منطقة طلب سابقة فشلت وتم كسرها ثم تعمل كمقاومة.",
+      "conditions": [
+        "فشل السيناريو الصاعد",
+        "إغلاق تحت المنطقة",
+        "إعادة اختبار فاشلة من الأسفل"
+      ],
+      "tags": [
+        "breaker",
+        "bearish",
+        "flip"
+      ]
+    },
+    {
+      "id": "order_block_quality",
+      "name_ar": "جودة الأوردر بلوك",
+      "name_en": "Order Block Quality",
+      "direction": "grading",
+      "high_quality": [
+        "سبب BOS أو CHOCH واضح",
+        "توافق مع سيولة أو FVG",
+        "اختبار أول أو ثانٍ",
+        "سياق فريم أكبر موافق"
+      ],
+      "low_quality": [
+        "شمعة عشوائية بلا دفع",
+        "اختبارات كثيرة",
+        "داخل نطاق ضيق"
+      ],
+      "tags": [
+        "order_block",
+        "quality"
+      ]
+    }
+  ]
+}
