@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "policy": "كل شارت جديد يُقارن بأمثلة السيناريو المرجعية، ثم لا يُقبل السيناريو إلا إذا تحققت مكوناته هندسيًا على شموع M5 المغلقة. المطابقة البصرية لا تنشئ أي رسم أو صفقة وحدها.",
+  "source_image_count": 9,
+  "atlas_file": "scenario_atlas.webp",
+  "scenarios": [
+    {
+      "scenario_id": "trend_reversal_choch_ifvg",
+      "label_ar": "انعكاس اتجاه + CHOCH + IFVG",
+      "source_reference_id": "result_01",
+      "file": "raw/result_01.webp"
+    },
+    {
+      "scenario_id": "bullish_engulfing_orderblock",
+      "label_ar": "ابتلاع شرائي عند Order Block",
+      "source_reference_id": "result_02",
+      "file": "raw/result_02.webp"
+    },
+    {
+      "scenario_id": "bearish_fvg_liquidity_double_top",
+      "label_ar": "سحب سيولة + FVG + قمة مزدوجة",
+      "source_reference_id": "result_03",
+      "file": "raw/result_03.webp"
+    },
+    {
+      "scenario_id": "inverse_head_shoulders_ob",
+      "label_ar": "رأس وكتفين مقلوب + CHOCH + Order Block",
+      "source_reference_id": "result_04",
+      "file": "raw/result_04.webp"
+    },
+    {
+      "scenario_id": "bearish_bos_ob_retest",
+      "label_ar": "BOS هابط + Order Block + إعادة اختبار",
+      "source_reference_id": "result_05",
+      "file": "raw/result_05.webp"
+    },
+    {
+      "scenario_id": "distribution_structure_sequence",
+      "label_ar": "توزيع: Sweep → MSS/CHOCH → BOS → تجميع",
+      "source_reference_id": "result_06",
+      "file": "raw/result_06.webp"
+    },
+    {
+      "scenario_id": "multiple_tops_breakdown",
+      "label_ar": "قمم متعددة + كسر دعم",
+      "source_reference_id": "result_07",
+      "file": "raw/result_07.webp"
+    },
+    {
+      "scenario_id": "bullish_smc_reversal",
+      "label_ar": "انعكاس SMC صاعد",
+      "source_reference_id": "result_08",
+      "file": "raw/result_08.webp"
+    },
+    {
+      "scenario_id": "smart_money_sellside_reversal",
+      "label_ar": "Sell-side Sweep → BOS/CHOCH → Order Block",
+      "source_reference_id": "result_09",
+      "file": "raw/result_09.webp"
+    }
+  ]
+}

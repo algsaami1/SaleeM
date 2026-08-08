@@ -5429,7 +5429,7 @@ def _native_draw_pattern_overlays(
         # path from the real breakout.  Candidate patterns use a dashed path
         # from the latest visible candle toward the activation/nearest real
         # structural level.  This is explanatory, not an Entry signal.
-        if rank == 0 and bias in {"صاعد", "هابط"}:
+        if rank == 0 and bias in {"صاعد", "هابط"} and not bool(analysis.get("reference_scenario_available")):
             current = _number(analysis.get("current_price"))
             arrow_target = target
             if arrow_target is None or _native_y(analysis, float(arrow_target), height) is None:
@@ -5755,7 +5755,137 @@ def _native_draw_structure(
 
 
 
-# v3.63: browser/GIF animation was intentionally removed.
+def _native_draw_reference_scenario(
+    image: Image.Image,
+    analysis: dict[str, Any],
+    width: int,
+    height: int,
+    font,
+    candle_centers: list[int],
+) -> None:
+    """Draw only the components of the closest verified reference scenario.
+
+    The scenario memory is explanatory, never generative: every visible line,
+    zone and marker is backed by closed-M5 geometry saved by the deterministic
+    reference_scenario_engine.  Candidate scenarios use dashed expectation;
+    confirmed scenarios use a solid expectation arrow.
+    """
+    if not bool(analysis.get("reference_scenario_available")) or len(candle_centers) < 6:
+        # Classical source pattern remains the safe fallback.
+        _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
+        return
+
+    components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
+    geometry = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
+    bias = str(analysis.get("reference_scenario_bias") or "محايد")
+    status = str(analysis.get("reference_scenario_status") or "candidate")
+    confirmed = status == "confirmed"
+
+    # Draw classical geometry only when the selected scenario actually uses it.
+    if "pattern" in components and analysis.get("pattern_overlays"):
+        _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
+
+    if "structure" in components:
+        _native_draw_structure(ImageDraw.Draw(image), analysis, width, height, font, candle_centers)
+
+    if "order_block" in components or "fvg" in components:
+        # The helper redraws only actually detected M5 zones.  It never fabricates one.
+        _native_draw_zones(image, analysis, width, height, font, candle_centers)
+
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    native_geom = {"window_size": int(geometry.get("window_size") or len(candle_centers))}
+    line_w = max(1, int(height * 0.0018))
+    gaps = [b-a for a,b in zip(candle_centers[:-1], candle_centers[1:]) if 2 <= b-a <= width*0.12]
+    spacing = max(8, int(median(gaps))) if gaps else max(9, width // max(14, len(candle_centers)))
+
+    # Liquidity sweep is anchored to the real swept pivot price and sweep candle.
+    if "liquidity" in components:
+        sweep = geometry.get("liquidity_sweep") if isinstance(geometry.get("liquidity_sweep"), dict) else None
+        if sweep:
+            try:
+                idx = int(sweep.get("index")); price = float(sweep.get("price")); side = str(sweep.get("side"))
+            except (TypeError, ValueError):
+                idx = -1; price = 0.0; side = ""
+            x = _native_index_x(analysis, native_geom, idx, candle_centers) if idx >= 0 else None
+            y = _native_y(analysis, price, height) if idx >= 0 else None
+            if x is not None and y is not None:
+                x1 = max(8, x - spacing * 4)
+                x2 = min(width - 8, x + spacing)
+                color = (201, 67, 75, 190) if side == "high" else (26, 145, 91, 190)
+                _dash_line(draw, (x1, y), (x2, y), color, width=line_w, dash=max(6, spacing//2), gap=max(4, spacing//3))
+                draw.text(((x1+x2)//2, y-5), "Liquidity Sweep", font=font, fill=color, anchor="ms")
+
+    # Engulfing is shown only as a small factual candle marker, not a new model.
+    if "engulfing" in components:
+        engulf = geometry.get("engulfing") if isinstance(geometry.get("engulfing"), dict) else None
+        if engulf:
+            try:
+                idx = int(engulf.get("index")); side = str(engulf.get("side"))
+            except (TypeError, ValueError):
+                idx = -1; side = ""
+            x = _native_index_x(analysis, native_geom, idx, candle_centers) if idx >= 0 else None
+            candles = _valid_renderer_candles(analysis)
+            if x is not None and 0 <= idx < len(candles):
+                high_y = _native_y(analysis, float(candles[idx]["high"]), height)
+                low_y = _native_y(analysis, float(candles[idx]["low"]), height)
+                if high_y is not None and low_y is not None:
+                    top,bottom=sorted((high_y,low_y)); pad=max(4,spacing//3)
+                    color=(23,150,91,190) if side=="bull" else (207,59,68,190)
+                    draw.rounded_rectangle((x-pad, top-3, x+pad, bottom+3), radius=4, outline=color, width=max(1,line_w))
+                    draw.text((x, max(10, top-7)), "Engulfing", font=font, fill=color, anchor="ms")
+
+    # Compact scenario name: one label, never a large educational title.
+    label = str(analysis.get("reference_scenario_label") or "").strip()
+    if label:
+        color = (19, 139, 83, 220) if bias == "صاعد" else (204, 57, 66, 220) if bias == "هابط" else (43, 104, 196, 220)
+        suffix = " ✓" if confirmed else " — مرشح"
+        text = f"{label}{suffix}"
+        bbox = draw.textbbox((0,0), text, font=font)
+        tw=max(1,bbox[2]-bbox[0]); th=max(1,bbox[3]-bbox[1])
+        lx=max(8,min(width-tw-22,int(width*0.50)-tw//2)); ly=max(8,int(height*0.035))
+        draw.rounded_rectangle((lx-7,ly-5,lx+tw+7,ly+th+5),radius=6,fill=(252,253,255,224),outline=color,width=1)
+        draw.text((lx,ly),text,font=font,fill=(35,44,55,235))
+
+    # Mandatory expectation arrow for an accepted reference scenario.
+    if "expectation_arrow" in components and bias in {"صاعد", "هابط"}:
+        current = _number(analysis.get("current_price"))
+        target = _number(analysis.get("target_1"))
+        if current is not None:
+            # If TP1 is off the visible axis, use the nearest real level in the same direction.
+            if target is None or _native_y(analysis, float(target), height) is None:
+                key = "resistance_levels" if bias == "صاعد" else "support_levels"
+                valid: list[float] = []
+                for item in analysis.get(key) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    price = _number(item.get("price"))
+                    if price is None:
+                        continue
+                    if bias == "صاعد" and float(price) > float(current): valid.append(float(price))
+                    if bias == "هابط" and float(price) < float(current): valid.append(float(price))
+                if valid:
+                    target = min(valid, key=lambda p: abs(p-float(current)))
+            sy = _native_y(analysis, float(current), height)
+            ty = _native_y(analysis, float(target), height) if target is not None else None
+            if sy is not None and ty is not None:
+                sx = candle_centers[-1]
+                ex = min(width-12, max(sx+spacing*5, int(width*0.80)))
+                color = (20, 151, 91, 225) if bias == "صاعد" else (207, 58, 67, 225)
+                if confirmed:
+                    _native_draw_arrow(draw, (sx,sy), (ex,ty), color, width=max(3,line_w+2))
+                else:
+                    bend_x=min(ex-spacing, sx+spacing*2)
+                    bend_y=int(round((sy+ty)/2))
+                    _dash_line(draw,(sx,sy),(bend_x,bend_y),color,width=max(2,line_w+1),dash=max(7,spacing//2),gap=max(5,spacing//3))
+                    _dash_line(draw,(bend_x,bend_y),(ex,ty),color,width=max(2,line_w+1),dash=max(7,spacing//2),gap=max(5,spacing//3))
+                    _native_draw_arrow(draw,(bend_x,bend_y),(ex,ty),color,width=max(2,line_w+1))
+
+    image.alpha_composite(layer)
+
+
+# v3.64: browser/GIF animation remains intentionally removed.
+# The closest verified reference scenario is rendered as a static overlay.
 # The selected source-matched pattern is drawn as one static overlay directly
 # on the untouched uploaded chart; its expectation arrow is produced by
 # _native_draw_pattern_overlays and remains tied to real M5 geometry.
@@ -5862,9 +5992,9 @@ def _render_uploaded_chart_with_overlays(
     # out of the main image so they cannot obscure the user's candles.
     draw = ImageDraw.Draw(image)
     _native_draw_sr(draw, analysis, width, height, font)
-    _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
-    # No generic fallback arrow: if no verified source-model geometry exists,
-    # the original chart remains clean rather than showing a guessed scenario.
+    _native_draw_reference_scenario(image, analysis, width, height, font, candle_centers)
+    # No generic fallback arrow: only a verified source pattern/scenario may
+    # add an expectation path; otherwise the broker chart remains untouched.
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
@@ -6001,10 +6131,21 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     pattern_name = str(analysis.get("pattern_type") or "لا يوجد")
     pattern_status = str(analysis.get("pattern_status") or "none")
-    reference_id = str(analysis.get("pattern_reference_source_id") or "").strip()
-    reference_rule = str(analysis.get("pattern_reference_rule") or "").strip()
-    evidence = str(analysis.get("pattern_reference_visual_evidence") or analysis.get("pattern_review_summary") or "").strip()
-    if pattern_name != "لا يوجد":
+    scenario_available = bool(analysis.get("reference_scenario_available"))
+    scenario_name = str(analysis.get("reference_scenario_label") or "").strip()
+    scenario_status = str(analysis.get("reference_scenario_status") or "none")
+    reference_id = str(analysis.get("reference_scenario_source_id") or analysis.get("pattern_reference_source_id") or "").strip()
+    reference_rule = str(analysis.get("reference_scenario_rule") or analysis.get("pattern_reference_rule") or "").strip()
+    evidence = str(analysis.get("reference_scenario_evidence") or analysis.get("pattern_reference_visual_evidence") or analysis.get("pattern_review_summary") or "").strip()
+    if scenario_available and scenario_name:
+        intro = f"تمت مراجعة الشارت مع ذاكرة السيناريوهات المرجعية، والسيناريو الأقرب هو: {scenario_name}."
+        rule_text = reference_rule or evidence or "لا يُقبل السيناريو إلا بعد تحقق مكوناته على شموع M5 الحقيقية."
+        arrow_text = (
+            "السهم المتصل يوضح المسار المرجعي بعد اكتمال التحقق الهندسي."
+            if scenario_status == "confirmed"
+            else "السهم المتقطع يوضح أقرب سيناريو مرجعي مرشح؛ لا يعني دخولًا قبل اكتمال شرط التفعيل."
+        )
+    elif pattern_name != "لا يوجد":
         intro = f"تمت مراجعة الشارت مع صور النماذج المرجعية، والنموذج الأقرب هو: {pattern_name}."
         rule_text = reference_rule or evidence or "يُقبل النموذج فقط عندما ترتبط نقاطه بقمم وقيعان حقيقية على M5."
         arrow_text = (
@@ -6013,11 +6154,11 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
             else "السهم المتقطع يوضح السيناريو المتوقع للنموذج المرشح؛ لا يصبح مؤكدًا إلا عند تحقق شرط الكسر أو التفعيل."
         )
     else:
-        intro = "تمت مراجعة الشارت مع صور النماذج المرجعية، ولم توجد مطابقة هندسية كافية للرسم."
-        rule_text = "لا يُرسم نموذج تقريبي ولا تُختلق نقاط أو خطوط إذا لم تثبت المطابقة على شموع M5 الحقيقية."
-        arrow_text = "عند غياب نموذج صالح لا يظهر سهم نموذج؛ تبقى قراءة السوق العامة فقط."
+        intro = "تمت مراجعة الشارت مع ذاكرة النماذج والسيناريوهات المرجعية، ولم توجد مطابقة هندسية كافية للرسم."
+        rule_text = "لا يُرسم سيناريو تقريبي ولا تُختلق نقاط أو خطوط إذا لم تثبت المطابقة على شموع M5 الحقيقية."
+        arrow_text = "عند غياب سيناريو صالح لا يظهر سهم توقع؛ يبقى الشارت الأصلي نظيفًا."
 
-    mechanism = "آلية التطبيق: لكل شارت جديد تُراجع صور المصادر، ثم يُرسم النموذج الأقرب فقط بعد تثبيت هندسته على الشارت."
+    mechanism = "آلية التطبيق: لكل شارت جديد تُراجع الذاكرة المرجعية، ثم يُرسم السيناريو الأقرب فقط بعد تثبيت مكوناته هندسيًا على الشارت."
     if reference_id:
         draw.text(
             (pad + 28, rule_y1 + 38),

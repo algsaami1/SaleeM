@@ -20,6 +20,7 @@ from PIL import Image, ImageEnhance
 
 from app.engine.memory_engine import memory_context
 from app.engine.pattern_engine import review_market_patterns
+from app.engine.reference_scenario_engine import review_reference_scenarios
 from app.engine.renderer import (
     AxisCalibrationError,
     detect_market_zone_presence,
@@ -1060,6 +1061,9 @@ REFERENCE_PATTERN_MATCH_SCHEMA = {
         "visual_score": {"type": "integer", "minimum": 0, "maximum": 100},
         "bias": {"type": "string", "enum": ["صاعد", "هابط", "محايد"]},
         "evidence": {"type": "string"},
+        "scenario_reference_id": {"type": "string"},
+        "scenario_score": {"type": "integer", "minimum": 0, "maximum": 100},
+        "scenario_evidence": {"type": "string"},
     },
     "required": [
         "matched",
@@ -1068,6 +1072,9 @@ REFERENCE_PATTERN_MATCH_SCHEMA = {
         "visual_score",
         "bias",
         "evidence",
+        "scenario_reference_id",
+        "scenario_score",
+        "scenario_evidence",
     ],
 }
 
@@ -1585,6 +1592,9 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             "visual_score": 0,
             "bias": "محايد",
             "evidence": "أطلس صور النماذج المرجعية غير متوفر.",
+            "scenario_reference_id": "",
+            "scenario_score": 0,
+            "scenario_evidence": "",
         }
 
     prompt = """أنت مرحلة مطابقة صور مرجعية فقط في SaleeM.
@@ -1598,8 +1608,10 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
 3) لا تستخرج أسعارًا، ولا تحدد دخولًا أو وقفًا أو أهدافًا، ولا تستنتج صفقة.
 4) لا تختر نموذجًا بسبب الاسم أو اللون؛ طابق هندسة القمم/القيعان/الخطوط فقط.
 5) لا تعتبر المطابقة مؤكدة إذا كانت مجرد جزء صغير أو تشابه ضعيف. matched=true يحتاج visual_score لا يقل عن 55.
-6) source_reference_id يجب أن يكون معرف المرجع المكتوب في الأطلس، مثل archive_2_05.
-7) evidence جملة عربية قصيرة تصف عناصر الشكل التي طابقتها، بلا أسعار.
+6) source_reference_id يجب أن يكون معرف مرجع العائلة المكتوب في الأطلس، مثل archive_2_05.
+7) بالإضافة إلى عائلة النموذج، راجع أمثلة السيناريو التي تحمل result_01 إلى result_09 واختر السيناريو الأقرب بصريًا فقط في scenario_reference_id. إذا لم توجد مطابقة واضحة أعد سلسلة فارغة.
+8) scenario_score من 0 إلى 100 ويحتاج 55 على الأقل ليُستخدم كعامل ترجيح، لكنه لا يستطيع أبدًا تجاوز فشل التحقق الهندسي على شموع M5.
+9) evidence وscenario_evidence جملتان عربيتان قصيرتان تصفان عناصر الشكل التي طابقتها، بلا أسعار.
 
 هذه المطابقة لا ترسم شيئًا بنفسها؛ سيقبلها المحرك لاحقًا فقط إذا أكدتها هندسة الشموع المغلقة."""
     try:
@@ -1620,6 +1632,9 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             "visual_score": 0,
             "bias": "محايد",
             "evidence": "تعذرت المطابقة البصرية؛ استُخدم فحص الشموع الحتمي فقط.",
+            "scenario_reference_id": "",
+            "scenario_score": 0,
+            "scenario_evidence": "",
         }
 
     score = max(0, min(100, int(result.get("visual_score") or 0)))
@@ -1638,12 +1653,16 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
         "visual_score": score if matched else 0,
         "bias": str(result.get("bias") or "محايد") if matched else "محايد",
         "evidence": str(result.get("evidence") or "").strip()[:220],
+        "scenario_reference_id": str(result.get("scenario_reference_id") or "").strip(),
+        "scenario_score": max(0, min(100, int(result.get("scenario_score") or 0))),
+        "scenario_evidence": str(result.get("scenario_evidence") or "").strip()[:220],
     }
 
 
 def _merge_reference_pattern_review(
     review: dict[str, Any],
     visual_match: dict[str, Any],
+    frames: Any | None = None,
 ) -> dict[str, Any]:
     """Select one drawable model by visual-source match + real M5 geometry."""
     merged = copy.deepcopy(review if isinstance(review, dict) else {})
@@ -1731,6 +1750,20 @@ def _merge_reference_pattern_review(
                 "reference_visual_evidence": str(visual_match.get("evidence") or "") if matched else "",
             }
         )
+    scenario_review = review_reference_scenarios(frames or {}, merged, visual_match)
+    merged["reference_scenario"] = scenario_review
+    merged["reference_scenario_available"] = bool(scenario_review.get("available"))
+    merged["reference_scenario_id"] = str(scenario_review.get("scenario_id") or "none")
+    merged["reference_scenario_label"] = str(scenario_review.get("label_ar") or "")
+    merged["reference_scenario_confidence"] = int(scenario_review.get("confidence") or 0)
+    merged["reference_scenario_status"] = str(scenario_review.get("status") or "none")
+    merged["reference_scenario_bias"] = str(scenario_review.get("bias") or "محايد")
+    merged["reference_scenario_source_id"] = str(scenario_review.get("source_reference_id") or "")
+    merged["reference_scenario_rule"] = str(scenario_review.get("rule_ar") or "")
+    merged["reference_scenario_evidence"] = str(scenario_review.get("evidence") or "")
+    merged["reference_scenario_features"] = list(scenario_review.get("features") or [])
+    merged["reference_scenario_geometry"] = dict(scenario_review.get("geometry") or {})
+    merged["reference_scenario_draw_components"] = list(scenario_review.get("draw_components") or [])
     return merged
 
 
@@ -3717,6 +3750,27 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
     data["pattern_reference_visual_evidence"] = str(review.get("reference_visual_evidence") or "")[:220]
     data["pattern_reference_match_status"] = str(review.get("reference_match_status") or "")
 
+    scenario = review.get("reference_scenario") if isinstance(review.get("reference_scenario"), dict) else {}
+    data["reference_scenario_available"] = bool(scenario.get("available"))
+    data["reference_scenario_id"] = str(scenario.get("scenario_id") or "none")
+    data["reference_scenario_label"] = str(scenario.get("label_ar") or "")[:120]
+    data["reference_scenario_confidence"] = int(scenario.get("confidence") or 0)
+    data["reference_scenario_status"] = str(scenario.get("status") or "none")
+    data["reference_scenario_bias"] = str(scenario.get("bias") or "محايد")
+    data["reference_scenario_source_id"] = str(scenario.get("source_reference_id") or "")
+    data["reference_scenario_rule"] = str(scenario.get("rule_ar") or "")[:360]
+    data["reference_scenario_evidence"] = str(scenario.get("evidence") or "")[:240]
+    data["reference_scenario_features"] = list(scenario.get("features") or [])
+    data["reference_scenario_geometry"] = dict(scenario.get("geometry") or {})
+    data["reference_scenario_draw_components"] = list(scenario.get("draw_components") or [])
+
+    if data["reference_scenario_available"]:
+        summary = (
+            f"السيناريو المرجعي الأقرب: {data['reference_scenario_label']} "
+            f"بثقة {data['reference_scenario_confidence']}٪؛ "
+            f"{data['reference_scenario_evidence']}."
+        )
+
     data["pattern_review_summary"] = summary[:260]
     data["pattern_candidates_checked"] = checked
     data["pattern_review_candidates"] = list(review.get("candidates") or [])[:4]
@@ -4511,6 +4565,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     pattern_review = _merge_reference_pattern_review(
         review_market_patterns(market_context.get("frames") or {}),
         visual_pattern_match,
+        market_context.get("frames") or {},
     )
 
     canonical_input = {
@@ -4541,8 +4596,8 @@ def _analyze(path: Path) -> dict[str, Any]:
             "analysis_rules_hash": _analysis_rules_fingerprint(),
             "rules_audit_summary": (
                 f"طُبقت قواعد H4/H1/M15/M5، ورُوجعت {len(pattern_review.get('checked_patterns') or [])} "
-                "نماذج على الشموع المغلقة، وطُبق مرجع صور المصادر على الشارت ثم ثُبت النموذج الأقرب "
-                "بهندسة M5 حقيقية قبل الرسم."
+                "نماذج على الشموع المغلقة، وطُبقت ذاكرة صور المصادر على الشارت ثم ثُبت "
+                "النموذج/السيناريو الأقرب بهندسة M5 حقيقية قبل الرسم."
             ),
             "provider_closed_m5_price": round(provider_closed_price, 3),
             "provider_live_price": round(provider_live_price, 3),
