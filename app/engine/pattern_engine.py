@@ -645,18 +645,3 @@ def review_market_patterns(frames: Any) -> dict[str, Any]:
         "overlay_patterns": [_serialize(item) for item in overlay],
         "candidates": [_serialize(item) for item in candidates[:6]],
     }
- break
-
-    return {
-        "available": accepted,
-        "pattern_type": best.name if accepted else "لا يوجد",
-        "pattern_confidence": best.confidence if accepted else 0,
-        "pattern_timeframe": best.timeframe if accepted else "",
-        "pattern_bias": best.bias if accepted else "محايد",
-        "pattern_status": best.status if accepted else "none",
-        "pattern_evidence": best.evidence if accepted else "لم يكتمل نموذج هندسي بشروط كافية",
-        "checked_patterns": checked,
-        "extended_checked_patterns": extended_checked,
-        "overlay_patterns": [_serialize(item) for item in overlay],
-        "candidates": [_serialize(item) for item in candidates[:6]],
-    }
