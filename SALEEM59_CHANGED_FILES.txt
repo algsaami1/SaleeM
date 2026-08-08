@@ -1,3 +1,10 @@
+SaleeM v3.50.0 — Strict structural events and single executable pattern overlay
+- Removed decorative pre/post legs from W/M: only pivot1 -> neckline -> pivot2 -> real breakout.
+- Removed uploaded-chart X fallback entirely: no proven candle match means no structure/pattern drawing.
+- BOS/CHOCH now come from sequential closed-candle swing-break events; IDM is a real internal swing in the latest BOS leg.
+- Only the primary pattern may draw Activation/Entry/Invalidation/forecast, and only when market is active, draw_mode is conditional/confirmed, and pattern bias matches SaleeM direction/action.
+- Secondary patterns remain analytical geometry only; Market closed/watch/conflict never receives a forecast arrow.
+
 SaleeM v3.49.0 — True candle-X anchored pattern and structure overlays
 
 - Aligns screenshot candle X positions to actual M5 market-candle indices using wick prices and candle color instead of blindly mapping the last N candles.

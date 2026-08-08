@@ -5125,6 +5125,13 @@ def _native_index_x(
     relative_index: int,
     candle_centers: list[int],
 ) -> int | None:
+    """Project a market candle index onto the uploaded chart only from a calibrated X map.
+
+    Uploaded-chart rendering is fail-closed: if the wick/price matching could
+    not prove which screenshot candle corresponds to the market index, no X is
+    returned. The old trailing-window fallback caused W/M/BOS/CHOCH/IDM to
+    drift onto unrelated candles and is intentionally removed.
+    """
     candles = _valid_renderer_candles(analysis)
     if not candles or not candle_centers:
         return None
@@ -5132,24 +5139,15 @@ def _native_index_x(
     if absolute is None:
         return None
     x_map = analysis.get("_native_candle_x_map")
-    if isinstance(x_map, dict):
-        value = x_map.get(int(absolute))
-        if value is not None:
-            try:
-                return int(value)
-            except (TypeError, ValueError):
-                pass
-        # A calibrated X model exists but this candle is not visible. Never
-        # guess its X from a different trailing-window assumption.
-        if x_map:
-            return None
-    visible_count = min(len(candle_centers), len(candles))
-    centers = candle_centers[-visible_count:]
-    visible_start = len(candles) - visible_count
-    if absolute < visible_start or absolute >= len(candles):
+    if not isinstance(x_map, dict) or not x_map:
         return None
-    return int(centers[absolute - visible_start])
-
+    value = x_map.get(int(absolute))
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 def _native_draw_arrow(
     draw: ImageDraw.ImageDraw,
@@ -5173,6 +5171,54 @@ def _native_draw_arrow(
         vy = sign * ux * sa + uy * ca
         point = (int(end[0] - vx * size), int(end[1] - vy * size))
         draw.line((end[0], end[1], point[0], point[1]), fill=color, width=width)
+
+
+def _native_pattern_execution_allowed(analysis: dict[str, Any], overlay: dict[str, Any], rank: int) -> bool:
+    """Only the primary, direction-compatible pattern may explain an executable path."""
+    if rank != 0:
+        return False
+    if str(analysis.get("market_status") or "active") != "active":
+        return False
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    if draw_mode not in {"conditional", "confirmed"}:
+        return False
+    direction = str(analysis.get("direction") or "")
+    bias = str(overlay.get("bias") or "")
+    if bias == "صاعد" and direction != "صاعد":
+        return False
+    if bias == "هابط" and direction != "هابط":
+        return False
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    side = str(action.get("primary_side") or "wait")
+    expected_side = "buy" if bias == "صاعد" else "sell" if bias == "هابط" else "wait"
+    return side == expected_side
+
+
+def _native_pattern_core_visible(
+    analysis: dict[str, Any],
+    overlay: dict[str, Any],
+    geometry: dict[str, Any],
+    candle_centers: list[int],
+) -> bool:
+    """Require the full W/M core to be visible before drawing any part of it."""
+    name = str(overlay.get("name") or "")
+    if name not in {"W", "M"}:
+        return True
+    roles: list[tuple[int, str]] = []
+    for anchor in geometry.get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        try:
+            idx = int(anchor.get("index"))
+        except (TypeError, ValueError):
+            continue
+        role = str(anchor.get("role") or "")
+        if role in {"pivot", "neck"}:
+            roles.append((idx, role))
+    if len(roles) < 3:
+        return False
+    visible = [_native_index_x(analysis, geometry, idx, candle_centers) for idx, _role in roles[:3]]
+    return all(value is not None for value in visible)
 
 
 def _native_draw_pattern_overlays(
@@ -5211,6 +5257,9 @@ def _native_draw_pattern_overlays(
         status = str(overlay.get("status") or "candidate")
         bias = str(overlay.get("bias") or "محايد")
         confirmed = status == "confirmed"
+        if not _native_pattern_core_visible(analysis, overlay, geometry, candle_centers):
+            continue
+        execution_allowed = confirmed and _native_pattern_execution_allowed(analysis, overlay, rank)
         opacity = 205 if rank == 0 else 135
         boundary = (79, 91, 213, opacity) if confirmed else (71, 80, 94, opacity)
         path_color = (70, 78, 89, max(90, opacity - 50))
@@ -5290,9 +5339,9 @@ def _native_draw_pattern_overlays(
                 if price is not None:
                     pivot_prices.append(float(price))
 
-        # For confirmed M/W overlays, show the trade explanation directly on the chart:
-        # activation/entry zone, invalidation, and the expected path arrow.
-        if confirmed and trigger is not None:
+        # Only the primary, direction-compatible active scenario may show
+        # activation/entry/invalidation. Secondary patterns stay analytical only.
+        if execution_allowed and trigger is not None:
             trigger_y = _native_y(analysis, float(trigger), height)
             if trigger_y is not None:
                 zone_left = max(candle_centers[-1] - spacing * 2, int(width * 0.68))
@@ -5319,7 +5368,7 @@ def _native_draw_pattern_overlays(
                     draw.text((zone_right - 4, (top_y + bottom_y) // 2), "ENTRY ZONE", font=font, fill=outline, anchor="rm")
                 _dash_line(draw, (zone_left, trigger_y), (zone_right, trigger_y), (33, 147, 83, 190) if bias == "صاعد" else (212, 62, 70, 190), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
                 draw.text((zone_right - 4, max(12, trigger_y - 6)), "NECKLINE / ACTIVATION", font=font, fill=(33, 147, 83, 200) if bias == "صاعد" else (212, 62, 70, 200), anchor="rs")
-        if confirmed and stop is not None:
+        if execution_allowed and stop is not None:
             stop_y = _native_y(analysis, float(stop), height)
             if stop_y is not None:
                 line_left = max(int(width * 0.66), candle_centers[-1] - spacing * 2)
@@ -5327,8 +5376,9 @@ def _native_draw_pattern_overlays(
                 _dash_line(draw, (line_left, stop_y), (line_right, stop_y), (212, 62, 70, 160), width=max(1, line_w), dash=max(6, spacing // 2), gap=max(4, spacing // 3))
                 draw.text(((line_left + line_right) // 2, stop_y - 6), "INVALIDATION", font=font, fill=(212, 62, 70, 190), anchor="ms")
 
-        # Forecast arrow is permitted only after the real breakout is confirmed.
-        if confirmed and trigger is not None and target is not None and breakout_idx is not None:
+        # Forecast arrow starts at the real breakout only for an active,
+        # direction-compatible primary scenario. Watch/closed/conflict = no arrow.
+        if execution_allowed and trigger is not None and target is not None and breakout_idx is not None:
             try:
                 sx = _native_index_x(analysis, geometry, int(breakout_idx), candle_centers)
             except (TypeError, ValueError):
@@ -5437,61 +5487,121 @@ def _native_structure_events(
     analysis: dict[str, Any],
     candles: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Return BOS/CHOCH/IDM only when they are tied to real swing/break events.
+    """Build recent market-structure events from real swing breaks only.
 
-    BOS/CHOCH are drawn at the broken swing level from the swing candle to the
-    actual breaking candle. IDM is the last opposite swing inside that leg.
+    A break exists only when a later closed candle closes beyond the latest
+    known swing high/low. The first break establishes structure. A break in the
+    same direction is BOS; the first opposite break is CHOCH and flips the
+    structure state. IDM is an actual internal opposite swing inside the most
+    recent BOS leg. No floating label is created without a source swing.
     """
     highs, lows = _simple_swing_points(candles, window=2)
     if not highs and not lows:
         return []
-    recent_floor = max(0, len(candles) - 32)
     atr_values = [max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-24:]]
     atr = max(0.01, float(median(atr_values))) if atr_values else 0.25
-    tol = atr * 0.04
-    breaks: list[dict[str, Any]] = []
-    for idx, price in highs:
-        for j in range(idx + 2, len(candles)):
-            if float(candles[j]["close"]) > float(price) + tol:
-                breaks.append({"side": "bull", "swing_index": idx, "break_index": j, "price": float(price)})
-                break
-    for idx, price in lows:
-        for j in range(idx + 2, len(candles)):
-            if float(candles[j]["close"]) < float(price) - tol:
-                breaks.append({"side": "bear", "swing_index": idx, "break_index": j, "price": float(price)})
-                break
-    breaks = [e for e in breaks if int(e["break_index"]) >= recent_floor]
-    breaks.sort(key=lambda e: (int(e["break_index"]), int(e["swing_index"])))
-    if not breaks:
+    tolerance = atr * 0.05
+
+    high_by_idx = {int(i): float(p) for i, p in highs}
+    low_by_idx = {int(i): float(p) for i, p in lows}
+    broken_highs: set[int] = set()
+    broken_lows: set[int] = set()
+    active_high: tuple[int, float] | None = None
+    active_low: tuple[int, float] | None = None
+    structural_side: str | None = None
+    events: list[dict[str, Any]] = []
+
+    for j in range(len(candles)):
+        # A 2-bar pivot becomes knowable only after two candles to its right.
+        pivot_idx = j - 2
+        if pivot_idx in high_by_idx:
+            active_high = (pivot_idx, high_by_idx[pivot_idx])
+        if pivot_idx in low_by_idx:
+            active_low = (pivot_idx, low_by_idx[pivot_idx])
+        close = float(candles[j]["close"])
+
+        candidate: dict[str, Any] | None = None
+        if active_high is not None and active_high[0] not in broken_highs and j >= active_high[0] + 2:
+            if close > active_high[1] + tolerance:
+                candidate = {
+                    "side": "bull",
+                    "swing_index": active_high[0],
+                    "break_index": j,
+                    "price": active_high[1],
+                }
+                broken_highs.add(active_high[0])
+        if active_low is not None and active_low[0] not in broken_lows and j >= active_low[0] + 2:
+            if close < active_low[1] - tolerance:
+                bear = {
+                    "side": "bear",
+                    "swing_index": active_low[0],
+                    "break_index": j,
+                    "price": active_low[1],
+                }
+                broken_lows.add(active_low[0])
+                if candidate is None:
+                    candidate = bear
+                else:
+                    # A single candle should not normally break both sides. If it
+                    # does, keep the break that travelled farther beyond its level.
+                    bull_excess = close - float(candidate["price"])
+                    bear_excess = float(bear["price"]) - close
+                    if bear_excess > bull_excess:
+                        candidate = bear
+        if candidate is None:
+            continue
+
+        side = str(candidate["side"])
+        if structural_side is None:
+            label = "BOS"
+            structural_side = side
+        elif side == structural_side:
+            label = "BOS"
+        else:
+            label = "CHOCH"
+            structural_side = side
+        candidate["label"] = label
+        events.append(candidate)
+
+    if not events:
+        return []
+    recent_floor = max(0, len(candles) - 34)
+    recent_events = [e for e in events if int(e["break_index"]) >= recent_floor]
+    if not recent_events:
         return []
 
-    direction = _reference_direction(analysis)
-    trend_side = "bull" if direction != "هابط" else "bear"
-    bos = next((e for e in reversed(breaks) if e["side"] == trend_side), None)
-    choch = None
-    if bos is not None:
-        choch = next((e for e in reversed(breaks) if e["side"] != trend_side and int(e["break_index"]) <= int(bos["break_index"])), None)
-    if choch is None:
-        choch = next((e for e in reversed(breaks) if e["side"] != trend_side), None)
+    last_choch = next((e for e in reversed(recent_events) if e["label"] == "CHOCH"), None)
+    bos_candidates = [e for e in recent_events if e["label"] == "BOS"]
+    if last_choch is not None:
+        after = [e for e in bos_candidates if int(e["break_index"]) > int(last_choch["break_index"])]
+        last_bos = after[-1] if after else None
+    else:
+        last_bos = bos_candidates[-1] if bos_candidates else None
 
-    events: list[dict[str, Any]] = []
-    if bos is not None:
-        events.append({**bos, "label": "BOS"})
-    if choch is not None and (bos is None or (choch["swing_index"], choch["price"]) != (bos["swing_index"], bos["price"])):
-        events.append({**choch, "label": "CHOCH"})
+    result: list[dict[str, Any]] = []
+    if last_bos is not None:
+        result.append(dict(last_bos))
+    if last_choch is not None:
+        result.append(dict(last_choch))
 
-    if bos is not None:
-        a = int(bos["swing_index"])
-        b = int(bos["break_index"])
-        if trend_side == "bull":
-            internal = [p for p in lows if a < p[0] < b]
+    # IDM = last real opposite swing inside the latest BOS leg only.
+    if last_bos is not None:
+        a = int(last_bos["swing_index"])
+        b = int(last_bos["break_index"])
+        if str(last_bos["side"]) == "bull":
+            internal = [(i, p) for i, p in lows if a < i < b]
         else:
-            internal = [p for p in highs if a < p[0] < b]
+            internal = [(i, p) for i, p in highs if a < i < b]
         if internal:
-            idx, price = internal[-1]
-            events.append({"side": trend_side, "swing_index": idx, "break_index": idx, "price": float(price), "label": "IDM"})
-    return events[:3]
-
+            i, price = internal[-1]
+            result.append({
+                "side": str(last_bos["side"]),
+                "swing_index": int(i),
+                "break_index": int(i),
+                "price": float(price),
+                "label": "IDM",
+            })
+    return result[:3]
 
 def _native_draw_structure(
     draw: ImageDraw.ImageDraw,
