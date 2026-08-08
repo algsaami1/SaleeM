@@ -1,4 +1,4 @@
-"""Reference-scenario matcher for SaleeM v3.64.
+"""Reference-scenario matcher for SaleeM v3.65.
 
 This module converts the user's approved reference examples into deterministic
 scenario templates.  Visual similarity may rank a template, but no scenario is
@@ -81,11 +81,11 @@ SCENARIOS: tuple[ScenarioTemplate, ...] = (
     ),
     ScenarioTemplate(
         "multiple_tops_breakdown",
-        "قمم متعددة + كسر دعم",
+        "M / قمم متعددة + ضغط على الدعم",
         "هابط",
-        "تكرار القمم عند مقاومة واحدة ثم ضغط على الدعم/العنق؛ كسر الدعم يؤكد استمرار الهبوط.",
-        ("multiple_tops", "bearish_impulse"),
-        ("bos_bear", "break_retest", "liquidity_sweep_high"),
+        "قمتان أو أكثر عند مقاومة واحدة مع فشل الاختراق؛ يبقى السيناريو مرشحًا أثناء الضغط على الدعم/العنق، ويصبح أقوى بعد كسر الدعم.",
+        ("bearish_top_pattern",),
+        ("bearish_impulse", "bos_bear", "break_retest", "liquidity_sweep_high"),
         "result_07",
     ),
     ScenarioTemplate(
@@ -277,9 +277,13 @@ def _classical_features(pattern_review: dict[str, Any]) -> set[str]:
         if int(item.get("confidence") or 0) < 58:
             continue
         name = str(item.get("name") or "")
-        if name == "M": out.add("double_top")
+        if name == "M":
+            out.add("double_top")
+            out.add("bearish_top_pattern")
         if name == "W": out.add("double_bottom")
-        if name == "قمة ثلاثية": out.add("multiple_tops")
+        if name == "قمة ثلاثية":
+            out.add("multiple_tops")
+            out.add("bearish_top_pattern")
         if name == "قاع ثلاثي": out.add("multiple_bottoms")
         if "رأس وكتفين مقلوب" in name: out.add("inverse_head_shoulders")
         elif "رأس وكتفين" in name: out.add("head_shoulders")

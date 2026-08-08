@@ -34,3 +34,19 @@ def test_visual_hint_cannot_create_scenario_without_m5_geometry():
     assert result['available'] is False
     assert result['scenario_id']=='none'
     assert result['draw_components']==[]
+
+
+def test_double_top_can_be_candidate_before_breakdown_when_geometry_is_real():
+    values=[]
+    # enough closed M5 candles; directional impulse is intentionally absent
+    for i in range(20):
+        base=100.0 + (0.05 if i%2==0 else -0.04)
+        values.append((base,base+0.25,base-0.25,base+0.02))
+    frames={'M5':_candles(values)}
+    pattern_review={'candidates':[{'name':'M','confidence':79,'timeframe':'M5','status':'candidate'}]}
+    result=review_reference_scenarios(frames,pattern_review,{'scenario_reference_id':'result_07','scenario_score':78})
+    assert result['available'] is True
+    assert result['scenario_id']=='multiple_tops_breakdown'
+    assert result['status']=='candidate'
+    assert 'expectation_arrow' in result['draw_components']
+    assert 'pattern' in result['draw_components']

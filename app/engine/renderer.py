@@ -5884,7 +5884,7 @@ def _native_draw_reference_scenario(
     image.alpha_composite(layer)
 
 
-# v3.64: browser/GIF animation remains intentionally removed.
+# v3.65: browser/GIF animation remains intentionally removed.
 # The closest verified reference scenario is rendered as a static overlay.
 # The selected source-matched pattern is drawn as one static overlay directly
 # on the untouched uploaded chart; its expectation arrow is produced by
@@ -6237,7 +6237,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v3.61", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v3.65", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)

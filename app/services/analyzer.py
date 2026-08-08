@@ -43,6 +43,7 @@ SPEC_PATH = BASE_DIR / "SALEEM_FINAL_SPEC.md"
 PERMANENT_PROMPT_PATH = KNOWLEDGE_DIR / "09_rules" / "PERMANENT_ANALYSIS_PROMPT.md"
 REFERENCE_MODEL_DIR = KNOWLEDGE_DIR / "10_reference_images" / "source_models"
 REFERENCE_MODEL_ATLAS_PATH = REFERENCE_MODEL_DIR / "source_model_atlas.webp"
+REFERENCE_SCENARIO_ATLAS_PATH = KNOWLEDGE_DIR / "10_reference_images" / "result_scenarios" / "scenario_atlas.webp"
 REFERENCE_MODEL_CATALOG_PATH = REFERENCE_MODEL_DIR / "source_model_catalog.json"
 
 
@@ -1387,6 +1388,8 @@ def _analysis_rules_fingerprint() -> str:
     # invalidates cached analysis snapshots without adding large per-request IO.
     try:
         digest.update(REFERENCE_MODEL_ATLAS_PATH.read_bytes())
+        if REFERENCE_SCENARIO_ATLAS_PATH.exists():
+            digest.update(REFERENCE_SCENARIO_ATLAS_PATH.read_bytes())
     except OSError:
         digest.update(str(REFERENCE_MODEL_ATLAS_PATH).encode("utf-8"))
     return digest.hexdigest()[:20]
@@ -1600,7 +1603,8 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
     prompt = """أنت مرحلة مطابقة صور مرجعية فقط في SaleeM.
 
 الصورة الأولى هي شارت GOLD/XAUUSD M5 المرفوع من المستخدم.
-الصورة الثانية هي أطلس مبني من صور المصادر التي اعتمدها المستخدم، وتحت كل مرجع يظهر source id واسم العائلة.
+الصورة الثانية هي أطلس عائلات النماذج المعتمدة، وتحت كل مرجع يظهر source id واسم العائلة.
+الصورة الثالثة - إن وُجدت - هي أطلس السيناريوهات المرجعية result_01 إلى result_09.
 
 المطلوب:
 1) راجع شكل الحركة المرئي في الشارت، خصوصًا آخر ثلث إلى نصف الشارت، وقارنه بعائلات النماذج الموجودة في أطلس المصادر.
@@ -1620,7 +1624,7 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
             schema=REFERENCE_PATTERN_MATCH_SCHEMA,
             schema_name="saleem_reference_pattern_match",
             image_path=path,
-            image_paths=[REFERENCE_MODEL_ATLAS_PATH],
+            image_paths=[p for p in (REFERENCE_MODEL_ATLAS_PATH, REFERENCE_SCENARIO_ATLAS_PATH) if p.exists()],
             max_output_tokens=1200,
         )
     except RuntimeError as exc:
