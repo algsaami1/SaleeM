@@ -290,6 +290,19 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                     detail="أبعاد صورة الشارت صغيرة جدًا. ارفع صورة أوضح لقراءة السعر والشكل العام.",
                 )
 
+        # v3.74-horizontal-upload-guard
+        ratio = width / max(1, height)
+        if width <= height or ratio < 1.15:
+            raise HTTPException(
+                status_code=400,
+                detail="يشترط SaleeM صورة أفقية واضحة للشارت. دوّر الهاتف للوضع الأفقي وأظهر الشموع ومحور الأسعار ثم أعد الرفع.",
+            )
+        if width < 800 or height < 400:
+            raise HTTPException(
+                status_code=400,
+                detail=f"دقة الصورة منخفضة ({width}×{height}). ارفع صورة أفقية أوضح لا تقل تقريبًا عن 800×400.",
+            )
+
         result = await run_in_threadpool(
             analyze_chart_image,
             temp_path,
