@@ -1,0 +1,6 @@
+SaleeM v3.72 Chart Fit First
+Applied: 2026-08-09T17:08:18
+Backup: /root/SaleeM/_ui_v372_backup_20260809_170818
+Normal chart box: about 50dvh.
+Initial view: full result image visible using object-fit: contain.
+Zoom/pan remain available after the initial fit.

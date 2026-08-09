@@ -1306,3 +1306,123 @@ body.chart-focus-open-v371{overflow:hidden!important;touch-action:none!important
   .chart-gesture-hint-v371{bottom:12px;font-size:8px}
   .saleem-ui-rule-card{padding:11px 12px!important}
 }
+
+/* =====================================================================
+   v3.72 CHART FIT FIRST
+   Normal mode: show the ENTIRE chart first.
+   User can then zoom/pan without cropping the initial drawing.
+   ===================================================================== */
+
+.terminal-chart-card.result-chart-box-v371,
+.terminal-chart-card.result-chart-box{
+  width:100%!important;
+  margin:12px 0!important;
+  padding:8px!important;
+  border:2px solid #2fa75a!important;
+  border-radius:22px!important;
+  background:#ffffff!important;
+  overflow:hidden!important;
+}
+
+/* The chart box occupies the middle half of the phone screen. */
+.result-chart-box-v371 .chart-pan-viewport,
+.result-chart-box .chart-pan-viewport{
+  width:100%!important;
+  height:50dvh!important;
+  min-height:320px!important;
+  max-height:640px!important;
+  overflow:auto!important;
+  display:block!important;
+  border-radius:15px!important;
+  background:#090d12!important;
+  touch-action:none!important;
+  overscroll-behavior:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+  scrollbar-width:none!important;
+}
+.result-chart-box-v371 .chart-pan-viewport::-webkit-scrollbar,
+.result-chart-box .chart-pan-viewport::-webkit-scrollbar{
+  display:none!important;
+}
+
+/* Initial state: full chart visible, centered, no crop. */
+.result-chart-box-v371 .chart-pan-canvas,
+.result-chart-box .chart-pan-canvas{
+  width:100%!important;
+  height:100%!important;
+  min-width:100%!important;
+  min-height:100%!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  overflow:visible!important;
+  background:#090d12!important;
+}
+
+.result-chart-box-v371 #result-image,
+.result-chart-box #result-image{
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  max-width:100%!important;
+  max-height:100%!important;
+  object-fit:contain!important;
+  object-position:center center!important;
+  margin:auto!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  -webkit-user-drag:none!important;
+  transform-origin:center center!important;
+}
+
+/* Full-screen mode keeps the same fit-first behavior until the user zooms. */
+.result-chart-box-v371.chart-focus-v371 .chart-pan-viewport{
+  flex:1 1 auto!important;
+  width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  background:#090d12!important;
+}
+.result-chart-box-v371.chart-focus-v371 .chart-pan-canvas{
+  width:100%!important;
+  height:100%!important;
+  min-width:100%!important;
+  min-height:100%!important;
+  background:#090d12!important;
+}
+.result-chart-box-v371.chart-focus-v371 #result-image{
+  width:100%!important;
+  height:100%!important;
+  max-width:100%!important;
+  max-height:100%!important;
+  object-fit:contain!important;
+}
+
+/* Keep controls away from the plotted candles. */
+.result-chart-box-v371 .chart-focus-toggle-v371{
+  top:12px!important;
+  right:12px!important;
+}
+.result-chart-box-v371 .chart-gesture-hint-v371{
+  bottom:12px!important;
+}
+
+/* Phone tuning: visually similar to the supplied reference. */
+@media(max-width:640px){
+  .result-chart-box-v371 .chart-pan-viewport,
+  .result-chart-box .chart-pan-viewport{
+    height:50dvh!important;
+    min-height:300px!important;
+    max-height:560px!important;
+  }
+}
+
+/* Very short phone screens: keep chart usable without swallowing the page. */
+@media(max-height:700px){
+  .result-chart-box-v371 .chart-pan-viewport,
+  .result-chart-box .chart-pan-viewport{
+    height:46dvh!important;
+    min-height:260px!important;
+  }
+}
