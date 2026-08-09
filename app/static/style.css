@@ -1426,3 +1426,73 @@ body.chart-focus-open-v371{overflow:hidden!important;touch-action:none!important
     min-height:260px!important;
   }
 }
+
+/* =====================================================================
+   v3.73 COMPACT CHART + REAL PAN/ZOOM
+   ===================================================================== */
+
+.terminal-chart-card.result-chart-box-v371,
+.terminal-chart-card.result-chart-box{
+  width:100%!important;
+  margin:10px 0!important;
+  padding:7px!important;
+  border:2px solid #2fa75a!important;
+  border-radius:20px!important;
+  background:#fff!important;
+  overflow:hidden!important;
+}
+
+.result-chart-box-v371:not(.chart-focus-v371) .chart-pan-viewport,
+.result-chart-box:not(.chart-focus-v371) .chart-pan-viewport{
+  width:100%!important;
+  min-height:0!important;
+  max-height:none!important;
+  overflow:auto!important;
+  border-radius:14px!important;
+  background:#fff!important;
+  touch-action:none!important;
+  overscroll-behavior:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+  scrollbar-width:none!important;
+}
+
+.result-chart-box-v371 .chart-pan-viewport::-webkit-scrollbar,
+.result-chart-box .chart-pan-viewport::-webkit-scrollbar{
+  display:none!important;
+}
+
+.result-chart-box-v371 .chart-pan-canvas,
+.result-chart-box .chart-pan-canvas{
+  display:block!important;
+  max-width:none!important;
+  max-height:none!important;
+  overflow:visible!important;
+  background:#fff!important;
+}
+
+.result-chart-box-v371 #result-image,
+.result-chart-box #result-image{
+  display:block!important;
+  max-width:none!important;
+  max-height:none!important;
+  object-position:center center!important;
+  user-select:none!important;
+  -webkit-user-select:none!important;
+  -webkit-user-drag:none!important;
+}
+
+.result-chart-box-v371.chart-focus-v371 .chart-pan-viewport{
+  flex:1 1 auto!important;
+  width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  overflow:auto!important;
+  background:#090d12!important;
+}
+
+.result-chart-box-v371 .chart-gesture-hint-v371{
+  padding:7px 11px!important;
+  font-size:8px!important;
+  bottom:10px!important;
+}

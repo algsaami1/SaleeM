@@ -1,0 +1,7 @@
+SaleeM v3.73 Compact Chart + Real Pan/Zoom
+Applied: 2026-08-09T18:36:35
+Backup: /root/SaleeM/_ui_v373_backup_20260809_183635
+Normal chart box follows the result image aspect ratio.
+Initial view shows the entire chart with no large empty vertical area.
+Pinch zoom enlarges both canvas width and height up to 5x.
+One-finger pan works after zoom.
