@@ -1,0 +1,1048 @@
+{
+  "meta": {
+    "name": "SaleeM Reference Library",
+    "version": "1.0",
+    "app_target": "SaleeM v3.52",
+    "built_from": {
+      "unique_reference_images": 94,
+      "real_video_files_reviewed": 107,
+      "unique_video_contents": 106,
+      "video_duration_minutes_approx": 58.9,
+      "note": "ملفات __MACOSX/._ ليست فيديوهات إضافية؛ هي ملفات metadata من macOS وتم استبعادها."
+    },
+    "purpose": "تحويل الصور والفيديوهات التعليمية إلى قواعد مرجعية قابلة للمطابقة مع OHLC الحقيقي، لا إلى نسخ صور."
+  },
+  "non_negotiable_rules": [
+    "السوق الحالي وOHLC الحقيقي يحددان وجود النموذج؛ المكتبة لا تفرض نموذجًا.",
+    "لا Anchor ولا خط ولا منطقة دون سعر/شمعة حقيقية.",
+    "لا أكثر من نموذجين Overlay، والنموذج الأساسي فقط يملك مسار تنفيذ.",
+    "Candidate غير مكتمل = خطوط متقطعة بلا مسار مؤكد.",
+    "Confirmed يحتاج كسرًا/تفعيلًا حقيقيًا على شمعة مغلقة حسب القاعدة.",
+    "عند الازدحام تتحرك labels فقط، لا تتحرك نقاط النموذج.",
+    "الصورة المرفوعة لمعايرة X/Y والسعر الظاهر؛ القرار من بيانات السوق المغلقة.",
+    "السيناريو النهائي يشرح Break → Retest/Correction → Continuation عند توافر anchors موثوقة.",
+    "إذا لم توجد مطابقة قوية فلا يتم اختلاق نموذج؛ النتيجة مراقبة."
+  ],
+  "matching": {
+    "weights_percent": {
+      "structure_and_pivot_geometry": 35,
+      "pattern_geometry": 20,
+      "breakout_retest_state": 15,
+      "current_price_position": 10,
+      "trend_context": 8,
+      "liquidity_ob_fvg_confluence": 7,
+      "recency": 5
+    },
+    "thresholds": {
+      "very_strong": 88,
+      "strong": 78,
+      "candidate_medium": 68,
+      "weak_below": 68,
+      "execution_requires": "score >= 78 AND deterministic status=confirmed AND direction/action compatible"
+    },
+    "tie_breakers": [
+      "M5 geometry usable on screenshot",
+      "higher score",
+      "confirmed over candidate",
+      "newer structure",
+      "fewer assumptions"
+    ]
+  },
+  "rendering": {
+    "base": "uploaded chart preserved",
+    "overlay": "same SaleeM final overlay/animation spec v1",
+    "max_patterns": 2,
+    "primary_execution_paths": 1,
+    "candidate_style": "dashed",
+    "confirmed_style": "solid",
+    "path": "Break → Retest/Correction → short Continuation",
+    "do_not": "stretch arrow to distant TP or fabricate missing future legs"
+  },
+  "references": [
+    {
+      "id": "REV_W_BULL",
+      "family": "reversal",
+      "name_ar": "W / قاع مزدوج",
+      "bias": "bullish",
+      "aliases": [
+        "W",
+        "Double Bottom",
+        "قاع مزدوج"
+      ],
+      "geometry_required": [
+        "low1",
+        "neck_high",
+        "low2"
+      ],
+      "precondition": "هبوط أو ضغط سابق ثم تكوّن قاعين متقاربين يفصل بينهما ارتداد واضح.",
+      "candidate_when": "القاع الثاني قريب من الأول وخط العنق مثبت على قمة حقيقية بينهما.",
+      "confirmed_when": "إغلاق حقيقي فوق خط العنق؛ الأفضل Retest ناجح للعنق.",
+      "invalid_when": "إغلاق واضح أسفل القاع الثاني/منطقة الإبطال.",
+      "entry_rule": "فوق العنق بعد الكسر أو على إعادة اختبار ناجحة.",
+      "stop_rule": "أسفل القاع الثاني أو أسفل منطقة إعادة الاختبار البنيوية.",
+      "target_rule": "قياس عمق W من العنق إلى القاع ثم إسقاطه للأعلى، مع احترام أقرب مقاومة/سيولة.",
+      "render_rule": "ارسم low1→neck→low2 فقط على القمم/القيعان الحقيقية؛ المرشح متقطع، والمؤكد صلب + Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_M_BEAR",
+      "family": "reversal",
+      "name_ar": "M / قمة مزدوجة",
+      "bias": "bearish",
+      "aliases": [
+        "M",
+        "Double Top",
+        "قمة مزدوجة"
+      ],
+      "geometry_required": [
+        "high1",
+        "neck_low",
+        "high2"
+      ],
+      "precondition": "صعود أو ضغط سابق ثم تكوّن قمتين متقاربتين يفصل بينهما هبوط واضح.",
+      "candidate_when": "القمة الثانية قريبة من الأولى وخط العنق مثبت على قاع حقيقي بينهما.",
+      "confirmed_when": "إغلاق حقيقي تحت خط العنق؛ الأفضل Retest فاشل من أسفل.",
+      "invalid_when": "إغلاق واضح أعلى القمة الثانية/منطقة الإبطال.",
+      "entry_rule": "تحت العنق بعد الكسر أو على إعادة اختبار فاشلة من أسفل.",
+      "stop_rule": "أعلى القمة الثانية أو أعلى منطقة إعادة الاختبار البنيوية.",
+      "target_rule": "قياس عمق M من القمة إلى العنق ثم إسقاطه للأسفل، مع احترام أقرب دعم/سيولة.",
+      "render_rule": "ارسم high1→neck→high2 على نقاط حقيقية فقط؛ المرشح متقطع، والمؤكد صلب + Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_TRIPLE_BOTTOM_BULL",
+      "family": "reversal",
+      "name_ar": "قاع ثلاثي",
+      "bias": "bullish",
+      "aliases": [
+        "Triple Bottom",
+        "قاع ثلاثي"
+      ],
+      "geometry_required": [
+        "low1",
+        "low2",
+        "low3",
+        "neckline"
+      ],
+      "precondition": "ثلاثة اختبارات دعم متقاربة بعد هبوط/نطاق ضعيف.",
+      "candidate_when": "ثلاثة قيعان متقاربة مع قمم فاصلة تحدد خط العنق.",
+      "confirmed_when": "إغلاق فوق خط العنق بعد القاع الثالث.",
+      "invalid_when": "إغلاق أسفل نطاق القيعان الثلاثة.",
+      "entry_rule": "بعد كسر العنق أو Retest ناجح.",
+      "stop_rule": "أسفل أدنى قاع.",
+      "target_rule": "ارتفاع النموذج أو أقرب مقاومة/سيولة.",
+      "render_rule": "ثلاث نقاط ارتكاز فقط + عنق؛ لا تضف أرجل تجميلية.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_TRIPLE_TOP_BEAR",
+      "family": "reversal",
+      "name_ar": "قمة ثلاثية",
+      "bias": "bearish",
+      "aliases": [
+        "Triple Top",
+        "قمة ثلاثية"
+      ],
+      "geometry_required": [
+        "high1",
+        "high2",
+        "high3",
+        "neckline"
+      ],
+      "precondition": "ثلاثة اختبارات مقاومة متقاربة بعد صعود/نطاق ضعيف.",
+      "candidate_when": "ثلاث قمم متقاربة مع قيعان فاصلة تحدد خط العنق.",
+      "confirmed_when": "إغلاق تحت خط العنق بعد القمة الثالثة.",
+      "invalid_when": "إغلاق أعلى نطاق القمم الثلاث.",
+      "entry_rule": "بعد كسر العنق أو Retest فاشل.",
+      "stop_rule": "أعلى أعلى قمة.",
+      "target_rule": "ارتفاع النموذج أو أقرب دعم/سيولة.",
+      "render_rule": "ثلاث نقاط ارتكاز فقط + عنق؛ لا تضف أرجل تجميلية.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_IHS_BULL",
+      "family": "reversal",
+      "name_ar": "رأس وكتفين مقلوب",
+      "bias": "bullish",
+      "aliases": [
+        "Inverse Head and Shoulders",
+        "IHS"
+      ],
+      "geometry_required": [
+        "left_shoulder",
+        "head",
+        "right_shoulder",
+        "neck1",
+        "neck2"
+      ],
+      "precondition": "هبوط سابق؛ الرأس أعمق من الكتفين والكتفان متقاربان.",
+      "candidate_when": "اكتملت الكتفان والرأس وخط العنق الحقيقي.",
+      "confirmed_when": "إغلاق فوق خط العنق المائل/الأفقي.",
+      "invalid_when": "كسر الرأس أو فشل الكتف الأيمن بوضوح.",
+      "entry_rule": "بعد كسر العنق أو Retest ناجح.",
+      "stop_rule": "أسفل الكتف الأيمن/الرأس حسب البنية.",
+      "target_rule": "المسافة من الرأس إلى العنق أو أقرب مقاومة.",
+      "render_rule": "ارسم الكتفين والرأس والعنق فقط؛ لا تتنبأ بكتف غير موجود.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_HS_BEAR",
+      "family": "reversal",
+      "name_ar": "رأس وكتفين",
+      "bias": "bearish",
+      "aliases": [
+        "Head and Shoulders",
+        "H&S"
+      ],
+      "geometry_required": [
+        "left_shoulder",
+        "head",
+        "right_shoulder",
+        "neck1",
+        "neck2"
+      ],
+      "precondition": "صعود سابق؛ الرأس أعلى من الكتفين والكتفان متقاربان.",
+      "candidate_when": "اكتملت الكتفان والرأس وخط العنق الحقيقي.",
+      "confirmed_when": "إغلاق تحت خط العنق.",
+      "invalid_when": "كسر الرأس أو فشل الكتف الأيمن بوضوح.",
+      "entry_rule": "بعد كسر العنق أو Retest فاشل.",
+      "stop_rule": "أعلى الكتف الأيمن/الرأس حسب البنية.",
+      "target_rule": "المسافة من الرأس إلى العنق أو أقرب دعم.",
+      "render_rule": "ارسم الكتفين والرأس والعنق فقط؛ لا تتنبأ بكتف غير موجود.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_ASC_TRI_BULL",
+      "family": "triangle",
+      "name_ar": "مثلث صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Ascending Triangle"
+      ],
+      "geometry_required": [
+        "upper_line",
+        "lower_line",
+        "3+ touches"
+      ],
+      "precondition": "تقلص/ضغط واضح قبل نقطة الالتقاء، مع نقاط تماس حقيقية على الضلعين.",
+      "candidate_when": "قمم شبه أفقية + قيعان صاعدة تضغط نحو المقاومة.",
+      "confirmed_when": "إغلاق فوق الضلع العلوي/المقاومة.",
+      "invalid_when": "عودة السعر داخل المثلث وإغلاق مستقر خلف الضلع المقابل.",
+      "entry_rule": "على الكسر أو Retest للضلع المكسور.",
+      "stop_rule": "خلف الضلع المقابل أو خلف آخر Swing صالح.",
+      "target_rule": "ارتفاع قاعدة المثلث أو أقرب مستوى هيكلي، ولا يتجاوز مقاومة/دعم قوي دون سبب.",
+      "render_rule": "الضلعان مثبتان على touches حقيقية؛ المرشح متقطع والمؤكد صلب؛ السيناريو Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_DESC_TRI_BEAR",
+      "family": "triangle",
+      "name_ar": "مثلث هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Descending Triangle"
+      ],
+      "geometry_required": [
+        "upper_line",
+        "lower_line",
+        "3+ touches"
+      ],
+      "precondition": "تقلص/ضغط واضح قبل نقطة الالتقاء، مع نقاط تماس حقيقية على الضلعين.",
+      "candidate_when": "قيعان شبه أفقية + قمم هابطة تضغط نحو الدعم.",
+      "confirmed_when": "إغلاق تحت الضلع السفلي/الدعم.",
+      "invalid_when": "عودة السعر داخل المثلث وإغلاق مستقر خلف الضلع المقابل.",
+      "entry_rule": "على الكسر أو Retest للضلع المكسور.",
+      "stop_rule": "خلف الضلع المقابل أو خلف آخر Swing صالح.",
+      "target_rule": "ارتفاع قاعدة المثلث أو أقرب مستوى هيكلي، ولا يتجاوز مقاومة/دعم قوي دون سبب.",
+      "render_rule": "الضلعان مثبتان على touches حقيقية؛ المرشح متقطع والمؤكد صلب؛ السيناريو Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_SYM_TRI_BULL",
+      "family": "triangle",
+      "name_ar": "مثلث متماثل - كسر صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Symmetrical Triangle Bullish"
+      ],
+      "geometry_required": [
+        "upper_line",
+        "lower_line",
+        "3+ touches"
+      ],
+      "precondition": "تقلص/ضغط واضح قبل نقطة الالتقاء، مع نقاط تماس حقيقية على الضلعين.",
+      "candidate_when": "قمم هابطة + قيعان صاعدة مع تقلص النطاق.",
+      "confirmed_when": "إغلاق فوق الضلع العلوي.",
+      "invalid_when": "عودة السعر داخل المثلث وإغلاق مستقر خلف الضلع المقابل.",
+      "entry_rule": "على الكسر أو Retest للضلع المكسور.",
+      "stop_rule": "خلف الضلع المقابل أو خلف آخر Swing صالح.",
+      "target_rule": "ارتفاع قاعدة المثلث أو أقرب مستوى هيكلي، ولا يتجاوز مقاومة/دعم قوي دون سبب.",
+      "render_rule": "الضلعان مثبتان على touches حقيقية؛ المرشح متقطع والمؤكد صلب؛ السيناريو Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_SYM_TRI_BEAR",
+      "family": "triangle",
+      "name_ar": "مثلث متماثل - كسر هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Symmetrical Triangle Bearish"
+      ],
+      "geometry_required": [
+        "upper_line",
+        "lower_line",
+        "3+ touches"
+      ],
+      "precondition": "تقلص/ضغط واضح قبل نقطة الالتقاء، مع نقاط تماس حقيقية على الضلعين.",
+      "candidate_when": "قمم هابطة + قيعان صاعدة مع تقلص النطاق.",
+      "confirmed_when": "إغلاق تحت الضلع السفلي.",
+      "invalid_when": "عودة السعر داخل المثلث وإغلاق مستقر خلف الضلع المقابل.",
+      "entry_rule": "على الكسر أو Retest للضلع المكسور.",
+      "stop_rule": "خلف الضلع المقابل أو خلف آخر Swing صالح.",
+      "target_rule": "ارتفاع قاعدة المثلث أو أقرب مستوى هيكلي، ولا يتجاوز مقاومة/دعم قوي دون سبب.",
+      "render_rule": "الضلعان مثبتان على touches حقيقية؛ المرشح متقطع والمؤكد صلب؛ السيناريو Break→Retest→Continuation.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_FALLING_WEDGE_BULL",
+      "family": "wedge",
+      "name_ar": "وتد هابط",
+      "bias": "bullish",
+      "aliases": [
+        "Falling Wedge"
+      ],
+      "geometry_required": [
+        "descending_upper",
+        "descending_lower",
+        "contracting"
+      ],
+      "precondition": "قمم وقيعان هابطة لكن النطاق يتقلص.",
+      "candidate_when": "توجد 2-3 لمسات حقيقية على كل حد والتقارب واضح.",
+      "confirmed_when": "إغلاق فوق الحد العلوي، ويفضل Retest.",
+      "invalid_when": "كسر جديد أسفل الحد السفلي/القاع الأخير.",
+      "entry_rule": "بعد كسر الحد العلوي أو Retest ناجح.",
+      "stop_rule": "أسفل القاع/الحد السفلي.",
+      "target_rule": "أعرض جزء من الوتد أو أقرب مقاومة.",
+      "render_rule": "الحدود على pivots فقط؛ لا تمد خطًا لا يلمس السعر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_RISING_WEDGE_BEAR",
+      "family": "wedge",
+      "name_ar": "وتد صاعد",
+      "bias": "bearish",
+      "aliases": [
+        "Rising Wedge"
+      ],
+      "geometry_required": [
+        "ascending_upper",
+        "ascending_lower",
+        "contracting"
+      ],
+      "precondition": "قمم وقيعان صاعدة لكن النطاق يتقلص.",
+      "candidate_when": "توجد 2-3 لمسات حقيقية على كل حد والتقارب واضح.",
+      "confirmed_when": "إغلاق تحت الحد السفلي، ويفضل Retest فاشل.",
+      "invalid_when": "كسر جديد أعلى الحد العلوي/القمة الأخيرة.",
+      "entry_rule": "بعد كسر الحد السفلي أو Retest فاشل.",
+      "stop_rule": "أعلى القمة/الحد العلوي.",
+      "target_rule": "أعرض جزء من الوتد أو أقرب دعم.",
+      "render_rule": "الحدود على pivots فقط؛ لا تمد خطًا لا يلمس السعر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CHANNEL_ASC",
+      "family": "channel",
+      "name_ar": "قناة صاعدة",
+      "bias": "neutral",
+      "aliases": [
+        "Ascending Channel",
+        "Rising Channel"
+      ],
+      "geometry_required": [
+        "parallel_upper",
+        "parallel_lower",
+        "2+ touches each"
+      ],
+      "precondition": "قمم وقيعان صاعدة بين خطين شبه متوازيين.",
+      "candidate_when": "القناة قائمة ما دام السعر يحترم الحدين.",
+      "confirmed_when": "الاتجاه التنفيذي يتحدد بكسر حقيقي لأحد الحدين ثم Retest، وليس باسم القناة وحده.",
+      "invalid_when": "عودة داخل القناة بعد الكسر أو كسر معاكس.",
+      "entry_rule": "بعد كسر الحد المختار/Retest.",
+      "stop_rule": "خلف الحد المقابل أو آخر Swing.",
+      "target_rule": "عرض القناة أو أقرب S/R.",
+      "render_rule": "ارسم خطين متوازيين فقط على نقاط حقيقية؛ لا تفترض أن القناة تعني شراء دائمًا.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CHANNEL_DESC",
+      "family": "channel",
+      "name_ar": "قناة هابطة",
+      "bias": "neutral",
+      "aliases": [
+        "Descending Channel",
+        "Falling Channel"
+      ],
+      "geometry_required": [
+        "parallel_upper",
+        "parallel_lower",
+        "2+ touches each"
+      ],
+      "precondition": "قمم وقيعان هابطة بين خطين شبه متوازيين.",
+      "candidate_when": "القناة قائمة ما دام السعر يحترم الحدين.",
+      "confirmed_when": "الاتجاه التنفيذي يتحدد بكسر حقيقي لأحد الحدين ثم Retest، وليس باسم القناة وحده.",
+      "invalid_when": "عودة داخل القناة بعد الكسر أو كسر معاكس.",
+      "entry_rule": "بعد كسر الحد المختار/Retest.",
+      "stop_rule": "خلف الحد المقابل أو آخر Swing.",
+      "target_rule": "عرض القناة أو أقرب S/R.",
+      "render_rule": "ارسم خطين متوازيين فقط على نقاط حقيقية؛ لا تفترض أن القناة تعني بيع دائمًا.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "RANGE_RECT_BULL",
+      "family": "range",
+      "name_ar": "مستطيل - كسر صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Bullish Rectangle"
+      ],
+      "geometry_required": [
+        "horizontal_resistance",
+        "horizontal_support",
+        "multiple_touches"
+      ],
+      "precondition": "تذبذب أفقي واضح بين دعم ومقاومة متكررين.",
+      "candidate_when": "لا صفقة اتجاهية داخل منتصف النطاق؛ يبقى مراقبة.",
+      "confirmed_when": "إغلاق خارج النطاق في جهة الكسر، ويفضل Retest.",
+      "invalid_when": "عودة وإغلاق داخل النطاق بعد التفعيل.",
+      "entry_rule": "بعد الكسر/إعادة الاختبار.",
+      "stop_rule": "خلف الحد الآخر أو خلف Retest.",
+      "target_rule": "ارتفاع المستطيل أو أقرب S/R.",
+      "render_rule": "ارسم الحدين الأفقيين الحقيقيين فقط؛ لا تملأ النطاق بعناصر زائدة.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "RANGE_RECT_BEAR",
+      "family": "range",
+      "name_ar": "مستطيل - كسر هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Bearish Rectangle"
+      ],
+      "geometry_required": [
+        "horizontal_resistance",
+        "horizontal_support",
+        "multiple_touches"
+      ],
+      "precondition": "تذبذب أفقي واضح بين دعم ومقاومة متكررين.",
+      "candidate_when": "لا صفقة اتجاهية داخل منتصف النطاق؛ يبقى مراقبة.",
+      "confirmed_when": "إغلاق خارج النطاق في جهة الكسر، ويفضل Retest.",
+      "invalid_when": "عودة وإغلاق داخل النطاق بعد التفعيل.",
+      "entry_rule": "بعد الكسر/إعادة الاختبار.",
+      "stop_rule": "خلف الحد الآخر أو خلف Retest.",
+      "target_rule": "ارتفاع المستطيل أو أقرب S/R.",
+      "render_rule": "ارسم الحدين الأفقيين الحقيقيين فقط؛ لا تملأ النطاق بعناصر زائدة.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_FLAG_BULL",
+      "family": "continuation",
+      "name_ar": "علم صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Bull Flag"
+      ],
+      "geometry_required": [
+        "impulse_pole",
+        "short_consolidation",
+        "boundary_break"
+      ],
+      "precondition": "اندفاع قوي واضح (pole) يليه تماسك قصير أضعف منه.",
+      "candidate_when": "التماسك لا يعكس معظم الاندفاع ويظل داخل حدود قصيرة.",
+      "confirmed_when": "كسر التماسك في اتجاه الاندفاع وإغلاق خارجه.",
+      "invalid_when": "كسر التماسك عكس اتجاه الاندفاع أو إلغاء قاعدة الاندفاع.",
+      "entry_rule": "على breakout أو retest.",
+      "stop_rule": "خلف التماسك/آخر Swing.",
+      "target_rule": "طول عمود العلم/الاندفاع مع احترام مستويات السوق.",
+      "render_rule": "أظهر العمود والحدود فقط عند وضوحهما؛ السيناريو المتوقع لا يبدأ قبل الكسر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_FLAG_BEAR",
+      "family": "continuation",
+      "name_ar": "علم هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Bear Flag"
+      ],
+      "geometry_required": [
+        "impulse_pole",
+        "short_consolidation",
+        "boundary_break"
+      ],
+      "precondition": "اندفاع قوي واضح (pole) يليه تماسك قصير أضعف منه.",
+      "candidate_when": "التماسك لا يعكس معظم الاندفاع ويظل داخل حدود قصيرة.",
+      "confirmed_when": "كسر التماسك في اتجاه الاندفاع وإغلاق خارجه.",
+      "invalid_when": "كسر التماسك عكس اتجاه الاندفاع أو إلغاء قاعدة الاندفاع.",
+      "entry_rule": "على breakout أو retest.",
+      "stop_rule": "خلف التماسك/آخر Swing.",
+      "target_rule": "طول عمود العلم/الاندفاع مع احترام مستويات السوق.",
+      "render_rule": "أظهر العمود والحدود فقط عند وضوحهما؛ السيناريو المتوقع لا يبدأ قبل الكسر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_PENNANT_BULL",
+      "family": "continuation",
+      "name_ar": "راية صاعدة",
+      "bias": "bullish",
+      "aliases": [
+        "Bull Pennant"
+      ],
+      "geometry_required": [
+        "impulse_pole",
+        "short_consolidation",
+        "boundary_break"
+      ],
+      "precondition": "اندفاع قوي واضح (pole) يليه تماسك قصير أضعف منه.",
+      "candidate_when": "التماسك لا يعكس معظم الاندفاع ويظل داخل حدود قصيرة.",
+      "confirmed_when": "كسر التماسك في اتجاه الاندفاع وإغلاق خارجه.",
+      "invalid_when": "كسر التماسك عكس اتجاه الاندفاع أو إلغاء قاعدة الاندفاع.",
+      "entry_rule": "على breakout أو retest.",
+      "stop_rule": "خلف التماسك/آخر Swing.",
+      "target_rule": "طول عمود العلم/الاندفاع مع احترام مستويات السوق.",
+      "render_rule": "أظهر العمود والحدود فقط عند وضوحهما؛ السيناريو المتوقع لا يبدأ قبل الكسر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "CONT_PENNANT_BEAR",
+      "family": "continuation",
+      "name_ar": "راية هابطة",
+      "bias": "bearish",
+      "aliases": [
+        "Bear Pennant"
+      ],
+      "geometry_required": [
+        "impulse_pole",
+        "short_consolidation",
+        "boundary_break"
+      ],
+      "precondition": "اندفاع قوي واضح (pole) يليه تماسك قصير أضعف منه.",
+      "candidate_when": "التماسك لا يعكس معظم الاندفاع ويظل داخل حدود قصيرة.",
+      "confirmed_when": "كسر التماسك في اتجاه الاندفاع وإغلاق خارجه.",
+      "invalid_when": "كسر التماسك عكس اتجاه الاندفاع أو إلغاء قاعدة الاندفاع.",
+      "entry_rule": "على breakout أو retest.",
+      "stop_rule": "خلف التماسك/آخر Swing.",
+      "target_rule": "طول عمود العلم/الاندفاع مع احترام مستويات السوق.",
+      "render_rule": "أظهر العمود والحدود فقط عند وضوحهما؛ السيناريو المتوقع لا يبدأ قبل الكسر.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "REV_ROUND_BOTTOM_BULL",
+      "family": "rounding",
+      "name_ar": "قاع دائري",
+      "bias": "bullish",
+      "aliases": [
+        "Rounding Bottom"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "قاع منحني تدريجي مع تحسن متتابع في القيعان ثم كسر عنق/مقاومة.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "REV_ROUND_TOP_BEAR",
+      "family": "rounding",
+      "name_ar": "قمة دائرية",
+      "bias": "bearish",
+      "aliases": [
+        "Rounding Top"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "قمة منحنيّة تدريجيًا مع ضعف متتابع في القمم ثم كسر دعم.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "REV_CUP_HANDLE_BULL",
+      "family": "cup_handle",
+      "name_ar": "كوب وعروة",
+      "bias": "bullish",
+      "aliases": [
+        "Cup and Handle"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "قاع دائري يعود قرب الحافة القديمة ثم Handle صغير أعلى منتصف الكوب.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "REV_INV_CUP_HANDLE_BEAR",
+      "family": "cup_handle",
+      "name_ar": "كوب وعروة مقلوب",
+      "bias": "bearish",
+      "aliases": [
+        "Inverted Cup and Handle"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "قمة دائرية تعود قرب الحافة ثم Handle صغير هابط/جانبي.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "EXP_BROADENING",
+      "family": "broadening",
+      "name_ar": "نموذج متسع / Megaphone",
+      "bias": "neutral",
+      "aliases": [
+        "Broadening Pattern",
+        "Megaphone"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "قمم أعلى وقيعان أدنى مع اتساع تدريجي؛ الاتجاه لا يعتمد على الشكل وحده بل على الكسر.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "REV_DIAMOND_TOP_BEAR",
+      "family": "diamond",
+      "name_ar": "قمة ماسية",
+      "bias": "bearish",
+      "aliases": [
+        "Diamond Top"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "اتساع أولًا ثم تقلص حول قمة بعد صعود، مع كسر سفلي.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "REV_DIAMOND_BOTTOM_BULL",
+      "family": "diamond",
+      "name_ar": "قاع ماسي",
+      "bias": "bullish",
+      "aliases": [
+        "Diamond Bottom"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "اتساع أولًا ثم تقلص حول قاع بعد هبوط، مع كسر علوي.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "HARM_ABCD_BULL",
+      "family": "harmonic",
+      "name_ar": "AB=CD صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "ABCD Bullish"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "أربع نقاط متعاقبة مع تقارب طول AB وCD وانعكاس من D.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "HARM_ABCD_BEAR",
+      "family": "harmonic",
+      "name_ar": "AB=CD هابط",
+      "bias": "bearish",
+      "aliases": [
+        "ABCD Bearish"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "أربع نقاط متعاقبة مع تقارب طول AB وCD وانعكاس من D.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "HARM_THREE_DRIVE_BULL",
+      "family": "harmonic",
+      "name_ar": "Three Drive صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Three Drive Bullish"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "ثلاث دفعات هابطة متقاربة في القياس تنتهي بانعكاس صاعد.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "HARM_THREE_DRIVE_BEAR",
+      "family": "harmonic",
+      "name_ar": "Three Drive هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Three Drive Bearish"
+      ],
+      "geometry_required": [
+        "strict_real_pivots",
+        "shape_ratio_checks"
+      ],
+      "precondition": "يجب وجود سياق واضح ونقاط Pivot حقيقية؛ لا يكفي التشابه البصري.",
+      "candidate_when": "ثلاث دفعات صاعدة متقاربة في القياس تنتهي بانعكاس هابط.",
+      "confirmed_when": "اكتمال البنية + كسر/تأكيد واضح حسب اتجاه النموذج.",
+      "invalid_when": "فشل النقطة الأخيرة أو كسر مستوى الإبطال البنيوي.",
+      "entry_rule": "بعد التفعيل الحقيقي فقط.",
+      "stop_rule": "خلف D/الحافة/آخر Pivot صالح.",
+      "target_rule": "قياس النموذج أو أقرب S/R/سيولة؛ لا أهداف ثابتة.",
+      "render_rule": "Library-only في v3.52: لا يُرسم حتى يضيف detector حتمي يثبت كل نقطة.",
+      "implementation": "library_only_no_fabrication"
+    },
+    {
+      "id": "PA_BREAK_RETEST_BULL",
+      "family": "price_action",
+      "name_ar": "كسر وإعادة اختبار صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Break Retest Bullish"
+      ],
+      "geometry_required": [
+        "real_level",
+        "break_candle",
+        "retest"
+      ],
+      "precondition": "المستوى يجب أن يأتي من Swing/SR حقيقي وليس رقمًا مصطنعًا.",
+      "candidate_when": "اختراق مقاومة سابقة ثم عودة لاختبارها والثبات فوقها.",
+      "confirmed_when": "إغلاق فوق المستوى ثم لمس/اقتراب منه دون إغلاق تحته ثم استمرار.",
+      "invalid_when": "إغلاق راجع تحت المستوى.",
+      "entry_rule": "بعد Retest أو شمعة تأكيد على المستوى.",
+      "stop_rule": "خلف Retest/آخر Swing.",
+      "target_rule": "أقرب سيولة ثم S/R التالية؛ يمكن استخدام قياس الحركة إذا كان واضحًا.",
+      "render_rule": "خط مستوى حقيقي + BREAK + RETEST + continuation قصير.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "PA_BREAK_RETEST_BEAR",
+      "family": "price_action",
+      "name_ar": "كسر وإعادة اختبار هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Break Retest Bearish"
+      ],
+      "geometry_required": [
+        "real_level",
+        "break_candle",
+        "retest"
+      ],
+      "precondition": "المستوى يجب أن يأتي من Swing/SR حقيقي وليس رقمًا مصطنعًا.",
+      "candidate_when": "كسر دعم سابق ثم عودة لاختباره والفشل تحته.",
+      "confirmed_when": "إغلاق تحت المستوى ثم Retest من أسفل دون استعادة المستوى ثم استمرار.",
+      "invalid_when": "إغلاق راجع فوق المستوى.",
+      "entry_rule": "بعد Retest أو شمعة تأكيد على المستوى.",
+      "stop_rule": "خلف Retest/آخر Swing.",
+      "target_rule": "أقرب سيولة ثم S/R التالية؛ يمكن استخدام قياس الحركة إذا كان واضحًا.",
+      "render_rule": "خط مستوى حقيقي + BREAK + RETEST + continuation قصير.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_SWEEP_RECLAIM_BULL",
+      "family": "smc",
+      "name_ar": "سحب سيولة أسفل القاع ثم استعادة",
+      "bias": "bullish",
+      "aliases": [
+        "Sell-side Liquidity Sweep"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "اختراق ذيل/سعر أسفل قاع واضح ثم إغلاق عائد فوقه.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "استعادة المستوى + شمعة صاعدة/CHOCH لاحق.",
+      "invalid_when": "إغلاق مستقر أسفل قاع السحب.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_SWEEP_REJECT_BEAR",
+      "family": "smc",
+      "name_ar": "سحب سيولة أعلى القمة ثم رفض",
+      "bias": "bearish",
+      "aliases": [
+        "Buy-side Liquidity Sweep"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "اختراق أعلى قمة واضحة ثم إغلاق عائد تحتها.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "استعادة المستوى للأسفل + شمعة هابطة/CHOCH لاحق.",
+      "invalid_when": "إغلاق مستقر أعلى قمة السحب.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_BOS_BULL",
+      "family": "smc",
+      "name_ar": "BOS صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Bullish BOS"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "إغلاق فوق Swing High مؤكد ضمن بنية صاعدة/تحول صاعد.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "كسر حقيقي وليس wick فقط، ويفضل Retest.",
+      "invalid_when": "عودة أسفل آخر Higher Low/مستوى الكسر.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_BOS_BEAR",
+      "family": "smc",
+      "name_ar": "BOS هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Bearish BOS"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "إغلاق تحت Swing Low مؤكد ضمن بنية هابطة/تحول هابط.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "كسر حقيقي وليس wick فقط، ويفضل Retest.",
+      "invalid_when": "عودة أعلى آخر Lower High/مستوى الكسر.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_CHOCH_BULL",
+      "family": "smc",
+      "name_ar": "CHOCH صاعد",
+      "bias": "bullish",
+      "aliases": [
+        "Bullish CHOCH"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "بعد بنية هابطة، إغلاق فوق آخر Lower High مهم.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "يتأكد أكثر بمتابعة BOS صاعد أو Retest ناجح.",
+      "invalid_when": "استعادة البنية الهابطة وكسر القاع الأخير.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_CHOCH_BEAR",
+      "family": "smc",
+      "name_ar": "CHOCH هابط",
+      "bias": "bearish",
+      "aliases": [
+        "Bearish CHOCH"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "بعد بنية صاعدة، إغلاق تحت آخر Higher Low مهم.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "يتأكد أكثر بمتابعة BOS هابط أو Retest فاشل.",
+      "invalid_when": "استعادة البنية الصاعدة وكسر القمة الأخيرة.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_OB_REACTION_BULL",
+      "family": "smc",
+      "name_ar": "تفاعل Order Block شرائي",
+      "bias": "bullish",
+      "aliases": [
+        "Bullish Order Block"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "عودة السعر إلى آخر شمعة معاكسة قبل اندفاع صاعد واضح.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "رفض/ثبات من المنطقة مع بنية داعمة.",
+      "invalid_when": "إغلاق واضح أسفل المنطقة.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_OB_REACTION_BEAR",
+      "family": "smc",
+      "name_ar": "تفاعل Order Block بيعي",
+      "bias": "bearish",
+      "aliases": [
+        "Bearish Order Block"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "عودة السعر إلى آخر شمعة معاكسة قبل اندفاع هابط واضح.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "رفض/ثبات من المنطقة مع بنية داعمة.",
+      "invalid_when": "إغلاق واضح أعلى المنطقة.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_FVG_RETRACE_BULL",
+      "family": "smc",
+      "name_ar": "عودة إلى FVG شرائية",
+      "bias": "bullish",
+      "aliases": [
+        "Bullish FVG Retrace"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "وجود فجوة سعرية حقيقية أسفل/حول السعر بعد اندفاع صاعد.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "ملء جزئي/اختبار مع ثبات ثم استمرار.",
+      "invalid_when": "ملء كامل مع كسر البنية الداعمة.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    },
+    {
+      "id": "SMC_FVG_RETRACE_BEAR",
+      "family": "smc",
+      "name_ar": "عودة إلى FVG بيعية",
+      "bias": "bearish",
+      "aliases": [
+        "Bearish FVG Retrace"
+      ],
+      "geometry_required": [
+        "real_swing_or_zone",
+        "closed_candle_confirmation"
+      ],
+      "precondition": "وجود فجوة سعرية حقيقية أعلى/حول السعر بعد اندفاع هابط.",
+      "candidate_when": "العنصر موجود لكن التفعيل غير مكتمل؛ يبقى مراقبة/مشروط.",
+      "confirmed_when": "ملء جزئي/اختبار مع رفض ثم استمرار.",
+      "invalid_when": "ملء كامل مع كسر البنية الداعمة.",
+      "entry_rule": "بعد شمعة تأكيد أو Retest/CHOCH/BOS حسب السيناريو.",
+      "stop_rule": "خلف المنطقة/السوينغ الذي يبطل الفكرة.",
+      "target_rule": "السيولة المقابلة ثم أقرب S/R حقيقية؛ لا تستخدم مسافة ثابتة.",
+      "render_rule": "BOS/CHOCH/IDM/OB/FVG على أسعار حقيقية فقط؛ النص يتحرك لكن الـ anchors لا تتحرك.",
+      "implementation": "active_rule_library"
+    }
+  ]
+}

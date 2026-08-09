@@ -21,6 +21,7 @@ from PIL import Image, ImageEnhance
 from app.engine.memory_engine import memory_context
 from app.engine.pattern_engine import review_market_patterns
 from app.engine.reference_scenario_engine import review_reference_scenarios
+from app.engine.reference_rule_bridge import match_reference
 from app.engine.renderer import (
     AxisCalibrationError,
     detect_market_zone_presence,
