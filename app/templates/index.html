@@ -194,6 +194,15 @@
         <article><span>سبب الانتظار</span><b class="tone-gold">{% if decision_zone.get('active') %}داخل منطقة قرار{% elif result.rule_check and result.rule_check.first_missing %}{{ result.rule_check.first_missing }}{% else %}{{ action_badge }}{% endif %}</b><small>{{ action_reason|truncate(32, True, '…') }}</small></article>
       </div>
 
+      <section class="saleem-ui-rule-card" id="saleem-ui-rule-card-v371" aria-label="القاعدة الأساسية">
+        <div class="saleem-ui-rule-title">
+          <span>القاعدة الأساسية</span>
+          <b>{{ result.reference_scenario_label or result.pattern_type or 'السيناريو الأقرب' }}</b>
+        </div>
+        <p>{{ result.reference_scenario_rule or result.pattern_reference_rule or action_reason or 'لا توجد قاعدة مرجعية مكتملة بدرجة كافية لهذه النتيجة.' }}</p>
+      </section>
+
+
       <div class="result-actions terminal-actions" aria-label="خيارات النتيجة">
         <button class="result-action save-button" id="save-image-button" type="button">حفظ النتيجة</button>
         <button class="result-action share-button" id="share-image-button" type="button">مشاركة</button>
@@ -546,21 +555,207 @@
 
   <script src="/static/app.js?v={{ app_version }}" defer></script>
 
-<script id="saleem-v370-ui-fix">
-(()=>{const ready=f=>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",f,{once:true}):f();ready(()=>{
-const b=document.getElementById("analyze-button"),ip=document.getElementById("analysis-inline-percent"),
-bt=document.getElementById("analysis-button-text"),pv=document.getElementById("progress-value"),
-pc=document.getElementById("processing-card");
-if(b&&pc){pc.classList.add("inline-processing-card");b.insertAdjacentElement("afterend",pc)}
-const sync=()=>{if(!b)return;const v=Math.max(0,Math.min(100,Number((pv?.textContent||"0").replace("%",""))||0));
-b.style.setProperty("--p",v+"%");if(ip){ip.textContent=Math.round(v)+"%";ip.hidden=!(pc&&!pc.hidden)}
-if(bt&&pc&&!pc.hidden)bt.textContent=v>=100?"اكتمل التحليل":"جاري التحليل"};
-if(pv)new MutationObserver(sync).observe(pv,{childList:true,characterData:true,subtree:true});
-if(pc)new MutationObserver(()=>{const run=!pc.hidden;if(ip)ip.hidden=!run;if(bt)bt.textContent=run?"جاري التحليل":"بدء التحليل";if(!run&&b)b.style.setProperty("--p","0%");sync()}).observe(pc,{attributes:true,attributeFilter:["hidden"]});
-sync();
-const ch=document.querySelector(".terminal-chart-card");if(ch&&!ch.querySelector(".result-chart-change")){const x=document.createElement("a");x.className="result-chart-change";x.href="/";x.textContent="تغيير الشارت";ch.appendChild(x)}
-const m=document.querySelector(".terminal-metrics-bottom");if(m){const xs=[...document.querySelectorAll("section,article,div")].filter(e=>e!==m&&!m.contains(e)&&(e.textContent||"").includes("القاعدة الأساسية")).sort((a,b)=>(a.textContent||"").length-(b.textContent||"").length);if(xs[0]){const card=xs[0].closest("section,article")||xs[0];card.classList.add("rule-under-metrics");m.insertAdjacentElement("afterend",card)}}
-})})();
+<script id="saleem-v371-ui-controller">
+(() => {
+  const ready = (fn) => document.readyState === "loading"
+    ? document.addEventListener("DOMContentLoaded", fn, { once: true })
+    : fn();
+
+  ready(() => {
+    const analyzeButton = document.getElementById("analyze-button");
+    const analyzeForm = analyzeButton?.closest("form") || null;
+    const processingCard = document.getElementById("processing-card");
+    const oldProgressValue = document.getElementById("progress-value");
+
+    let buttonLabel = document.getElementById("analysis-button-text");
+    let inlinePercent = document.getElementById("analysis-inline-percent");
+
+    if (analyzeButton && !buttonLabel) {
+      const initial = (analyzeButton.textContent || "بدء التحليل").trim();
+      analyzeButton.textContent = "";
+      buttonLabel = document.createElement("span");
+      buttonLabel.id = "analysis-button-text";
+      buttonLabel.textContent = initial || "بدء التحليل";
+      inlinePercent = document.createElement("strong");
+      inlinePercent.id = "analysis-inline-percent";
+      inlinePercent.textContent = "0%";
+      inlinePercent.hidden = true;
+      analyzeButton.append(buttonLabel, inlinePercent);
+    }
+    if (analyzeButton) analyzeButton.classList.add("analysis-progress-button-v371");
+
+    if (analyzeButton && processingCard) {
+      processingCard.classList.add("inline-processing-card-v371");
+      if (processingCard.previousElementSibling !== analyzeButton) {
+        analyzeButton.insertAdjacentElement("afterend", processingCard);
+      }
+    }
+
+    const steps = processingCard
+      ? Array.from(processingCard.querySelectorAll(".steps span"))
+      : [];
+
+    const setProgress = (value) => {
+      const p = Math.max(0, Math.min(100, Number(value) || 0));
+      if (analyzeButton) analyzeButton.style.setProperty("--analysis-progress-v371", `${p}%`);
+      if (inlinePercent) {
+        inlinePercent.hidden = false;
+        inlinePercent.textContent = `${Math.round(p)}%`;
+      }
+      if (oldProgressValue) oldProgressValue.textContent = `${Math.round(p)}%`;
+
+      const active = p < 25 ? 0 : p < 50 ? 1 : p < 78 ? 2 : 3;
+      steps.forEach((step, i) => {
+        step.classList.toggle("done", i < active || p >= 100);
+        step.classList.toggle("current", i === active && p < 100);
+      });
+    };
+
+    const setRunning = (running) => {
+      if (!analyzeButton) return;
+      analyzeButton.disabled = running;
+      if (buttonLabel) buttonLabel.textContent = running ? "جاري التحليل" : "بدء التحليل";
+      if (processingCard) processingCard.hidden = !running;
+      if (!running) {
+        analyzeButton.style.setProperty("--analysis-progress-v371", "0%");
+        if (inlinePercent) inlinePercent.hidden = true;
+      }
+    };
+
+    const showError = (message) => {
+      let el = document.getElementById("saleem-analysis-inline-error");
+      if (!el && analyzeButton) {
+        el = document.createElement("p");
+        el.id = "saleem-analysis-inline-error";
+        el.className = "saleem-analysis-inline-error";
+        analyzeButton.insertAdjacentElement("afterend", el);
+      }
+      if (el) el.textContent = message;
+    };
+
+    // Keep the current interface visible while the server analyzes.
+    if (analyzeForm && !analyzeForm.dataset.saleemV371Ajax) {
+      analyzeForm.dataset.saleemV371Ajax = "1";
+
+      window.addEventListener("submit", async (event) => {
+        if (event.target !== analyzeForm) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        const formData = new FormData(analyzeForm);
+        const method = (analyzeForm.method || "POST").toUpperCase();
+        const action = analyzeForm.action || window.location.href;
+
+        setRunning(true);
+        setProgress(5);
+
+        let synthetic = 5;
+        const timer = window.setInterval(() => {
+          synthetic = Math.min(88, synthetic + (synthetic < 45 ? 4 : synthetic < 72 ? 2 : 1));
+          setProgress(synthetic);
+        }, 420);
+
+        try {
+          const response = await fetch(action, {
+            method,
+            body: method === "GET" ? undefined : formData,
+            credentials: "same-origin",
+            headers: { "X-Requested-With": "SaleeM-AJAX" }
+          });
+
+          const htmlText = await response.text();
+          window.clearInterval(timer);
+
+          if (!response.ok) throw new Error(`تعذر إكمال التحليل (${response.status})`);
+
+          setProgress(100);
+          if (buttonLabel) buttonLabel.textContent = "اكتمل التحليل";
+          await new Promise((resolve) => setTimeout(resolve, 180));
+
+          document.open();
+          document.write(htmlText);
+          document.close();
+        } catch (error) {
+          window.clearInterval(timer);
+          setRunning(false);
+          showError(error?.message || "تعذر إكمال التحليل. حاول مرة أخرى.");
+        }
+      }, true);
+    }
+
+    // Full-screen focus mode for the SAME chart element.
+    const chart = document.querySelector(".terminal-chart-card");
+    const viewport = document.getElementById("chart-pan-viewport");
+    const resultImage = document.getElementById("result-image");
+
+    if (chart && viewport && resultImage) {
+      chart.classList.add("result-chart-box-v371");
+
+      let focusButton = chart.querySelector(".chart-focus-toggle-v371");
+      if (!focusButton) {
+        focusButton = document.createElement("button");
+        focusButton.type = "button";
+        focusButton.className = "chart-focus-toggle-v371";
+        focusButton.innerHTML = "<span aria-hidden='true'>⛶</span><b>تكبير</b>";
+        chart.appendChild(focusButton);
+      }
+
+      const setFocus = (open) => {
+        chart.classList.toggle("chart-focus-v371", open);
+        document.body.classList.toggle("chart-focus-open-v371", open);
+        focusButton.innerHTML = open
+          ? "<span aria-hidden='true'>×</span><b>رجوع</b>"
+          : "<span aria-hidden='true'>⛶</span><b>تكبير</b>";
+      };
+
+      focusButton.addEventListener("click", () => {
+        setFocus(!chart.classList.contains("chart-focus-v371"));
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && chart.classList.contains("chart-focus-v371")) {
+          setFocus(false);
+        }
+      });
+
+      let lastTap = 0;
+      viewport.addEventListener("touchend", (event) => {
+        if (event.changedTouches.length !== 1) return;
+        const now = Date.now();
+        if (now - lastTap < 290) {
+          event.preventDefault();
+          setFocus(!chart.classList.contains("chart-focus-v371"));
+          lastTap = 0;
+        } else {
+          lastTap = now;
+        }
+      }, { passive: false });
+
+      if (!chart.querySelector(".chart-gesture-hint-v371")) {
+        const hint = document.createElement("div");
+        hint.className = "chart-gesture-hint-v371";
+        hint.innerHTML = "<span>↔</span> اسحب بإصبع • قرّب بإصبعين • ضغطتين لكامل الشاشة";
+        chart.appendChild(hint);
+        const hide = () => hint.classList.add("hide");
+        viewport.addEventListener("pointerdown", hide, { once: true });
+        viewport.addEventListener("touchstart", hide, { once: true, passive: true });
+      }
+    }
+
+    // Hide older duplicate rule sections; keep the new guaranteed rule card.
+    const newRule = document.getElementById("saleem-ui-rule-card-v371");
+    if (newRule) {
+      document.querySelectorAll("section, article").forEach((el) => {
+        if (el === newRule || el.contains(newRule)) return;
+        const text = (el.textContent || "").trim();
+        if (text.includes("القاعدة الأساسية") && !el.classList.contains("saleem-ui-rule-card")) {
+          el.hidden = true;
+        }
+      });
+    }
+  });
+})();
 </script>
 
 </body>

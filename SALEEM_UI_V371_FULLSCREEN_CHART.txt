@@ -1,0 +1,7 @@
+SaleeM v3.71 Fullscreen Chart UI
+Applied: 2026-08-09T15:58:25
+Backup: /root/SaleeM/_ui_v371_backup_20260809_155825
+Changed: app/templates/index.html + app/static/style.css
+Normal chart: ~50dvh. Full-screen focus: fixed overlay.
+Analysis stays visible using fetch until result HTML is ready.
+Rule is UI-only. Save/share uses result.result_url.
