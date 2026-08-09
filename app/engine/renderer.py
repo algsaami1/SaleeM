@@ -5474,72 +5474,79 @@ def _native_draw_pattern_overlays(
     image.alpha_composite(layer)
 
 def _native_draw_sr(draw: ImageDraw.ImageDraw, analysis: dict[str, Any], width: int, height: int, font) -> None:
-    """Draw a low-noise S/R plan on the untouched broker chart.
+    """v3.68: draw readable support/resistance *zones* on the original chart.
 
-    v3.60: when support and resistance are tightly packed around the live price,
-    render one neutral decision zone instead of multiple contradictory lines.
-    Outside that cluster, show only the nearest meaningful level on each side.
+    The price level remains the anchor.  A translucent band is only a visual
+    comfort layer around that exact level; it never changes the price or the
+    detected geometry.  Up to two nearby levels per side may be shown because
+    v3.68 prefers organized richness over hiding useful context.
     """
     current = _number(analysis.get("current_price"))
     if current is None:
         return
-    left = int(width * 0.035)
-    right = int(width * 0.855)
-    pad_x = max(4, int(width * 0.004))
-    pad_y = max(2, int(height * 0.003))
-    line_w = max(1, int(round(height * 0.0018)))
+    bounds = analysis.get("educational_overlay_bounds")
+    if isinstance(bounds, list) and len(bounds) >= 4:
+        left, _top, right, _bottom = [int(v) for v in bounds[:4]]
+    else:
+        left, right = int(width * 0.035), int(width * 0.855)
+    left = max(2, min(width - 4, left))
+    right = max(left + 8, min(width - 2, right))
+    line_w = max(1, int(round(min(width, height) * 0.0022)))
+    band_half = max(5, int(round(height * 0.0075)))
+    label_pad_x = max(5, int(width * 0.0045))
+    label_pad_y = max(3, int(height * 0.0028))
 
     decision_zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
     zone_low = _number(decision_zone.get("low")) if decision_zone.get("active") else None
     zone_high = _number(decision_zone.get("high")) if decision_zone.get("active") else None
     if zone_low is not None and zone_high is not None and float(zone_low) < float(zone_high):
-        y_high = _native_y(analysis, float(zone_high), height)
-        y_low = _native_y(analysis, float(zone_low), height)
-        if y_high is not None and y_low is not None:
-            top, bottom = sorted((y_high, y_low))
-            layer_fill = (214, 151, 45, 24)
-            boundary = (184, 124, 32, 150)
-            draw.rectangle((left, top, right, bottom), fill=layer_fill)
-            _dash_line(draw, (left, top), (right, top), boundary, width=line_w, dash=9, gap=7)
-            _dash_line(draw, (left, bottom), (right, bottom), boundary, width=line_w, dash=9, gap=7)
+        yh = _native_y(analysis, float(zone_high), height)
+        yl = _native_y(analysis, float(zone_low), height)
+        if yh is not None and yl is not None:
+            zt, zb = sorted((yh, yl))
+            draw.rounded_rectangle((left, zt, right, zb), radius=max(4, band_half // 2), fill=(245, 158, 11, 26), outline=(195, 127, 26, 110), width=1)
+            _dash_line(draw, (left, zt), (right, zt), (195, 127, 26, 155), width=line_w, dash=10, gap=7)
+            _dash_line(draw, (left, zb), (right, zb), (195, 127, 26, 155), width=line_w, dash=10, gap=7)
 
-    def in_decision_zone(price: float) -> bool:
+    def _inside_decision(price: float) -> bool:
         return zone_low is not None and zone_high is not None and float(zone_low) - 1e-9 <= price <= float(zone_high) + 1e-9
 
     specs = (
-        ("resistance_levels", "R", (210, 64, 72, 180), lambda p: p > current),
-        ("support_levels", "S", (44, 111, 214, 180), lambda p: p < current),
+        ("resistance_levels", "R", (221, 63, 72, 255), (221, 63, 72, 28), lambda p: p > float(current)),
+        ("support_levels", "S", (42, 111, 214, 255), (42, 111, 214, 28), lambda p: p < float(current)),
     )
-    for key, prefix, color, side_ok in specs:
-        candidates: list[tuple[float, int]] = []
+    for key, prefix, color, fill, side_ok in specs:
+        candidates: list[tuple[float, int, int]] = []
         for item in analysis.get(key) or []:
-            price = _number(item.get("price")) if isinstance(item, dict) else None
-            strength = int(item.get("strength") or 0) if isinstance(item, dict) else 0
-            if price is None or not side_ok(float(price)) or in_decision_zone(float(price)):
+            if not isinstance(item, dict):
                 continue
-            candidates.append((float(price), strength))
-        if not candidates:
-            continue
-        candidates.sort(key=lambda pair: abs(pair[0] - float(current)))
-        price, strength = candidates[0]
-        y = _native_y(analysis, price, height)
-        if y is None or y < int(height * 0.03) or y > int(height * 0.97):
-            continue
-        alpha = 205 if strength >= 75 else 165
-        line_color = (color[0], color[1], color[2], alpha)
-        draw.line((left, y, right, y), fill=line_color, width=line_w)
-        strength_text = f" {strength}%" if strength > 0 else ""
-        _native_tag(
-            draw,
-            left + max(3, int(width * 0.006)),
-            y,
-            f"{prefix} {_fmt_axis_price(price)}{strength_text}",
-            fill=(color[0], color[1], color[2], 170),
-            font=font,
-            pad_x=pad_x,
-            pad_y=pad_y,
-        )
-
+            price = _number(item.get("price"))
+            if price is None or not side_ok(float(price)) or _inside_decision(float(price)):
+                continue
+            strength = max(0, min(100, int(item.get("strength") or 0)))
+            touches = max(1, int(item.get("touches") or 1))
+            candidates.append((float(price), strength, touches))
+        candidates.sort(key=lambda item: abs(item[0] - float(current)))
+        for rank, (price, strength, touches) in enumerate(candidates[:2], 1):
+            y = _native_y(analysis, price, height)
+            if y is None or not (2 <= y <= height - 3):
+                continue
+            # Stronger levels get a slightly wider visible band, never a moved level.
+            half = band_half + (2 if strength >= 80 else 0)
+            draw.rounded_rectangle((left, max(1, y-half), right, min(height-2, y+half)), radius=max(3, half//2), fill=fill)
+            draw.line((left, y, right, y), fill=(color[0], color[1], color[2], 205 if strength >= 75 else 170), width=line_w)
+            strength_text = f" · {strength}%" if strength else ""
+            touch_text = f" · {touches}x" if touches >= 3 else ""
+            _native_tag(
+                draw,
+                left + max(4, int(width * 0.006)),
+                y,
+                f"{prefix}{rank} {_fmt_axis_price(price)}{strength_text}{touch_text}",
+                fill=(color[0], color[1], color[2], 205),
+                font=font,
+                pad_x=label_pad_x,
+                pad_y=label_pad_y,
+            )
 
 def _native_draw_zones(
     image: Image.Image,
@@ -5787,6 +5794,64 @@ def _visual_overlay_bounds(analysis: dict[str, Any], width: int, height: int) ->
     return (0, 0, width - 1, height - 1)
 
 
+
+def _v368_safe_text(value: str) -> str:
+    """Strip internal/debug artifacts and broken glyph placeholders from UI text."""
+    text = str(value or "")
+    for bad in ("\ufffd", "□□", "□", "\x00"):
+        text = text.replace(bad, "")
+    # Source IDs belong in debug logs, never in the customer-facing overlay.
+    if text.upper().startswith("SOURCE "):
+        return ""
+    return " ".join(text.split()).strip()
+
+
+def _image_is_dark(image: Image.Image, bounds: tuple[int, int, int, int]) -> bool:
+    x1, y1, x2, y2 = bounds
+    samples = []
+    for rx, ry in ((0.08,0.08),(0.5,0.12),(0.12,0.50),(0.88,0.50),(0.5,0.88)):
+        x = max(0, min(image.width-1, int(x1 + (x2-x1)*rx)))
+        y = max(0, min(image.height-1, int(y1 + (y2-y1)*ry)))
+        r,g,b,*_ = image.convert('RGBA').getpixel((x,y))
+        samples.append((r+g+b)/3)
+    return (sum(samples)/max(1,len(samples))) < 118
+
+
+def _v368_label(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    text: str,
+    font,
+    accent: tuple[int,int,int,int],
+    image_size: tuple[int,int],
+    bounds: tuple[int,int,int,int],
+    *,
+    anchor: str = "mm",
+    compact: bool = False,
+) -> tuple[int,int,int,int] | None:
+    text = _v368_safe_text(text)
+    if not text:
+        return None
+    box = draw.textbbox((0,0), text, font=font)
+    tw = max(1, box[2]-box[0]); th=max(1,box[3]-box[1])
+    px = 4 if compact else 7; py = 2 if compact else 4
+    if anchor in {"ma","mm","ms"}:
+        left = x - tw//2 - px
+    elif anchor.endswith("r"):
+        left = x - tw - px*2
+    else:
+        left = x
+    top = y - th//2 - py if anchor.endswith("m") or anchor == "mm" else y - py
+    bx1,by1,bx2,by2=bounds
+    left=max(bx1+2,min(bx2-tw-px*2-2,left)); top=max(by1+2,min(by2-th-py*2-2,top))
+    right=left+tw+px*2; bottom=top+th+py*2
+    fill=(7,15,24,190) if accent[0]+accent[1]+accent[2] > 540 else (250,252,255,218)
+    text_fill=(248,250,253,245) if fill[0] < 100 else (28,36,47,245)
+    draw.rounded_rectangle((left,top,right,bottom),radius=max(4,py+2),fill=fill,outline=(accent[0],accent[1],accent[2],150),width=1)
+    draw.text((left+px,(top+bottom)//2),text,font=font,fill=text_fill,anchor="lm")
+    return (left,top,right,bottom)
+
 def _native_draw_visual_reference_geometry(
     image: Image.Image,
     analysis: dict[str, Any],
@@ -5794,13 +5859,11 @@ def _native_draw_visual_reference_geometry(
     height: int,
     font,
 ) -> bool:
-    """Draw pixel-anchored teaching geometry over the untouched upload.
+    """v3.68: rich but orderly pixel-anchored educational geometry.
 
-    v3.67 uses visual coordinates only after the deterministic engine verifies
-    the same source-model/scenario family.  These points do not decide prices or
-    trades; they only place already-verified educational geometry on the exact
-    screenshot so the result stays authentic even when market-candle timestamps
-    cannot be aligned to the screenshot.
+    The uploaded chart pixels remain immutable.  Pattern pivots, structure
+    labels, OB/FVG/liquidity zones and the expected path are composited above
+    the chart only after the deterministic family/scenario gate succeeds.
     """
     score = int(analysis.get("visual_geometry_score") or 0)
     scenario_ok = bool(analysis.get("reference_scenario_available"))
@@ -5813,33 +5876,36 @@ def _native_draw_visual_reference_geometry(
     structures = analysis.get("visual_structure_lines") or []
     zones = analysis.get("visual_zones") or []
     expected = analysis.get("visual_expected_path") or []
-    if not (path_raw or lines_raw or structures or zones):
+    if not (path_raw or lines_raw or structures or zones or expected):
         return False
 
     bounds = _visual_overlay_bounds(analysis, width, height)
+    analysis["educational_overlay_bounds"] = list(bounds)
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     status = str(analysis.get("reference_scenario_status") or analysis.get("pattern_status") or "candidate")
     confirmed = status == "confirmed"
     bias = str(analysis.get("reference_scenario_bias") or analysis.get("pattern_bias") or "محايد")
     components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
-    family = str(analysis.get("pattern_reference_family") or "")
-    line_w = max(2, int(round(min(width, height) * 0.0024)))
-    dash = max(7, int(round(min(width, height) * 0.010)))
-    gap = max(5, int(round(min(width, height) * 0.006)))
-    pattern_color = (38, 93, 202, 235)
-    skeleton_color = (245, 248, 252, 238) if sum(image.convert("RGB").getpixel((max(0,bounds[0]), max(0,bounds[1])))) < 380 else (37, 45, 57, 230)
+    line_w = max(2, int(round(min(width, height) * 0.0031)))
+    thin_w = max(1, line_w - 1)
+    dash = max(8, int(round(min(width, height) * 0.013)))
+    gap = max(5, int(round(min(width, height) * 0.007)))
+    pattern_color = (76, 116, 235, 242)
+    pattern_under = (7, 12, 19, 118)
+    text_dark = (24, 31, 41, 244)
+    structure_color = (233, 238, 245, 235) if _image_is_dark(image, bounds) else (35, 44, 57, 230)
 
-    # Transparent verified zones, similar to the user's educational references.
-    zone_kinds_allowed = set()
-    if "order_block" in components: zone_kinds_allowed.add("order_block")
-    if "fvg" in components: zone_kinds_allowed.add("fvg")
-    if "liquidity" in components: zone_kinds_allowed.add("liquidity_area")
-    for item in zones[:4]:
+    # Zones: calm translucency + explicit label; no visual element moves its source.
+    allowed = set()
+    if "order_block" in components: allowed.add("order_block")
+    if "fvg" in components: allowed.add("fvg")
+    if "liquidity" in components: allowed.add("liquidity_area")
+    for item in zones[:6]:
         if not isinstance(item, dict):
             continue
         kind = str(item.get("kind") or "")
-        if scenario_ok and kind not in zone_kinds_allowed:
+        if scenario_ok and allowed and kind not in allowed:
             continue
         rect = item.get("rect")
         if not (isinstance(rect, list) and len(rect) >= 4):
@@ -5848,103 +5914,115 @@ def _native_draw_visual_reference_geometry(
         p2 = _ratio_point_to_px(rect[2:4], width, height, bounds)
         if p1 is None or p2 is None:
             continue
-        x1,x2=sorted((p1[0],p2[0])); y1,y2=sorted((p1[1],p2[1]))
-        if x2-x1 < 4 or y2-y1 < 4:
+        x1, x2 = sorted((p1[0], p2[0])); y1, y2 = sorted((p1[1], p2[1]))
+        if x2 - x1 < 8 or y2 - y1 < 6:
             continue
         if kind == "order_block":
-            fill=(88, 88, 88, 45); outline=(78, 78, 78, 145); label="OB"
+            bullish = bias == "صاعد"
+            fill = (31, 166, 111, 42) if bullish else (218, 70, 76, 42)
+            outline = (31, 144, 97, 160) if bullish else (194, 55, 64, 160)
+            label = "OB"
         elif kind == "fvg":
-            fill=(228, 157, 45, 36); outline=(198, 132, 32, 135); label="FVG"
+            fill = (245, 158, 11, 34); outline = (205, 127, 21, 150); label = "FVG"
         else:
-            fill=(64, 133, 212, 28); outline=(51, 111, 185, 120); label="LIQ"
-        draw.rounded_rectangle((x1,y1,x2,y2), radius=max(3,line_w*2), fill=fill, outline=outline, width=1)
-        draw.text((x1+5, max(y1+4, y2-16)), label, font=font, fill=outline)
+            fill = (65, 137, 218, 30); outline = (50, 111, 190, 145); label = "LIQUIDITY"
+        radius = max(5, line_w * 2)
+        draw.rounded_rectangle((x1, y1, x2, y2), radius=radius, fill=fill, outline=outline, width=thin_w)
+        _v368_label(draw, x1 + 6, y1 + 6, label, font, outline, image.size, bounds, anchor="la")
 
-    # Pattern boundaries and neckline, anchored to visible chart pixels.
+    # Pattern boundaries and a clean teaching skeleton.  Candidate geometry is dashed.
     if pattern_ok or "pattern" in components:
-        for item in lines_raw[:6]:
+        for item in lines_raw[:8]:
             if not (isinstance(item, list) and len(item) >= 4):
                 continue
-            p1=_ratio_point_to_px(item[:2],width,height,bounds); p2=_ratio_point_to_px(item[2:4],width,height,bounds)
-            if p1 is None or p2 is None: continue
+            p1 = _ratio_point_to_px(item[:2], width, height, bounds)
+            p2 = _ratio_point_to_px(item[2:4], width, height, bounds)
+            if p1 is None or p2 is None:
+                continue
+            draw.line((p1, p2), fill=pattern_under, width=line_w + 3)
             if confirmed:
-                draw.line((p1,p2), fill=pattern_color, width=line_w)
+                draw.line((p1, p2), fill=pattern_color, width=line_w)
             else:
-                _dash_line(draw,p1,p2,pattern_color,width=line_w,dash=dash,gap=gap)
+                _dash_line(draw, p1, p2, pattern_color, width=line_w, dash=dash, gap=gap)
 
-        path=[]
-        for point in path_raw[:12]:
-            px=_ratio_point_to_px(point,width,height,bounds)
-            if px is not None: path.append(px)
+        path = []
+        for point in path_raw[:14]:
+            px = _ratio_point_to_px(point, width, height, bounds)
+            if px is not None:
+                path.append(px)
         if len(path) >= 2:
-            # Dark/white teaching skeleton with a thin outline stays readable on
-            # both broker light and dark themes without obscuring candles.
-            for a,b in zip(path[:-1],path[1:]):
-                under=(19,25,34,150) if skeleton_color[0] > 200 else (250,250,250,150)
-                draw.line((a,b), fill=under, width=line_w+3)
+            for a, b in zip(path[:-1], path[1:]):
+                draw.line((a, b), fill=pattern_under, width=line_w + 4)
                 if confirmed:
-                    draw.line((a,b), fill=skeleton_color, width=line_w)
+                    draw.line((a, b), fill=(245, 248, 252, 245), width=line_w)
                 else:
-                    _dash_line(draw,a,b,skeleton_color,width=line_w,dash=dash,gap=gap)
-            r=max(3,line_w+1)
-            for x,y in path:
-                draw.ellipse((x-r,y-r,x+r,y+r), fill=(250,252,255,205), outline=pattern_color, width=1)
+                    _dash_line(draw, a, b, (245, 248, 252, 238), width=line_w, dash=dash, gap=gap)
+            r = max(4, line_w + 1)
+            for i, (x, y) in enumerate(path):
+                draw.ellipse((x-r, y-r, x+r, y+r), fill=(248, 251, 255, 235), outline=pattern_color, width=thin_w)
+                if len(path) <= 6:
+                    label = chr(ord('A') + i)
+                    draw.text((x, y-r-4), label, font=font, fill=pattern_color, anchor="ms")
 
-    # Structure lines are shown only when the verified scenario uses structure.
-    if not scenario_ok or "structure" in components:
-        for item in structures[:6]:
-            if not isinstance(item, dict): continue
-            line=item.get("line"); label=str(item.get("label") or "")
-            if not (isinstance(line,list) and len(line)>=4): continue
-            p1=_ratio_point_to_px(line[:2],width,height,bounds); p2=_ratio_point_to_px(line[2:4],width,height,bounds)
-            if p1 is None or p2 is None: continue
-            col=(40,47,58,205)
-            _dash_line(draw,p1,p2,col,width=max(1,line_w-1),dash=dash,gap=gap)
-            mx=(p1[0]+p2[0])//2; my=(p1[1]+p2[1])//2
-            draw.text((mx,my-5),label,font=font,fill=col,anchor="ms")
+    # Structure labels get their own soft chip so BOS/CHOCH/MSS/IDM remain readable.
+    for item in structures[:8]:
+        if not isinstance(item, dict):
+            continue
+        line = item.get("line"); label = _v368_safe_text(str(item.get("label") or ""))
+        if not (isinstance(line, list) and len(line) >= 4 and label):
+            continue
+        p1 = _ratio_point_to_px(line[:2], width, height, bounds)
+        p2 = _ratio_point_to_px(line[2:4], width, height, bounds)
+        if p1 is None or p2 is None:
+            continue
+        _dash_line(draw, p1, p2, structure_color, width=thin_w, dash=max(7, dash-2), gap=gap)
+        mx = (p1[0] + p2[0]) // 2; my = (p1[1] + p2[1]) // 2
+        _v368_label(draw, mx, my - 7, label, font, structure_color, image.size, bounds, anchor="ms")
 
-    # One compact model/scenario name, never a large banner.
-    label = str(analysis.get("reference_scenario_label") or analysis.get("pattern_type") or "").strip()
-    anchor_points=[_ratio_point_to_px(pt,width,height,bounds) for pt in path_raw]
-    anchor_points=[pt for pt in anchor_points if pt is not None]
+    anchor_points = [_ratio_point_to_px(pt, width, height, bounds) for pt in path_raw]
+    anchor_points = [pt for pt in anchor_points if pt is not None]
+    label = _v368_safe_text(str(analysis.get("reference_scenario_label") or analysis.get("pattern_type") or "").strip())
     if label and anchor_points:
-        xs=[pt[0] for pt in anchor_points]; ys=[pt[1] for pt in anchor_points]
-        lx=max(bounds[0]+6,min(bounds[2]-8,int(sum(xs)/len(xs))))
-        ly=max(bounds[1]+12,min(ys)-max(18,line_w*7))
-        short=label if len(label)<=36 else label[:33]+"…"
-        suffix=" ✓" if confirmed else " — مرشح"
-        text=short+suffix
-        box=draw.textbbox((0,0),text,font=font); tw=box[2]-box[0]; th=box[3]-box[1]
-        x1=max(bounds[0]+4,min(bounds[2]-tw-16,lx-tw//2)); y1=max(bounds[1]+4,ly-th//2)
-        accent=(21,151,91,215) if bias=="صاعد" else (210,60,68,215) if bias=="هابط" else pattern_color
-        draw.rounded_rectangle((x1-5,y1-3,x1+tw+5,y1+th+3),radius=5,fill=(250,252,255,215),outline=accent,width=1)
-        draw.text((x1,y1),text,font=font,fill=(31,39,49,235))
+        xs = [p[0] for p in anchor_points]; ys = [p[1] for p in anchor_points]
+        accent = (20, 159, 99, 230) if bias == "صاعد" else (218, 61, 70, 230) if bias == "هابط" else pattern_color
+        short = label if len(label) <= 42 else label[:39] + "…"
+        suffix = " ✓" if confirmed else " · مرشح"
+        _v368_label(draw, int(sum(xs)/len(xs)), max(bounds[1] + 18, min(ys) - 20), short + suffix, font, accent, image.size, bounds, anchor="ma")
 
-    # Expected path: use the pixel-grounded path from the reference match when
-    # supplied; otherwise extrapolate only from the final real pattern pivot.
-    forecast=[]
-    for point in expected[:5]:
-        px=_ratio_point_to_px(point,width,height,bounds)
-        if px is not None: forecast.append(px)
-    if len(forecast) < 2 and anchor_points and bias in {"صاعد","هابط"}:
-        sx,sy=anchor_points[-1]
-        dx=max(32,int((bounds[2]-bounds[0])*0.12))
-        dy=max(24,int((bounds[3]-bounds[1])*0.11))
-        forecast=[(sx,sy),(min(bounds[2]-4,sx+dx), max(bounds[1]+4,sy-dy) if bias=="صاعد" else min(bounds[3]-4,sy+dy))]
-    if len(forecast)>=2 and bias in {"صاعد","هابط"}:
-        col=(20,151,91,230) if bias=="صاعد" else (210,58,67,230)
-        for a,b in zip(forecast[:-1],forecast[1:]):
+    # Expected path: 3–5 instructional stages, with a subtle under-stroke and stage labels.
+    forecast = []
+    for point in expected[:6]:
+        px = _ratio_point_to_px(point, width, height, bounds)
+        if px is not None:
+            forecast.append(px)
+    if len(forecast) < 3 and anchor_points and bias in {"صاعد", "هابط"}:
+        sx, sy = anchor_points[-1]
+        span_x = max(55, int((bounds[2] - bounds[0]) * 0.18))
+        step_x = max(24, span_x // 3)
+        primary_dy = max(28, int((bounds[3] - bounds[1]) * 0.10))
+        sign = -1 if bias == "صاعد" else 1
+        p1 = (min(bounds[2]-8, sx + step_x), max(bounds[1]+8, min(bounds[3]-8, sy + sign * primary_dy * 0.45)))
+        p2 = (min(bounds[2]-8, sx + step_x*2), max(bounds[1]+8, min(bounds[3]-8, sy - sign * primary_dy * 0.12)))
+        p3 = (min(bounds[2]-8, sx + step_x*3), max(bounds[1]+8, min(bounds[3]-8, sy + sign * primary_dy)))
+        forecast = [(sx, sy), p1, p2, p3]
+    if len(forecast) >= 2 and bias in {"صاعد", "هابط"}:
+        col = (19, 170, 101, 238) if bias == "صاعد" else (224, 61, 70, 238)
+        shadow = (5, 10, 15, 120)
+        for a, b in zip(forecast[:-1], forecast[1:]):
+            draw.line((a, b), fill=shadow, width=line_w + 5)
             if confirmed:
-                draw.line((a,b),fill=col,width=line_w+1)
+                draw.line((a, b), fill=col, width=line_w + 1)
             else:
-                _dash_line(draw,a,b,col,width=line_w+1,dash=dash,gap=gap)
-        _native_draw_arrow(draw,forecast[-2],forecast[-1],col,width=line_w+1)
+                _dash_line(draw, a, b, col, width=line_w + 1, dash=dash, gap=gap)
+        _native_draw_arrow(draw, forecast[-2], forecast[-1], col, width=line_w + 1)
+        stage_labels = ["BREAK", "RETEST", "TARGET"]
+        for idx, pt in enumerate(forecast[1:4]):
+            if idx < len(stage_labels):
+                _v368_label(draw, pt[0], pt[1] - 8, stage_labels[idx], font, col, image.size, bounds, anchor="ms", compact=True)
 
     image.alpha_composite(layer)
     analysis["educational_overlay_visual_geometry_used"] = True
-    analysis["educational_overlay_bounds"] = list(bounds)
     return True
-
 
 def _native_draw_reference_scenario(
     image: Image.Image,
@@ -5973,7 +6051,7 @@ def _native_draw_reference_scenario(
     confirmed = status == "confirmed"
 
     # Draw market-index classical geometry only when no trustworthy pixel-anchored
-    # visual geometry exists.  v3.67 prefers exact screenshot anchors so a stale
+    # visual geometry exists.  v3.68 prefers exact screenshot anchors so a stale
     # or differently cropped upload cannot shift the pattern horizontally.
     visual_ready = int(analysis.get("visual_geometry_score") or 0) >= 68 and bool(analysis.get("visual_pattern_path") or analysis.get("visual_pattern_lines"))
     if "pattern" in components and analysis.get("pattern_overlays") and not visual_ready:
@@ -6086,6 +6164,12 @@ def _native_draw_reference_scenario(
 
 
 def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int, height: int, font) -> None:
+    """v3.68: clear Entry/Stop/Cancel/TP cards and risk-reward zones.
+
+    Cards remain price-anchored.  Their centers are always at the true y of the
+    corresponding source-axis price; only horizontal placement/label width may
+    change to avoid hiding candles.
+    """
     action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
     code = str(action.get("code") or analysis.get("draw_mode") or "watch")
     side = str(action.get("primary_side") or "wait")
@@ -6095,24 +6179,32 @@ def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int,
 
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
-    left, right = int(width * 0.64), int(width * 0.82)
-    line_left = int(width * 0.55)
-    pad_x = max(4, int(width * 0.004))
-    pad_y = max(2, int(height * 0.003))
+    bounds = analysis.get("educational_overlay_bounds")
+    if isinstance(bounds, list) and len(bounds) >= 4:
+        plot_left, _pt, plot_right, _pb = [int(v) for v in bounds[:4]]
+    else:
+        plot_left, plot_right = int(width * 0.04), int(width * 0.86)
+    zone_left = max(plot_left, int(plot_left + (plot_right-plot_left) * 0.62))
+    zone_right = min(width - 4, plot_right)
+    line_left = max(plot_left, int(plot_left + (plot_right-plot_left) * 0.50))
+    tag_x = max(line_left + 8, zone_right - max(150, int(width * 0.20)))
+    line_w = max(2, int(round(min(width, height) * 0.0024)))
+    pad_x = max(5, int(width * 0.005)); pad_y = max(3, int(height * 0.003))
 
     if not confirmed:
         trigger = _number(action.get("trigger"))
         cancel = _number(action.get("cancel"))
         if trigger is None:
             return
-        y = _native_y(analysis, float(trigger), height)
-        if y is not None:
-            _dash_line(draw, (line_left, y), (right, y), (226, 142, 38, 195), width=max(1, int(height * 0.002)), dash=8, gap=5)
-            _native_tag(draw, left, y, "ACTIVATE", fill=(185, 111, 25, 165), font=font, pad_x=pad_x, pad_y=pad_y)
+        ty = _native_y(analysis, float(trigger), height)
+        if ty is not None:
+            _dash_line(draw, (line_left, ty), (zone_right, ty), (234, 147, 35, 220), width=line_w, dash=9, gap=6)
+            _native_tag(draw, tag_x, ty, f"ENTRY IF {_fmt_axis_price(trigger)}", fill=(190, 112, 24, 220), font=font, pad_x=pad_x, pad_y=pad_y)
         if cancel is not None:
             cy = _native_y(analysis, float(cancel), height)
             if cy is not None:
-                _dash_line(draw, (line_left, cy), (right, cy), (204, 66, 66, 150), width=1, dash=7, gap=5)
+                _dash_line(draw, (line_left, cy), (zone_right, cy), (211, 64, 72, 190), width=line_w, dash=8, gap=6)
+                _native_tag(draw, tag_x, cy, f"CANCEL {_fmt_axis_price(cancel)}", fill=(185, 51, 59, 205), font=font, pad_x=pad_x, pad_y=pad_y)
         image.alpha_composite(layer)
         return
 
@@ -6122,22 +6214,39 @@ def _native_draw_trade(image: Image.Image, analysis: dict[str, Any], width: int,
     targets = [float(v) for v in targets if v is not None]
     if entry is None or stop is None or not targets:
         return
-    ey = _native_y(analysis, float(entry), height)
-    sy = _native_y(analysis, float(stop), height)
-    tys = [(value, _native_y(analysis, value, height)) for value in targets]
-    tys = [(value, y) for value, y in tys if y is not None]
-    if ey is None or sy is None or not tys:
+    ey = _native_y(analysis, float(entry), height); sy = _native_y(analysis, float(stop), height)
+    ty_pairs = [(value, _native_y(analysis, value, height)) for value in targets]
+    ty_pairs = [(value, y) for value, y in ty_pairs if y is not None]
+    if ey is None or sy is None or not ty_pairs:
         return
-    far_y = tys[-1][1]
-    draw.rectangle((left, min(ey, far_y), right, max(ey, far_y)), fill=(17, 162, 98, 38))
-    draw.rectangle((left, min(ey, sy), right, max(ey, sy)), fill=(213, 61, 67, 38))
-    levels = [("ENTRY", ey, (18, 150, 103, 180)), ("SL", sy, (198, 50, 56, 180))]
-    levels += [(f"TP{i}", y, (18, 166, 92, 175)) for i, (_value, y) in enumerate(tys[:3], start=1)]
-    for label, y, color in levels:
-        _dash_line(draw, (line_left, y), (right, y), color, width=max(1, int(height * 0.002)), dash=8, gap=5)
-        _native_tag(draw, right - max(54, int(width * 0.075)), y, label, fill=color, font=font, pad_x=pad_x, pad_y=pad_y)
-    image.alpha_composite(layer)
 
+    far_y = ty_pairs[-1][1]
+    # Target and stop risk/reward blocks are intentionally translucent so the original candles remain visible.
+    draw.rounded_rectangle((zone_left, min(ey, far_y), zone_right, max(ey, far_y)), radius=8, fill=(23, 184, 111, 44), outline=(20, 145, 91, 120), width=1)
+    draw.rounded_rectangle((zone_left, min(ey, sy), zone_right, max(ey, sy)), radius=8, fill=(225, 65, 72, 42), outline=(188, 49, 58, 120), width=1)
+
+    levels: list[tuple[str, float, int, tuple[int,int,int,int]]] = [
+        ("ENTRY", float(entry), ey, (17, 151, 102, 225)),
+        ("SL", float(stop), sy, (202, 53, 61, 225)),
+    ]
+    target_colors = [(32, 180, 105, 220), (22, 151, 91, 220), (13, 122, 77, 220)]
+    levels += [(f"TP{i}", value, y, target_colors[min(i-1, 2)]) for i, (value, y) in enumerate(ty_pairs[:3], start=1)]
+    cancel = _number(action.get("cancel"))
+    if cancel is not None:
+        cy = _native_y(analysis, float(cancel), height)
+        if cy is not None and abs(cy - sy) > max(12, int(height * 0.012)):
+            levels.append(("CANCEL", float(cancel), cy, (204, 105, 29, 215)))
+    for label, value, y, color in levels:
+        _dash_line(draw, (line_left, y), (zone_right, y), color, width=line_w, dash=9, gap=6)
+        _native_tag(draw, tag_x, y, f"{label} {_fmt_axis_price(value)}", fill=color, font=font, pad_x=pad_x, pad_y=pad_y)
+
+    risk = abs(float(entry) - float(stop))
+    reward = abs(float(ty_pairs[0][0]) - float(entry)) if ty_pairs else 0.0
+    if risk > 1e-9 and reward > 0:
+        rr = reward / risk
+        rr_y = int(round((ey + ty_pairs[0][1]) / 2))
+        _v368_label(draw, int((zone_left + zone_right)/2), rr_y, f"RR 1:{rr:.1f}", font, (22, 126, 84, 220), image.size, (plot_left, 0, plot_right, height-1), anchor="mm", compact=True)
+    image.alpha_composite(layer)
 
 def _render_uploaded_chart_with_overlays(
     analysis: dict[str, Any],
@@ -6178,7 +6287,7 @@ def _render_uploaded_chart_with_overlays(
             analysis["_native_axis_strict_pixel"] = True
             analysis["native_axis_projection_mode"] = "hidden_untrusted_axis"
 
-    # Market candle index mapping is optional in v3.67.  If exact screenshot to
+    # Market candle index mapping is optional in v3.68.  If exact screenshot to
     # market alignment fails, the visual-reference geometry still places the
     # verified model directly on real visible pivots without recreating candles.
     candle_centers = _native_detect_candle_centers(image)
@@ -6191,22 +6300,29 @@ def _render_uploaded_chart_with_overlays(
     scenario_available = bool(analysis.get("reference_scenario_available"))
     pattern_available = str(analysis.get("pattern_type") or "لا يوجد") != "لا يوجد"
 
-    # One scenario first.  Generic S/R is only a fallback so the educational
-    # picture never becomes a dashboard full of competing lines.
-    if scenario_available:
-        _native_draw_reference_scenario(image, analysis, width, height, font, candle_centers)
-        _native_draw_visual_reference_geometry(image, analysis, width, height, font)
-        # Entry/SL/TP are allowed only when the execution rule itself is active
-        # and the price axis can place them honestly on the broker screenshot.
-        if analysis.get("native_axis_projection_mode") != "hidden_untrusted_axis":
-            _native_draw_trade(image, analysis, width, height, font)
-    elif pattern_available:
+    # v3.68: organized richness.  S/R context is always allowed when it is
+    # price-calibrated; the primary scenario then adds its own geometry/zones.
+    # Exact uploaded pixels remain the base layer throughout.
+    _native_draw_sr(ImageDraw.Draw(image), analysis, width, height, font)
+    used_visual = False
+    if scenario_available or pattern_available:
         used_visual = _native_draw_visual_reference_geometry(image, analysis, width, height, font)
+    if scenario_available:
+        # If pixel-anchored geometry was unavailable, fall back to deterministic
+        # market-index geometry.  Do not double-draw the same pattern/structure.
         if not used_visual:
-            _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
-    else:
-        draw = ImageDraw.Draw(image)
-        _native_draw_sr(draw, analysis, width, height, font)
+            _native_draw_reference_scenario(image, analysis, width, height, font, candle_centers)
+        else:
+            # Deterministic OB/FVG can supplement a visual pattern when the image
+            # matcher did not return those rectangles.
+            if not analysis.get("visual_zones") and ({"order_block","fvg"} & set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))):
+                _native_draw_zones(image, analysis, width, height, font, candle_centers)
+    elif pattern_available and not used_visual:
+        _native_draw_pattern_overlays(image, analysis, width, height, font, candle_centers)
+
+    # Price-linked execution cards/zones are rendered last so they stay legible.
+    if analysis.get("native_axis_projection_mode") != "hidden_untrusted_axis":
+        _native_draw_trade(image, analysis, width, height, font)
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
@@ -6836,14 +6952,8 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
         arrow_text = "عند غياب سيناريو صالح لا يظهر سهم توقع؛ يبقى الشارت الأصلي نظيفًا."
 
     mechanism = "آلية التطبيق: لكل شارت جديد تُراجع الذاكرة المرجعية، ثم يُرسم السيناريو الأقرب فقط بعد تثبيت مكوناته هندسيًا على الشارت."
-    if reference_id:
-        draw.text(
-            (pad + 28, rule_y1 + 38),
-            f"SOURCE  {reference_id}",
-            font=f_rule_latin,
-            fill=(80, 100, 125, 255),
-            anchor="la",
-        )
+    if reference_id and str(os.environ.get("SALEEM_DEBUG_OVERLAY", "")).lower() in {"1", "true", "yes"}:
+        draw.text((pad + 28, rule_y1 + 38), f"SOURCE  {reference_id}", font=f_rule_latin, fill=(80, 100, 125, 255), anchor="la")
     text_right = canvas_w - pad - 28
     text_width = canvas_w - pad * 2 - 56
     y_cursor = rule_y1 + 76
@@ -6914,7 +7024,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v3.67", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v3.68", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
@@ -6922,7 +7032,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """SaleeM v3.67: preserve the original chart and add one clean overlay.
+    """SaleeM v3.68: preserve the original chart and add one clean overlay.
 
     Market data verifies structure and execution; it never replaces the user's
     screenshot.  The final pixels are the original chart plus the verified

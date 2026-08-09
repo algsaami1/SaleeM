@@ -31,7 +31,7 @@ def test_system_status_opens_without_pin(monkeypatch, tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert set(payload) == {"app", "users", "market", "openai", "system"}
-    assert payload["app"]["version"] == "3.67.0"
+    assert payload["app"]["version"] == "3.68.0"
     assert payload["market"]["daily_limit"] == 800
     assert payload["market"]["minute_limit"] == 8
     assert payload["openai"]["balance_usd"] == 10.0

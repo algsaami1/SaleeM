@@ -895,7 +895,7 @@ def _enhance_chart_crop(crop: Image.Image) -> Image.Image:
 def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
     """Extract only visual-reference metadata from the uploaded chart image.
 
-    v3.67 preserves the screenshot as the final visual chart.  This helper reads
+    v3.68 preserves the screenshot as the final visual chart.  This helper reads
     only presentation metadata; market OHLC remains confirmation data and never
     replaces or redraws the uploaded candles.
     """
@@ -947,7 +947,7 @@ def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
     """Preserve the user's chart pixels as the final visual background.
 
-    v3.67 accepts portrait, square and landscape uploads.  The screenshot is
+    v3.68 accepts portrait, square and landscape uploads.  The screenshot is
     never rebuilt into synthetic candles.  Market OHLC is confirmation data;
     all final educational drawings are composited over these exact pixels.
     """
@@ -1711,9 +1711,9 @@ def _match_reference_pattern(path: Path) -> dict[str, Any]:
    - chart_plot_bounds = [x1,y1,x2,y2] كنسب من الصورة الكاملة لحدود منطقة الشارت الفعلية.
    - visual_pattern_path = نقاط القمم/القيعان الحقيقية الظاهرة التي تكوّن النموذج الأقرب، مرتبة زمنيًا.
    - visual_pattern_lines = حدود النموذج/العنق/خطوط الاتجاه الظاهرة التي يمكن تثبيتها على قمم أو قيعان.
-   - visual_structure_lines = BOS/CHOCH/MSS/IDM/NECKLINE فقط عندما يمكن تثبيت الخط بين مستوى ورد فعل واضحين.
-   - visual_zones = Order Block/FVG/Liquidity Area فقط عندما يمكن ربط المستطيل مباشرة بمنطقة شموع ظاهرة.
-   - visual_expected_path يبدأ من آخر نقطة فعلية في النموذج ويتجه في جهة السيناريو المرجعي؛ هو مسار توقع وليس مستوى سعر. إذا لم توجد هندسة كافية أعد القوائم فارغة.
+   - visual_structure_lines = BOS/CHOCH/MSS/IDM/NECKLINE فقط عندما يمكن تثبيت الخط بين مستوى ورد فعل واضحين. لا تحذف بنية صحيحة خوفًا من الازدحام؛ يمكن إرجاع حتى 6 خطوط منظمة.
+   - visual_zones = Order Block/FVG/Liquidity Area فقط عندما يمكن ربط المستطيل مباشرة بمنطقة شموع ظاهرة. اجعل المستطيلات ضيقة حول المنطقة الحقيقية ولا تغطِ مساحة كبيرة بلا سبب.
+   - visual_expected_path يبدأ من آخر نقطة فعلية في النموذج ويحتوي قدر الإمكان 3 إلى 5 نقاط تشرح: كسر/رفض ثم إعادة اختبار/تصحيح ثم استمرار نحو جهة الهدف. هو مسار توقع تعليمي وليس مستوى سعر، ويجب أن يبقى قريبًا من الشموع والمنطقة الحالية. إذا لم توجد هندسة كافية أعد القوائم فارغة.
 11) visual_geometry_score يقيس ثقتك بأن النقاط والخطوط تقع فعلًا فوق قمم/قيعان/مناطق مرئية. أقل من 68 يعني أن SaleeM لن يستخدم هذه الهندسة بصريًا.
 12) جميع الإحداثيات نسب 0..1 من الصورة الكاملة، ويجب أن تبقى داخل chart_plot_bounds.
 
@@ -2037,7 +2037,7 @@ def _bind_market_analysis_to_image(
 ) -> dict[str, Any]:
     """Attach screenshot reference metadata without shifting real market OHLC.
 
-    v3.67 keeps market decisions numerically independent from screenshot pixels.  Historical candles, levels,
+    v3.68 keeps market decisions numerically independent from screenshot pixels.  Historical candles, levels,
     pattern anchors and trade geometry stay at the prices returned by the
     market provider.  A readable screenshot price is preserved separately as
     ``visual_current_price`` and may be displayed when it remains reasonably
@@ -4713,7 +4713,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
 
-    # v3.67 keeps the upload as the literal final chart.  Axis calibration is
+    # v3.68 keeps the upload as the literal final chart.  Axis calibration is
     # used only to place price-linked overlays; failure never causes candle
     # reconstruction.  Visual pattern anchors may still draw an educational
     # pattern when the deterministic scenario/pattern family has been verified.
@@ -4727,6 +4727,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["uploaded_chart_role"] = "final_visual_background"
     analysis["ohlc_source"] = "market_provider_confirmation_only"
     analysis["educational_overlay_mode"] = True
+    analysis["visual_overlay_clarity_mode"] = "v3.68"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
@@ -4748,7 +4749,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
-    # v3.67: the exact uploaded chart pixels are the final background.  Market
+    # v3.68: the exact uploaded chart pixels are the final background.  Market
     # OHLC confirms structure; only the verified educational overlay is added.
     png = render_result(analysis, chart_background_path=image_path)
     share_png = render_share_snapshot(analysis, png)

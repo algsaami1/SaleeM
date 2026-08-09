@@ -1,4 +1,4 @@
-"""Reference-scenario matcher for SaleeM v3.67.
+"""Reference-scenario matcher for SaleeM v3.68.
 
 This module converts the user's approved reference examples into deterministic
 scenario templates.  Visual similarity may rank a template, but no scenario is

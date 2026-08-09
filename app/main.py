@@ -138,8 +138,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-authentic-educational-overlay-v3.67.0",
-        "ui": "saleem-original-chart-overlay-ui-v3.67.0",
+        "renderer": "saleem-visual-overlay-clarity-v3.68.0",
+        "ui": "saleem-rich-original-chart-overlay-ui-v3.68.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
@@ -282,7 +282,7 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                     status_code=400,
                     detail="أبعاد الصورة كبيرة جدًا. استخدم صورة لا تتجاوز 40 مليون بكسل.",
                 )
-            # v3.67 accepts portrait, square and landscape charts. The uploaded
+            # v3.68 accepts portrait, square and landscape charts. The uploaded
             # pixels remain the final background for the educational overlay.
             if min(width, height) < 280:
                 raise HTTPException(
