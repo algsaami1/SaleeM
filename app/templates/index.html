@@ -50,7 +50,10 @@
           <span class="upload-chart-change" id="upload-chart-change" hidden>تغيير الشارت</span>
         </label>
 
-        <button class="analyze-button" id="analyze-button" type="submit">بدء التحليل</button>
+        <button class="analyze-button analysis-progress-button" id="analyze-button" type="submit" style="--p:0%">
+          <span id="analysis-button-text">بدء التحليل</span>
+          <strong id="analysis-inline-percent" hidden>0%</strong>
+        </button>
       </form>
     </section>
 
@@ -166,7 +169,7 @@
 
       <div class="terminal-strength"><span>تطابق القاعدة</span><div class="strength-track"><i style="width:{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}%"></i></div><b>{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}٪</b></div>
 
-      <section class="terminal-chart-card" aria-label="الشارت التحليلي الثابت والقابل للتكبير">
+      <section class="terminal-chart-card result-chart-box" aria-label="الشارت التحليلي الثابت والقابل للتكبير">
         <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
           <button type="button" id="chart-zoom-out" aria-label="تصغير الشارت">−</button>
           <output id="chart-zoom-value" aria-live="polite">100%</output>
@@ -176,7 +179,7 @@
         <div class="chart-pan-viewport" id="chart-pan-viewport" tabindex="0" role="region" aria-label="شارت قابل للسحب والتكبير بإصبعين">
           <div class="chart-pan-canvas" id="chart-pan-canvas">
             <img id="result-image" src="{{ result.result_url }}" alt="شارت XAUUSD M5 الأصلي مع رسومات التحليل" draggable="false">
-            <img id="share-result-image" src="{{ result.share_result_url or result.result_url }}" alt="" hidden aria-hidden="true">
+            <img id="share-result-image" src="{{ result.result_url }}" alt="" hidden aria-hidden="true">
           </div>
         </div>
         <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
@@ -542,5 +545,23 @@
   {% endif %}
 
   <script src="/static/app.js?v={{ app_version }}" defer></script>
+
+<script id="saleem-v370-ui-fix">
+(()=>{const ready=f=>document.readyState==="loading"?document.addEventListener("DOMContentLoaded",f,{once:true}):f();ready(()=>{
+const b=document.getElementById("analyze-button"),ip=document.getElementById("analysis-inline-percent"),
+bt=document.getElementById("analysis-button-text"),pv=document.getElementById("progress-value"),
+pc=document.getElementById("processing-card");
+if(b&&pc){pc.classList.add("inline-processing-card");b.insertAdjacentElement("afterend",pc)}
+const sync=()=>{if(!b)return;const v=Math.max(0,Math.min(100,Number((pv?.textContent||"0").replace("%",""))||0));
+b.style.setProperty("--p",v+"%");if(ip){ip.textContent=Math.round(v)+"%";ip.hidden=!(pc&&!pc.hidden)}
+if(bt&&pc&&!pc.hidden)bt.textContent=v>=100?"اكتمل التحليل":"جاري التحليل"};
+if(pv)new MutationObserver(sync).observe(pv,{childList:true,characterData:true,subtree:true});
+if(pc)new MutationObserver(()=>{const run=!pc.hidden;if(ip)ip.hidden=!run;if(bt)bt.textContent=run?"جاري التحليل":"بدء التحليل";if(!run&&b)b.style.setProperty("--p","0%");sync()}).observe(pc,{attributes:true,attributeFilter:["hidden"]});
+sync();
+const ch=document.querySelector(".terminal-chart-card");if(ch&&!ch.querySelector(".result-chart-change")){const x=document.createElement("a");x.className="result-chart-change";x.href="/";x.textContent="تغيير الشارت";ch.appendChild(x)}
+const m=document.querySelector(".terminal-metrics-bottom");if(m){const xs=[...document.querySelectorAll("section,article,div")].filter(e=>e!==m&&!m.contains(e)&&(e.textContent||"").includes("القاعدة الأساسية")).sort((a,b)=>(a.textContent||"").length-(b.textContent||"").length);if(xs[0]){const card=xs[0].closest("section,article")||xs[0];card.classList.add("rule-under-metrics");m.insertAdjacentElement("afterend",card)}}
+})})();
+</script>
+
 </body>
 </html>
