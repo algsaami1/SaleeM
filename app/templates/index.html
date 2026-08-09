@@ -673,7 +673,14 @@
           const htmlText = await response.text();
           window.clearInterval(timer);
 
-          if (!response.ok) throw new Error(`تعذر إكمال التحليل (${response.status})`);
+          if (!response.ok) {
+            const errorDoc = new DOMParser().parseFromString(htmlText, "text/html");
+            const serverMessage =
+              errorDoc.querySelector(".error-card p")?.textContent?.trim()
+              || errorDoc.querySelector(".axis-retry-card p")?.textContent?.trim()
+              || "";
+            throw new Error(serverMessage || `تعذر إكمال التحليل (${response.status})`);
+          }
 
           setProgress(100);
           if (buttonLabel) buttonLabel.textContent = "اكتمل التحليل";
