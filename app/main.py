@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -255,7 +255,13 @@ async def submit_note(payload: NotePayload):
 
 
 @app.post("/analyze", response_class=HTMLResponse)
-async def analyze(request: Request, image: UploadFile | None = File(None)):
+async def analyze(
+    request: Request,
+    image: UploadFile | None = File(None),
+    current_price_ref: str | None = Form(None),
+    axis_high_ref: str | None = Form(None),
+    axis_low_ref: str | None = Form(None),
+):
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
     if not image or not image.filename:
         raise HTTPException(status_code=400, detail="يرجى اختيار صورة الشارت.")
@@ -290,24 +296,45 @@ async def analyze(request: Request, image: UploadFile | None = File(None)):
                     detail="أبعاد صورة الشارت صغيرة جدًا. ارفع صورة أوضح لقراءة السعر والشكل العام.",
                 )
 
-        # v3.74-horizontal-upload-guard
-        ratio = width / max(1, height)
-        if width <= height or ratio < 1.15:
+        # Portrait and landscape uploads are both accepted.  The screenshot is
+        # a visual/calibration reference; real market OHLC remains authoritative.
+        if width < 360 or height < 360:
             raise HTTPException(
                 status_code=400,
-                detail="يشترط SaleeM صورة أفقية واضحة للشارت. دوّر الهاتف للوضع الأفقي وأظهر الشموع ومحور الأسعار ثم أعد الرفع.",
+                detail=f"دقة الصورة منخفضة ({width}×{height}). ارفع صورة أوضح يظهر فيها الشارت ومحور الأسعار.",
             )
-        if width < 800 or height < 400:
-            raise HTTPException(
-                status_code=400,
-                detail=f"دقة الصورة منخفضة ({width}×{height}). ارفع صورة أفقية أوضح لا تقل تقريبًا عن 800×400.",
-            )
+
+        manual_values = [current_price_ref, axis_high_ref, axis_low_ref]
+        manual_calibration = None
+        if any(str(value or "").strip() for value in manual_values):
+            if not all(str(value or "").strip() for value in manual_values):
+                raise HTTPException(
+                    status_code=400,
+                    detail="للمعايرة اليدوية أدخل السعر الحالي وأعلى المحور وأدنى المحور معًا.",
+                )
+            try:
+                manual_current = float(str(current_price_ref).strip())
+                manual_high = float(str(axis_high_ref).strip())
+                manual_low = float(str(axis_low_ref).strip())
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail="قيم محور الأسعار يجب أن تكون أرقامًا صحيحة.") from exc
+            if not (manual_low < manual_current < manual_high):
+                raise HTTPException(
+                    status_code=400,
+                    detail="يجب أن يكون أدنى المحور أقل من السعر الحالي، والسعر الحالي أقل من أعلى المحور.",
+                )
+            manual_calibration = {
+                "current_price": manual_current,
+                "axis_high": manual_high,
+                "axis_low": manual_low,
+            }
 
         result = await run_in_threadpool(
             analyze_chart_image,
             temp_path,
             "XAUUSD",
             "M5",
+            manual_calibration,
         )
         system_status_store.record_analysis()
         return templates.TemplateResponse(

@@ -403,20 +403,24 @@ def _channel_or_triangle(candles: list[dict[str, float]], *, timeframe: str) -> 
                 target, stop = lower_now - max(atr, early_width), upper_now + atr * 0.12
         elif abs(np) <= 0.03 and nt > 0.035:
             name, bias, evidence, confidence = "مثلث صاعد", "صاعد", "قمم شبه ثابتة وقيعان صاعدة تضغط نحو المقاومة", 67
+            trigger, target, stop = upper_now, upper_now + max(atr, early_width), lower_now - atr * 0.12
             if close > upper_now + atr * 0.05:
-                status, trigger, target, stop = "confirmed", upper_now, upper_now + max(atr, early_width), lower_now - atr * 0.12
+                status = "confirmed"
         elif np < -0.035 and abs(nt) <= 0.03:
             name, bias, evidence, confidence = "مثلث هابط", "هابط", "قيعان شبه ثابتة وقمم هابطة تضغط نحو الدعم", 67
+            trigger, target, stop = lower_now, lower_now - max(atr, early_width), upper_now + atr * 0.12
             if close < lower_now - atr * 0.05:
-                status, trigger, target, stop = "confirmed", lower_now, lower_now - max(atr, early_width), upper_now + atr * 0.12
+                status = "confirmed"
         elif np > 0.02 and nt > 0.04 and nt > np:
             name, bias, evidence, confidence = "وتد صاعد", "هابط", "قمم وقيعان صاعدة لكن القيعان تتقارب من القمم", 64
+            trigger, target, stop = lower_now, lower_now - max(atr, early_width), upper_now + atr * 0.12
             if close < lower_now - atr * 0.05:
-                status, trigger, target, stop = "confirmed", lower_now, lower_now - max(atr, early_width), upper_now + atr * 0.12
+                status = "confirmed"
         elif np < -0.04 and nt < -0.02 and np < nt:
             name, bias, evidence, confidence = "وتد هابط", "صاعد", "قمم وقيعان هابطة لكن القمم تتقارب من القيعان", 64
+            trigger, target, stop = upper_now, upper_now + max(atr, early_width), lower_now - atr * 0.12
             if close > upper_now + atr * 0.05:
-                status, trigger, target, stop = "confirmed", upper_now, upper_now + max(atr, early_width), lower_now - atr * 0.12
+                status = "confirmed"
     if not name:
         return None
     if status == "confirmed":
@@ -519,9 +523,9 @@ def _flag_or_pennant(candles: list[dict[str, float]], *, timeframe: str) -> Patt
         candles,
         anchors=[(peaks[0][0], peaks[0][1], "upper"), (peaks[-1][0], peaks[-1][1], "upper"), (troughs[0][0], troughs[0][1], "lower"), (troughs[-1][0], troughs[-1][1], "lower")],
         lines=[(peaks[0], peaks[-1], "upper"), (troughs[0], troughs[-1], "lower")],
-        trigger=trigger if confirmed else None,
-        stop=stop if confirmed else None,
-        target=target if confirmed else None,
+        trigger=trigger,
+        stop=stop,
+        target=target,
         breakout_index=last_i if confirmed else None,
     )
     evidence = "اندفاع واضح تلاه تماسك قصير داخل حدود هندسية"

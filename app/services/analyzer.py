@@ -946,19 +946,23 @@ def _chart_visual_reference_meta(image_path: Path) -> dict[str, Any]:
 
 
 def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
-    """Preserve the user's chart pixels as the final visual background.
+    """Use the upload only as a visual/calibration reference.
 
-    v3.68 accepts portrait, square and landscape uploads.  The screenshot is
-    never rebuilt into synthetic candles.  Market OHLC is confirmation data;
-    all final educational drawings are composited over these exact pixels.
+    Portrait phone screenshots are accepted and request a generated landscape
+    result.  The generated candles and every deterministic anchor still come
+    from closed market OHLC; the screenshot never changes H4/H1/M15/M5 logic.
     """
     meta = _chart_visual_reference_meta(image_path)
+    orientation = str(meta.get("reference_orientation") or "square")
+    portrait_input = orientation == "portrait"
     meta.update({
         "used_smart_crop": False,
         "chart_viewport_prepared": False,
         "source_chart_preserved": True,
         "smart_crop_mode": "original_pixels_no_crop",
-        "reconstructed_market_chart": False,
+        "reconstructed_market_chart": portrait_input,
+        "force_landscape_output": portrait_input,
+        "output_chart_orientation": "landscape" if portrait_input else "source",
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
     })
@@ -4710,25 +4714,66 @@ def _analyze(path: Path) -> dict[str, Any]:
     return _enrich_dual_scenarios(projected)
 
 
-def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[str, Any]:
+def _apply_manual_visual_calibration(analysis: dict[str, Any], calibration: Any) -> bool:
+    """Apply user-entered axis values to visual calibration only.
+
+    This function must never change market OHLC, current_price, direction,
+    pattern geometry, Entry/Stop/Targets, or BUY/SELL/watch gates.
+    """
+    if not isinstance(calibration, dict):
+        return False
+    current = _number(calibration.get("current_price"))
+    high = _number(calibration.get("axis_high"))
+    low = _number(calibration.get("axis_low"))
+    if current is None or high is None or low is None or not (float(low) < float(current) < float(high)):
+        return False
+    current = float(current); high = float(high); low = float(low)
+    y_ratio = (high - current) / max(1e-9, high - low)
+    analysis["visual_current_price"] = round(current, 6)
+    analysis["visual_current_price_source"] = "user_manual_calibration"
+    analysis["image_price_high"] = round(high, 6)
+    analysis["image_price_low"] = round(low, 6)
+    analysis["current_price_y_ratio"] = round(max(0.0, min(1.0, y_ratio)), 6)
+    analysis["image_axis_labels"] = [
+        {"price": round(high, 6), "y_ratio": 0.0},
+        {"price": round(current, 6), "y_ratio": round(max(0.0, min(1.0, y_ratio)), 6)},
+        {"price": round(low, 6), "y_ratio": 1.0},
+    ]
+    analysis["manual_axis_calibration"] = True
+    return True
+
+
+def analyze_chart_image(
+    image_path: Path,
+    symbol: str,
+    timeframe: str,
+    manual_calibration: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
+    manual_axis_ok = _apply_manual_visual_calibration(analysis, manual_calibration)
 
-    # v3.68 keeps the upload as the literal final chart.  Axis calibration is
+    # The uploaded chart is calibration/reference evidence only. Axis values
     # used only to place price-linked overlays; failure never causes candle
     # reconstruction.  Visual pattern anchors may still draw an educational
     # pattern when the deterministic scenario/pattern family has been verified.
-    axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
+    if manual_axis_ok:
+        axis_ok, axis_reason = True, "manual_user_calibration"
+    else:
+        axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
     analysis["axis_validation_passed"] = bool(axis_ok)
     analysis["axis_warning"] = "" if axis_ok else (
         "تعذر تثبيت محور السعر كاملًا؛ سيبقى الشارت الأصلي كما هو وتُخفى فقط العناصر السعرية غير الموثوقة."
     )
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
-    analysis["reconstructed_market_chart"] = False
-    analysis["uploaded_chart_role"] = "final_visual_background"
-    analysis["ohlc_source"] = "market_provider_confirmation_only"
+    rebuild_landscape = bool(visual_meta.get("reconstructed_market_chart"))
+    analysis["reconstructed_market_chart"] = rebuild_landscape
+    analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
+    analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
+    analysis["uploaded_chart_role"] = "visual_calibration_reference" if rebuild_landscape else "final_visual_background"
+    analysis["ohlc_source"] = "market_provider_primary" if rebuild_landscape else "market_provider_confirmation_only"
     analysis["educational_overlay_mode"] = True
-    analysis["visual_overlay_clarity_mode"] = "v3.68"
+    analysis["visual_overlay_clarity_mode"] = "portrait_to_landscape_ohlc" if rebuild_landscape else "v3.68"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
@@ -4750,8 +4795,8 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
     analysis["action_summary"] = _build_action_summary(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
-    # v3.68: the exact uploaded chart pixels are the final background.  Market
-    # OHLC confirms structure; only the verified educational overlay is added.
+    # Portrait input is rebuilt as a wide market-OHLC chart for clearer model
+    # drawings. Landscape input keeps the current exact-pixel overlay behavior.
     png = render_result(analysis, chart_background_path=image_path)
     share_png = render_share_snapshot(analysis, png)
     return {
@@ -4759,7 +4804,7 @@ def analyze_chart_image(image_path: Path, symbol: str, timeframe: str) -> dict[s
         **visual_meta,
         "symbol": "XAUUSD",
         "timeframe": "M5",
-        "window": "الشارت الأصلي + تحقق بنيوي من M5/M15/H1/H4",
+        "window": ("شارت أفقي من OHLC الحقيقي + تحقق M5/M15/H1/H4" if analysis.get("reconstructed_market_chart") else "الشارت الأصلي + تحقق بنيوي من M5/M15/H1/H4"),
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
         "share_result_url": "data:image/png;base64," + base64.b64encode(share_png).decode(),
     }

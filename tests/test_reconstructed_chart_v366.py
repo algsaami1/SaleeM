@@ -4,7 +4,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.engine.renderer import render_result
-from app.services.analyzer import _bind_market_analysis_to_image, _prepare_analysis_image
+from app.services.analyzer import _apply_manual_visual_calibration, _bind_market_analysis_to_image, _prepare_analysis_image
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,7 +31,9 @@ def test_portrait_upload_is_visual_reference_and_not_landscape_gated(tmp_path):
     _path, meta=_prepare_analysis_image(src)
     assert meta['reference_orientation']=='portrait'
     assert meta['source_chart_preserved'] is True
-    assert meta['reconstructed_market_chart'] is False
+    assert meta['reconstructed_market_chart'] is True
+    assert meta['force_landscape_output'] is True
+    assert meta['output_chart_orientation'] == 'landscape'
     main=(ROOT/'app'/'main.py').read_text(encoding='utf-8')
     assert 'يجب التقاط صورة الشارت بشكل أفقي' not in main
 
@@ -94,3 +96,54 @@ def test_render_result_preserves_portrait_uploaded_pixels_when_no_overlay(tmp_pa
         assert out.size == (700, 1200)
         # With no verified scenario/pattern and no usable S/R, the original pixels remain intact.
         assert out.convert('RGB').getpixel((out.width//2,out.height//2)) == (10,10,10)
+
+
+def test_portrait_analysis_mode_renders_generated_landscape_ohlc(tmp_path):
+    source=tmp_path/'portrait-source.png'
+    Image.new('RGB',(700,1200),(10,10,10)).save(source)
+    analysis={
+        'candles': _candles(34),
+        'current_price': 4344.2,
+        'visual_current_price': 4344.3,
+        'support_levels': [{'price':4341.5,'strength':80}],
+        'resistance_levels': [{'price':4346.8,'strength':80}],
+        'pattern_overlays': [],
+        'reference_scenario_available': False,
+        'reconstructed_market_chart': True,
+        'force_landscape_output': True,
+        'output_chart_orientation': 'landscape',
+        'chart_reference_meta': {
+            'reference_aspect_ratio': 700/1200,
+            'reference_orientation':'portrait',
+            'reference_theme':'light',
+        },
+    }
+    png=render_result(analysis, chart_background_path=source)
+    with Image.open(BytesIO(png)) as out:
+        assert out.width > out.height
+        assert out.size == (1600, 900)
+        assert out.convert('RGB').getpixel((out.width//2,out.height//2)) != (10,10,10)
+
+
+def test_manual_axis_calibration_changes_visual_reference_only():
+    analysis={
+        'current_price': 4342.0,
+        'entry': 4343.0,
+        'stop_loss': 4340.5,
+        'target_1': 4345.0,
+        'direction': 'صاعد',
+    }
+    ok=_apply_manual_visual_calibration(
+        analysis,
+        {'current_price': 4344.81, 'axis_high': 4352.51, 'axis_low': 4306.91},
+    )
+    assert ok is True
+    assert analysis['current_price'] == 4342.0
+    assert analysis['entry'] == 4343.0
+    assert analysis['stop_loss'] == 4340.5
+    assert analysis['target_1'] == 4345.0
+    assert analysis['direction'] == 'صاعد'
+    assert analysis['visual_current_price'] == 4344.81
+    assert analysis['image_price_high'] == 4352.51
+    assert analysis['image_price_low'] == 4306.91
+    assert analysis['manual_axis_calibration'] is True

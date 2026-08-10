@@ -555,7 +555,7 @@
 
   if (chartPanViewport && chartPanCanvas && resultImage) {
     const MIN_ZOOM = 1;
-    const MAX_ZOOM = 5;
+    const MAX_ZOOM = 3.5;
     const ZOOM_STEP = 0.25;
 
     let zoom = 1;

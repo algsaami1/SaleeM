@@ -221,3 +221,9 @@ __marimo__/
 *.tmp
 *.zip
 .DS_Store
+
+# SaleeM local patch / backup artifacts
+_*backup*/
+*.before_*
+*.backup_*
+*_patch_*.py

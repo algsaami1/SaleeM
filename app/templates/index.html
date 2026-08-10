@@ -26,7 +26,7 @@
         <div>
           <span class="eyebrow">تحليل SaleeM الذكي</span>
           <h1>حلّل شارت الذهب بوضوح</h1>
-          <p>ارفع صورة أفقية واضحة للشارت. يجب أن تظهر الشموع والسعر الحالي ومحور الأسعار بوضوح؛ وتُرسم الشموع من بيانات السوق الحقيقية.</p>
+          <p>ارفع صورة الشارت كما هي من الهاتف، رأسية أو أفقية. يجب أن تظهر الشموع والسعر الحالي ومحور الأسعار بوضوح؛ وإذا كانت الصورة رأسية ينتج SaleeM شارتًا أفقيًا أوضح من بيانات السوق الحقيقية.</p>
         </div>
         <button class="help-button" id="capture-help-button" type="button" aria-haspopup="dialog" aria-controls="capture-help-modal">كيف ألتقط الصورة؟</button>
       </div>
@@ -40,7 +40,7 @@
               <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
             </span>
             <strong>ضع الشارت هنا</strong>
-            <small>يشترط صورة أفقية واضحة يظهر فيها الشارت ومحور الأسعار</small>
+            <small>صورة رأسية أو أفقية واضحة يظهر فيها الشارت ومحور الأسعار</small>
             <span class="primary-button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
               اختيار صورة الشارت
@@ -52,9 +52,19 @@
 
         <p class="upload-orientation-note" id="upload-orientation-note" aria-live="polite">
 
-          يشترط صورة أفقية واضحة. الصورة الرأسية أو منخفضة الدقة لن تُرسل للتحليل.
+          تُقبل الصورة الرأسية أو الأفقية. الصورة الرأسية تُستخدم للمعايرة ثم تُعرض النتيجة كشارت أفقي من OHLC الحقيقي.
 
         </p>
+
+        <section class="axis-calibration-fields" aria-label="معايرة محور الأسعار اليدوية">
+          <div class="axis-calibration-title">
+            <b>تثبيت محور الأسعار</b>
+            <small>اختياري — إذا أدخلت قيمة، أدخل القيم الثلاث معًا. لا تغيّر قرار التحليل.</small>
+          </div>
+          <label><span>السعر الحالي</span><input type="number" step="any" inputmode="decimal" name="current_price_ref" placeholder="4344.81"></label>
+          <label><span>أعلى المحور</span><input type="number" step="any" inputmode="decimal" name="axis_high_ref" placeholder="4352.51"></label>
+          <label><span>أدنى المحور</span><input type="number" step="any" inputmode="decimal" name="axis_low_ref" placeholder="4306.91"></label>
+        </section>
 
         <button class="analyze-button analysis-progress-button" id="analyze-button" type="submit" style="--p:0%">
           <span id="analysis-button-text">بدء التحليل</span>
@@ -101,7 +111,7 @@
       {% if axis_retry %}
       <div class="axis-retry-steps">
         <span><b>1</b> استخدم Reset Vertical Scale في الشارت قبل التصوير.</span>
-        <span><b>2</b> أظهر السعر الحالي ومحور الأسعار بوضوح، والتقط الصورة بالاتجاه الأفقي.</span>
+        <span><b>2</b> أظهر السعر الحالي ومحور الأسعار بوضوح. يمكن التصوير رأسيًا أو أفقيًا.</span>
         <span><b>3</b> التقط صورة جديدة ثم أعد المحاولة.</span>
       </div>
       <button class="axis-retry-button" id="axis-retry-button" type="button">اختيار صورة جديدة</button>
@@ -549,10 +559,10 @@
       <button class="modal-close" type="button" data-close-modal aria-label="إغلاق">×</button>
     </div>
     <div class="capture-checklist">
-      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط صورة أفقية واضحة.</span>
+      <span><b>1</b> افتح XAUUSD على فريم M5 والتقط صورة واضحة كما تظهر على هاتفك، رأسية أو أفقية.</span>
       <span><b>2</b> أظهر السعر الحالي والشموع ومحور الأسعار قدر الإمكان.</span>
       <span><b>3</b> أظهر خط السعر الحالي ولا تلصق أي صورة فوق الشارت.</span>
-      <span><b>4</b> استخدم الوضع الأفقي، ويفضل Reset Vertical Scale قبل التصوير حتى يظهر الشارت ومحور الأسعار كاملين.</span>
+      <span><b>4</b> يفضل Reset Vertical Scale قبل التصوير حتى يظهر الشارت ومحور الأسعار كاملين؛ لا يلزم تدوير الهاتف.</span>
     </div>
     <div class="axis-help-note"><b>Exact Axis Mode</b><p>يقرأ SaleeM أرقام محور السعر من الصورة ويربط الشموع والدخول والوقف والأهداف بالمقياس نفسه. عند نقص الأرقام يستخدم وضعًا احتياطيًا أو يطلب صورة أوضح.</p></div>
     <button class="modal-primary" type="button" data-close-modal>فهمت</button>

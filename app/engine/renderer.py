@@ -6337,6 +6337,8 @@ def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
     screenshot ratios are gently capped so the actual market chart remains
     readable while still feeling visually related to the uploaded reference.
     """
+    if bool(analysis.get("force_landscape_output")) or str(analysis.get("output_chart_orientation") or "") == "landscape":
+        return 1600, 900
     meta = analysis.get("chart_reference_meta") if isinstance(analysis.get("chart_reference_meta"), dict) else {}
     try:
         ratio = float(meta.get("reference_aspect_ratio") or 1.55)
@@ -6500,45 +6502,86 @@ def _draw_reconstructed_pattern(
     palette: dict[str, tuple[int, int, int, int]],
     font,
 ) -> None:
+    """Draw the single deterministic M5 pattern using real candle geometry."""
     overlays = [x for x in (analysis.get("pattern_overlays") or []) if isinstance(x, dict)]
     if not overlays:
         return
-    for overlay in overlays[:1]:
-        geom = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
+    overlay = overlays[0]
+    geom = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
+    try:
+        window_size = int(geom.get("window_size") or len(candles))
+    except (TypeError, ValueError):
+        window_size = len(candles)
+    status = str(overlay.get("status") or "candidate")
+    confirmed = status == "confirmed"
+    color = (39, 93, 173, 230)
+
+    def mapped_point(point: Any) -> tuple[int, int] | None:
+        if not (isinstance(point, list) and len(point) >= 2):
+            return None
         try:
-            window_size = int(geom.get("window_size") or len(candles))
-        except (TypeError, ValueError):
-            window_size = len(candles)
-        color = (39, 93, 173, 230)
-        for line in geom.get("lines") or []:
-            if not isinstance(line, dict):
-                continue
-            p1, p2 = line.get("p1"), line.get("p2")
-            if not (isinstance(p1, list) and isinstance(p2, list) and len(p1) >= 2 and len(p2) >= 2):
-                continue
-            try:
-                i1 = _recon_index_to_actual(int(p1[0]), window_size, len(candles))
-                i2 = _recon_index_to_actual(int(p2[0]), window_size, len(candles))
-                y1, y2 = price_y(float(p1[1])), price_y(float(p2[1]))
-            except (TypeError, ValueError):
-                continue
-            draw.line((candle_x[i1], y1, candle_x[i2], y2), fill=color, width=2)
-        for anchor in geom.get("anchors") or []:
-            if not isinstance(anchor, dict):
-                continue
-            try:
-                idx = _recon_index_to_actual(int(anchor.get("index")), window_size, len(candles))
-                y = price_y(float(anchor.get("price")))
-            except (TypeError, ValueError):
-                continue
-            x = candle_x[idx]
-            r = 7
-            draw.ellipse((x-r, y-r, x+r, y+r), fill=palette["plot"], outline=color, width=2)
-        label = str(overlay.get("name") or analysis.get("pattern_type") or "").strip()
-        if label:
-            x = candle_x[max(0, len(candles) - 12)]
-            y = max(28, price_y(max(float(c["high"]) for c in candles[-12:])) - 28)
-            _draw_rtl(draw, (x, y), label, font, color, anchor="ma")
+            idx = _recon_index_to_actual(int(point[0]), window_size, len(candles))
+            return candle_x[idx], price_y(float(point[1]))
+        except (TypeError, ValueError, IndexError):
+            return None
+
+    for line in geom.get("lines") or []:
+        if not isinstance(line, dict):
+            continue
+        a, b = mapped_point(line.get("p1")), mapped_point(line.get("p2"))
+        if a is None or b is None:
+            continue
+        line_color = (181, 129, 24, 230) if str(line.get("role") or "") in {"neckline", "trigger"} else color
+        if confirmed:
+            draw.line((*a, *b), fill=line_color, width=3)
+        else:
+            _dash_line(draw, a, b, line_color, width=3, dash=10, gap=7)
+
+    path_points = [p for item in (geom.get("path") or []) if (p := mapped_point(item)) is not None]
+    if len(path_points) >= 2:
+        if confirmed:
+            draw.line(path_points, fill=(55, 106, 184, 185), width=2)
+        else:
+            for a, b in zip(path_points[:-1], path_points[1:]):
+                _dash_line(draw, a, b, (55, 106, 184, 165), width=2, dash=8, gap=6)
+
+    anchor_points: list[tuple[int, int]] = []
+    for anchor in geom.get("anchors") or []:
+        if not isinstance(anchor, dict):
+            continue
+        try:
+            idx = _recon_index_to_actual(int(anchor.get("index")), window_size, len(candles))
+            x, y = candle_x[idx], price_y(float(anchor.get("price")))
+        except (TypeError, ValueError, IndexError):
+            continue
+        anchor_points.append((x, y))
+        r = 6
+        draw.ellipse((x-r, y-r, x+r, y+r), fill=palette["plot"], outline=color, width=2)
+
+    label = str(overlay.get("name") or analysis.get("pattern_type") or "").strip()
+    if label:
+        if anchor_points:
+            lx, ly = anchor_points[-1]
+        else:
+            lx = candle_x[max(0, len(candles) - 10)]
+            ly = price_y(max(float(c["high"]) for c in candles[-10:]))
+        suffix = "مؤكد" if confirmed else "مرشح"
+        _draw_rtl(draw, (min(candle_x[-1] + 90, lx + 16), max(26, ly - 28)), f"{label} · {suffix}", font, color, anchor="ma")
+
+    # Candidate plans explain the condition but never promote status.
+    for key, confirmed_name, candidate_name, level_color in (
+        ("trigger", "ENTRY", "ENTRY IF", (27, 151, 91, 220)),
+        ("stop", "STOP", "CANCEL", (206, 62, 70, 215)),
+        ("target", "TARGET", "TARGET", (27, 159, 96, 205)),
+    ):
+        value = _number(geom.get(key))
+        if value is None:
+            continue
+        y = price_y(float(value))
+        x1, x2 = candle_x[max(0, len(candles)-16)], candle_x[-1]
+        _dash_line(draw, (x1, y), (x2, y), level_color, width=2, dash=9, gap=6)
+        title = confirmed_name if confirmed else candidate_name
+        draw.text((x2 - 4, y - 5), f"{title} {_fmt_axis_price(value)}", font=font, fill=level_color, anchor="rs")
 
 
 def _draw_reconstructed_reference_scenario(
@@ -6568,7 +6611,9 @@ def _draw_reconstructed_reference_scenario(
     left, top, right, bottom = plot
     label_color = (24, 145, 88, 230) if bias == "صاعد" else (207, 61, 69, 230) if bias == "هابط" else (42, 104, 196, 230)
 
-    if "pattern" in components:
+    # The verified primary pattern remains the clearest visual element even when
+    # the selected reference scenario also adds SMC/structure components.
+    if analysis.get("pattern_overlays"):
         _draw_reconstructed_pattern(draw, analysis, candles, candle_x, price_y, palette, font)
 
     if "structure" in components:
@@ -7032,10 +7077,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
 
 def render_result(analysis: dict[str, Any], chart_background_path: str | os.PathLike[str] | None = None) -> bytes:
-    """SaleeM v3.68: preserve the original chart and add one clean overlay.
-
-    Market data verifies structure and execution; it never replaces the user's
-    screenshot.  The final pixels are the original chart plus the verified
-    educational scenario/pattern layer.
-    """
+    """Render native landscape uploads or rebuild portrait uploads from OHLC."""
+    if bool(analysis.get("reconstructed_market_chart")):
+        return _render_reconstructed_market_chart(analysis, chart_background_path)
     return _render_uploaded_chart_with_overlays(analysis, chart_background_path)

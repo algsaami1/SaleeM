@@ -16,9 +16,8 @@
 
     let uploadValid = false;
     let checking = false;
-    const MIN_W = 800;
-    const MIN_H = 400;
-    const MIN_RATIO = 1.15;
+    const MIN_W = 360;
+    const MIN_H = 360;
 
     const setNote = (message, tone = '') => {
       if (!note) return;
@@ -60,29 +59,19 @@
 
       if (!file) {
         checking = false;
-        setNote('يشترط صورة أفقية واضحة يظهر فيها الشارت ومحور الأسعار.');
+        setNote('اختر صورة واضحة للشارت، رأسية أو أفقية، مع ظهور محور الأسعار.');
         return false;
       }
 
       checking = true;
-      setNote('جاري التحقق من اتجاه الصورة ووضوحها...');
+      setNote('جاري التحقق من وضوح الصورة...');
 
       try {
         const { width, height } = await inspect(file);
-        const ratio = width / Math.max(1, height);
-
-        if (width <= height || ratio < MIN_RATIO) {
-          if (input) input.value = '';
-          clearInvalidPreview();
-          setNote('الصورة رأسية. دوّر الهاتف للوضع الأفقي والتقط الشارت كاملًا ثم أعد الرفع.', 'bad');
-          checking = false;
-          return false;
-        }
-
         if (width < MIN_W || height < MIN_H) {
           if (input) input.value = '';
           clearInvalidPreview();
-          setNote(`الصورة أفقية لكن دقتها منخفضة (${width}×${height}). ارفع صورة أوضح لا تقل تقريبًا عن 800×400.`, 'bad');
+          setNote(`دقة الصورة منخفضة (${width}×${height}). ارفع صورة أوضح.`, 'bad');
           checking = false;
           return false;
         }
@@ -90,13 +79,13 @@
         uploadValid = true;
         checking = false;
         dropZone?.classList.remove('upload-invalid');
-        setNote(`صورة أفقية مناسبة (${width}×${height}) — جاهزة للتحليل.`, 'good');
+        setNote(`${height > width ? "صورة رأسية" : "صورة أفقية"} مناسبة (${width}×${height}) — جاهزة للتحليل.`, 'good');
         return true;
       } catch {
         if (input) input.value = '';
         clearInvalidPreview();
         checking = false;
-        setNote('تعذر قراءة الصورة. اختر لقطة أفقية واضحة جديدة.', 'bad');
+        setNote('تعذر قراءة الصورة. اختر لقطة واضحة جديدة.', 'bad');
         return false;
       }
     };
@@ -110,7 +99,7 @@
         event.preventDefault();
         event.stopImmediatePropagation();
         setNote(
-          checking ? 'انتظر لحظة حتى يكتمل فحص الصورة.' : 'اختر صورة أفقية واضحة قبل بدء التحليل.',
+          checking ? 'انتظر لحظة حتى يكتمل فحص الصورة.' : 'اختر صورة واضحة قبل بدء التحليل.',
           'bad'
         );
         dropZone?.scrollIntoView({ behavior: 'smooth', block: 'center' });

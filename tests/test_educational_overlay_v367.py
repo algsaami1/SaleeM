@@ -13,8 +13,10 @@ def test_v367_preserves_original_dimensions_and_accepts_portrait(tmp_path: Path)
     path, meta = _prepare_analysis_image(source)
     assert path == source
     assert meta["source_chart_preserved"] is True
-    assert meta["reconstructed_market_chart"] is False
+    assert meta["reconstructed_market_chart"] is True
     assert meta["reference_orientation"] == "portrait"
+    assert meta["force_landscape_output"] is True
+    assert meta["output_chart_orientation"] == "landscape"
     assert meta["educational_overlay_mode"] is True
 
 

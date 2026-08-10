@@ -1,3 +1,0 @@
-SaleeM v3.70 UI FIX
-Backup: /root/SaleeM/_ui_v370_fix_backup_20260809_145352
-Changed: index.html, style.css
