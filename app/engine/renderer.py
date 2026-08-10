@@ -6331,54 +6331,42 @@ def _render_uploaded_chart_with_overlays(
 
 
 def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
-    """Choose a chart size from the uploaded reference aspect ratio.
+    """Return the permanent wide educational chart canvas.
 
-    Portrait, square and landscape uploads are all valid.  Extreme phone
-    screenshot ratios are gently capped so the actual market chart remains
-    readable while still feeling visually related to the uploaded reference.
+    The upload may be portrait or landscape, but it is calibration only.  A
+    16:9 rectangle gives the verified model, left-side history and future
+    targets enough space without changing any real price/time anchor.
     """
-    if bool(analysis.get("force_landscape_output")) or str(analysis.get("output_chart_orientation") or "") == "landscape":
-        return 1600, 900
-    meta = analysis.get("chart_reference_meta") if isinstance(analysis.get("chart_reference_meta"), dict) else {}
-    try:
-        ratio = float(meta.get("reference_aspect_ratio") or 1.55)
-    except (TypeError, ValueError):
-        ratio = 1.55
-    ratio = max(0.62, min(1.90, ratio))
-    if ratio < 0.90:
-        width = 1080
-    elif ratio > 1.28:
-        width = 1600
-    else:
-        width = 1280
-    height = int(round(width / ratio))
-    height = max(760, min(1740, height))
-    return width, height
+    return 1600, 900
 
 
 def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int, int, int]]:
+    style = str(analysis.get("educational_reference_style") or "")
+    if style == "library_video":
+        return {
+            "bg": (4, 10, 18, 255),
+            "plot": (9, 22, 35, 255),
+            "grid": (92, 122, 148, 34),
+            "text": (238, 244, 250, 255),
+            "muted": (154, 171, 187, 255),
+            "border": (20, 173, 193, 210),
+            "bull": (30, 182, 151, 255),
+            "bear": (235, 70, 72, 255),
+        }
     meta = analysis.get("chart_reference_meta") if isinstance(analysis.get("chart_reference_meta"), dict) else {}
     theme = str(meta.get("reference_theme") or "light")
     if theme == "dark":
         return {
-            "bg": (12, 20, 30, 255),
-            "plot": (15, 25, 37, 255),
-            "grid": (104, 126, 148, 42),
-            "text": (220, 228, 236, 255),
-            "muted": (148, 164, 180, 255),
-            "border": (68, 88, 108, 180),
-            "bull": (29, 184, 139, 255),
-            "bear": (239, 79, 79, 255),
+            "bg": (12, 20, 30, 255), "plot": (15, 25, 37, 255),
+            "grid": (104, 126, 148, 42), "text": (220, 228, 236, 255),
+            "muted": (148, 164, 180, 255), "border": (68, 88, 108, 180),
+            "bull": (29, 184, 139, 255), "bear": (239, 79, 79, 255),
         }
     return {
-        "bg": (246, 248, 251, 255),
-        "plot": (255, 255, 255, 255),
-        "grid": (77, 115, 153, 30),
-        "text": (55, 64, 74, 255),
-        "muted": (112, 124, 138, 255),
-        "border": (192, 202, 213, 210),
-        "bull": (32, 169, 139, 255),
-        "bear": (235, 78, 78, 255),
+        "bg": (246, 248, 251, 255), "plot": (255, 255, 255, 255),
+        "grid": (77, 115, 153, 30), "text": (55, 64, 74, 255),
+        "muted": (112, 124, 138, 255), "border": (192, 202, 213, 210),
+        "bull": (32, 169, 139, 255), "bear": (235, 78, 78, 255),
     }
 
 
@@ -6387,7 +6375,7 @@ def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]
     all_candles = _valid_renderer_candles(analysis)
     if not all_candles:
         return [], 0
-    desired = 42
+    desired = 78
     scenario_geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
     try:
         desired = max(desired, int(scenario_geom.get("window_size") or 0) + 6)
@@ -6401,12 +6389,17 @@ def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]
             desired = max(desired, int(geom.get("window_size") or 0) + 6)
         except (TypeError, ValueError):
             pass
-    desired = max(24, min(60, desired))
+    desired = max(48, min(96, desired))
     window = all_candles[-desired:]
     return window, len(all_candles) - len(window)
 
 
 def _reconstructed_price_range(analysis: dict[str, Any], candles: list[dict[str, Any]]) -> tuple[float, float]:
+    """Build a target-aware market range with extra breathing room.
+
+    All values come from real OHLC/levels or deterministic trade/pattern plans.
+    No synthetic target or guessed price is created.
+    """
     values: list[float] = []
     for candle in candles:
         values.extend((float(candle["low"]), float(candle["high"])))
@@ -6414,6 +6407,19 @@ def _reconstructed_price_range(analysis: dict[str, Any], candles: list[dict[str,
         value = _number(analysis.get(key))
         if value is not None:
             values.append(float(value))
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    for key in ("trigger", "cancel", "target"):
+        value = _number(action.get(key))
+        if value is not None:
+            values.append(float(value))
+    for item in analysis.get("pattern_overlays") or []:
+        if not isinstance(item, dict):
+            continue
+        geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+        for key in ("trigger", "stop", "target"):
+            value = _number(geom.get(key))
+            if value is not None:
+                values.append(float(value))
     for key in ("support_levels", "resistance_levels"):
         for item in analysis.get(key) or []:
             if isinstance(item, dict):
@@ -6425,19 +6431,36 @@ def _reconstructed_price_range(analysis: dict[str, Any], candles: list[dict[str,
     lo, hi = min(values), max(values)
     span = max(0.2, hi - lo)
 
-    # The screenshot axis is a visual hint only.  Use it when it surrounds the
-    # market window without being wildly wider; never force market OHLC to it.
     ref_lo = _number(analysis.get("image_price_low"))
     ref_hi = _number(analysis.get("image_price_high"))
     market_current = _number(analysis.get("current_price"))
     if ref_lo is not None and ref_hi is not None and ref_hi > ref_lo and market_current is not None:
         ref_span = float(ref_hi) - float(ref_lo)
         if float(ref_lo) <= float(market_current) <= float(ref_hi) and ref_span <= span * 3.2:
-            lo = min(lo, float(ref_lo))
-            hi = max(hi, float(ref_hi))
-            span = max(0.2, hi - lo)
-    pad = span * 0.08
-    return lo - pad, hi + pad
+            lo = min(lo, float(ref_lo)); hi = max(hi, float(ref_hi)); span = max(0.2, hi-lo)
+
+    # More vertical target room than the old renderer, especially when a real
+    # target sits near the visible boundary.
+    base_pad = span * 0.10
+    lo -= base_pad; hi += base_pad
+    span = max(0.2, hi-lo)
+    target_values: list[float] = []
+    for key in ("target_1", "target_2", "target_3"):
+        value = _number(analysis.get(key))
+        if value is not None: target_values.append(float(value))
+    value = _number(action.get("target"))
+    if value is not None: target_values.append(float(value))
+    for item in analysis.get("pattern_overlays") or []:
+        if isinstance(item, dict):
+            geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
+            value = _number(geom.get("target"))
+            if value is not None: target_values.append(float(value))
+    for target in target_values:
+        if target - lo < span * 0.10:
+            lo -= span * 0.10
+        if hi - target < span * 0.10:
+            hi += span * 0.10
+    return lo, hi
 
 
 def _recon_index_to_actual(index: int, window_size: int, total: int) -> int:
@@ -6467,30 +6490,37 @@ def _reconstructed_scenario_target(analysis: dict[str, Any], candles: list[dict[
     current = _number(analysis.get("current_price"))
     if current is None:
         return None
-    candidates: list[float] = []
-    direct = _number(analysis.get("target_1"))
-    if direct is not None:
-        candidates.append(float(direct))
+    current = float(current)
+    def valid(value: float) -> bool:
+        return value > current if bias == "صاعد" else value < current
+
+    # Use deterministic execution target first, then deterministic pattern target.
+    for key in ("target_1", "target_2", "target_3"):
+        value = _number(analysis.get(key))
+        if value is not None and valid(float(value)):
+            return float(value)
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    value = _number(action.get("target"))
+    if value is not None and valid(float(value)):
+        return float(value)
     for item in analysis.get("pattern_overlays") or []:
         if not isinstance(item, dict):
             continue
         geom = item.get("geometry") if isinstance(item.get("geometry"), dict) else {}
         value = _number(geom.get("target"))
-        if value is not None:
-            candidates.append(float(value))
+        if value is not None and valid(float(value)):
+            return float(value)
+
+    candidates: list[float] = []
     level_key = "resistance_levels" if bias == "صاعد" else "support_levels"
     for level in analysis.get(level_key) or []:
         if isinstance(level, dict):
             value = _number(level.get("price"))
-            if value is not None:
+            if value is not None and valid(float(value)):
                 candidates.append(float(value))
     highs, lows = _simple_swing_points(candles, window=2)
-    candidates.extend(price for _idx, price in (highs if bias == "صاعد" else lows))
-    if bias == "صاعد":
-        valid = [v for v in candidates if v > float(current)]
-    else:
-        valid = [v for v in candidates if v < float(current)]
-    return min(valid, key=lambda v: abs(v - float(current))) if valid else None
+    candidates.extend(float(price) for _idx, price in (highs if bias == "صاعد" else lows) if valid(float(price)))
+    return min(candidates, key=lambda v: abs(v-current)) if candidates else None
 
 
 def _draw_reconstructed_pattern(
@@ -6502,7 +6532,7 @@ def _draw_reconstructed_pattern(
     palette: dict[str, tuple[int, int, int, int]],
     font,
 ) -> None:
-    """Draw the single deterministic M5 pattern using real candle geometry."""
+    """Draw the closest verified library model with real M5 geometry only."""
     overlays = [x for x in (analysis.get("pattern_overlays") or []) if isinstance(x, dict)]
     if not overlays:
         return
@@ -6514,7 +6544,9 @@ def _draw_reconstructed_pattern(
         window_size = len(candles)
     status = str(overlay.get("status") or "candidate")
     confirmed = status == "confirmed"
-    color = (39, 93, 173, 230)
+    model_color = (120, 93, 235, 235)
+    path_color = (244, 247, 250, 235)
+    trigger_color = (236, 166, 46, 235)
 
     def mapped_point(point: Any) -> tuple[int, int] | None:
         if not (isinstance(point, list) and len(point) >= 2):
@@ -6525,63 +6557,155 @@ def _draw_reconstructed_pattern(
         except (TypeError, ValueError, IndexError):
             return None
 
+    # Pattern boundaries: candidate dashed, confirmed solid.  A soft polygon
+    # between two boundaries gives triangles/wedges the educational video look.
+    mapped_lines: list[tuple[tuple[int,int], tuple[int,int], str]] = []
     for line in geom.get("lines") or []:
         if not isinstance(line, dict):
             continue
         a, b = mapped_point(line.get("p1")), mapped_point(line.get("p2"))
         if a is None or b is None:
             continue
-        line_color = (181, 129, 24, 230) if str(line.get("role") or "") in {"neckline", "trigger"} else color
+        role = str(line.get("role") or "")
+        mapped_lines.append((a,b,role))
+    if len(mapped_lines) >= 2:
+        boundary = [item for item in mapped_lines if item[2] not in {"neckline", "trigger"}]
+        if len(boundary) >= 2:
+            a1,b1,_ = boundary[0]; a2,b2,_ = boundary[1]
+            draw.polygon([a1,b1,b2,a2], fill=(112, 76, 206, 28))
+    for a,b,role in mapped_lines:
+        line_color = trigger_color if role in {"neckline", "trigger"} else model_color
         if confirmed:
-            draw.line((*a, *b), fill=line_color, width=3)
+            draw.line((*a,*b), fill=line_color, width=4)
         else:
-            _dash_line(draw, a, b, line_color, width=3, dash=10, gap=7)
+            _dash_line(draw,a,b,line_color,width=3,dash=12,gap=7)
 
     path_points = [p for item in (geom.get("path") or []) if (p := mapped_point(item)) is not None]
     if len(path_points) >= 2:
         if confirmed:
-            draw.line(path_points, fill=(55, 106, 184, 185), width=2)
+            draw.line(path_points, fill=path_color, width=4)
         else:
-            for a, b in zip(path_points[:-1], path_points[1:]):
-                _dash_line(draw, a, b, (55, 106, 184, 165), width=2, dash=8, gap=6)
+            for a,b in zip(path_points[:-1],path_points[1:]):
+                _dash_line(draw,a,b,path_color,width=3,dash=11,gap=7)
 
-    anchor_points: list[tuple[int, int]] = []
+    anchor_points: list[tuple[int,int,str]] = []
     for anchor in geom.get("anchors") or []:
         if not isinstance(anchor, dict):
             continue
         try:
-            idx = _recon_index_to_actual(int(anchor.get("index")), window_size, len(candles))
-            x, y = candle_x[idx], price_y(float(anchor.get("price")))
-        except (TypeError, ValueError, IndexError):
+            idx = _recon_index_to_actual(int(anchor.get("index")),window_size,len(candles))
+            x,y = candle_x[idx], price_y(float(anchor.get("price")))
+        except (TypeError,ValueError,IndexError):
             continue
-        anchor_points.append((x, y))
-        r = 6
-        draw.ellipse((x-r, y-r, x+r, y+r), fill=palette["plot"], outline=color, width=2)
+        role=str(anchor.get("role") or "pivot")
+        anchor_points.append((x,y,role))
+        # glow + real anchor dot
+        draw.ellipse((x-12,y-12,x+12,y+12), fill=(76, 94, 255, 36))
+        draw.ellipse((x-6,y-6,x+6,y+6), fill=(76, 115, 255, 245), outline=(238,244,250,245), width=1)
 
-    label = str(overlay.get("name") or analysis.get("pattern_type") or "").strip()
-    if label:
-        if anchor_points:
-            lx, ly = anchor_points[-1]
-        else:
-            lx = candle_x[max(0, len(candles) - 10)]
-            ly = price_y(max(float(c["high"]) for c in candles[-10:]))
-        suffix = "مؤكد" if confirmed else "مرشح"
-        _draw_rtl(draw, (min(candle_x[-1] + 90, lx + 16), max(26, ly - 28)), f"{label} · {suffix}", font, color, anchor="ma")
+    # Educational labels from real anchor roles.  Only labels move; anchors do not.
+    name=str(overlay.get("name") or analysis.get("pattern_type") or "").strip()
+    lower_name=name.lower()
+    pivots=[p for p in anchor_points if p[2] not in {"neck", "lower", "upper", "pole", "retest"}]
+    if name in {"M", "قمة ثلاثية"}:
+        for i,(x,y,_role) in enumerate(pivots[:3],start=1):
+            draw.text((x+10,max(20,y-18)),f"{i}# TOP",font=font,fill=path_color,anchor="ls")
+    elif name in {"W", "قاع ثلاثي"}:
+        for i,(x,y,_role) in enumerate(pivots[:3],start=1):
+            draw.text((x+10,min(price_y(min(float(c['low']) for c in candles))-10,y+24)),f"{i}# BOTTOM",font=font,fill=path_color,anchor="la")
+    elif "رأس وكتفين" in name:
+        role_names={"shoulder":"SHOULDER","head":"HEAD","neck":"NECK"}
+        for x,y,role in anchor_points:
+            if role in role_names:
+                draw.text((x+8,max(20,y-14)),role_names[role],font=font,fill=path_color,anchor="ls")
 
-    # Candidate plans explain the condition but never promote status.
+    # Candidate plans explain conditions without changing status.
     for key, confirmed_name, candidate_name, level_color in (
-        ("trigger", "ENTRY", "ENTRY IF", (27, 151, 91, 220)),
-        ("stop", "STOP", "CANCEL", (206, 62, 70, 215)),
-        ("target", "TARGET", "TARGET", (27, 159, 96, 205)),
+        ("trigger","ENTRY","ENTRY IF",(34,183,112,225)),
+        ("stop","STOP","CANCEL",(227,76,82,220)),
+        ("target","TARGET","TARGET",(62,192,107,220)),
     ):
-        value = _number(geom.get(key))
+        value=_number(geom.get(key))
         if value is None:
             continue
-        y = price_y(float(value))
-        x1, x2 = candle_x[max(0, len(candles)-16)], candle_x[-1]
-        _dash_line(draw, (x1, y), (x2, y), level_color, width=2, dash=9, gap=6)
-        title = confirmed_name if confirmed else candidate_name
-        draw.text((x2 - 4, y - 5), f"{title} {_fmt_axis_price(value)}", font=font, fill=level_color, anchor="rs")
+        y=price_y(float(value))
+        x1=candle_x[max(0,len(candles)-18)]
+        # extend into the future-right area; this is display room, not a price anchor.
+        spacing=max(10, candle_x[-1]-candle_x[-2]) if len(candle_x)>1 else 12
+        x2=candle_x[-1]+spacing*8
+        _dash_line(draw,(x1,y),(x2,y),level_color,width=2,dash=9,gap=6)
+        title=confirmed_name if confirmed else candidate_name
+        draw.text((x2-4,y-5),f"{title} {_fmt_axis_price(value)}",font=font,fill=level_color,anchor="rs")
+
+
+def _draw_reconstructed_reference_zones(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    price_y,
+    plot: tuple[int,int,int,int],
+    font,
+) -> None:
+    """Video-style nearest support/resistance bands from real levels only."""
+    if not analysis.get("pattern_overlays") and not analysis.get("reference_scenario_available"):
+        return
+    left,top,right,bottom=plot
+    current=_number(analysis.get("current_price"))
+    atr=median([max(0.01,float(c["high"])-float(c["low"])) for c in candles[-20:]]) if candles else 0.5
+    half=max(atr*0.16,0.08)
+    for key,label,fill,outline in (
+        ("resistance_levels","RESISTANCE ZONE",(215,55,65,34),(227,71,79,180)),
+        ("support_levels","SUPPORT ZONE",(41,163,78,36),(66,192,92,185)),
+    ):
+        vals=[]
+        for item in analysis.get(key) or []:
+            if isinstance(item,dict):
+                value=_number(item.get("price"))
+                if value is not None: vals.append(float(value))
+        if not vals: continue
+        if current is not None: vals.sort(key=lambda v:abs(v-float(current)))
+        value=vals[0]
+        y1,y2=price_y(value+half),price_y(value-half)
+        yy1=max(top,min(y1,y2)); yy2=min(bottom,max(y1,y2))
+        if yy2<=yy1: continue
+        draw.rectangle((left+4,yy1,right-4,yy2),fill=fill,outline=outline,width=2)
+        label_x = int(left + (right-left) * (0.67 if key == "resistance_levels" else 0.45))
+        if key == "resistance_levels":
+            label_y = max(top + 18, yy1 - 7)
+            draw.text((label_x,label_y),label,font=font,fill=outline,anchor="ms")
+        else:
+            draw.text((label_x,(yy1+yy2)//2),label,font=font,fill=outline,anchor="mm")
+
+
+def _draw_reconstructed_pattern_expectation(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    candles: list[dict[str, Any]],
+    candle_x: list[int],
+    price_y,
+    plot: tuple[int,int,int,int],
+) -> None:
+    overlays=[x for x in (analysis.get("pattern_overlays") or []) if isinstance(x,dict)]
+    if not overlays: return
+    overlay=overlays[0]
+    bias=str(overlay.get("bias") or analysis.get("pattern_bias") or "محايد")
+    if bias not in {"صاعد","هابط"}: return
+    current=_number(analysis.get("current_price"))
+    target=_reconstructed_scenario_target(analysis,candles,bias)
+    if current is None or target is None: return
+    left,top,right,bottom=plot
+    sx=candle_x[-1]; sy=price_y(float(current)); ty=price_y(float(target))
+    spacing=max(10,candle_x[-1]-candle_x[-2]) if len(candle_x)>1 else 12
+    ex=min(right-16,sx+spacing*10)
+    if ex<=sx+20: return
+    bend_x=sx+max(24,(ex-sx)//3)
+    # Reference animation grammar: break -> small correction/retest -> continuation.
+    retrace=max(14,int(abs(ty-sy)*0.16))
+    bend_y=sy-retrace if bias=="هابط" else sy+retrace
+    bend_y=max(top+18,min(bottom-18,bend_y))
+    confirmed=str(overlay.get("status") or "candidate")=="confirmed"
+    color=(55,201,111,230) if bias=="صاعد" else (231,79,82,230)
+    _recon_arrow(draw,[(sx,sy),(bend_x,bend_y),(ex,ty)],color,width=4,dashed=not confirmed)
 
 
 def _draw_reconstructed_reference_scenario(
@@ -6595,7 +6719,9 @@ def _draw_reconstructed_reference_scenario(
     font,
 ) -> None:
     if not bool(analysis.get("reference_scenario_available")):
-        _draw_reconstructed_pattern(ImageDraw.Draw(image), analysis, candles, candle_x, price_y, palette, font)
+        base_draw = ImageDraw.Draw(image)
+        _draw_reconstructed_pattern(base_draw, analysis, candles, candle_x, price_y, palette, font)
+        _draw_reconstructed_pattern_expectation(base_draw, analysis, candles, candle_x, price_y, plot)
         return
     components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
     geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
@@ -6747,15 +6873,21 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    # Leave more future room in landscape and slightly less in portrait.
-    portrait = height > width * 1.15
-    margin_l = int(width * 0.045)
-    margin_r = int(width * (0.16 if portrait else 0.13))
-    margin_t = int(height * 0.055)
+    # Permanent rectangular layout: rich history on the left and generous
+    # future/target room on the right.  The latest real candle is intentionally
+    # shifted left; only the view changes, never its time/price.
+    portrait = False
+    margin_l = int(width * 0.035)
+    margin_r = int(width * 0.11)
+    margin_t = int(height * 0.075)
     margin_b = int(height * 0.10)
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
-    draw.rounded_rectangle((left-6, top-6, width-margin_l, bottom+6), radius=14, fill=palette["plot"], outline=palette["border"], width=2)
+        # Teal reference-video frame glow, kept outside the price plot.
+    if str(analysis.get("educational_reference_style") or "") == "library_video":
+        for grow,alpha in ((14,28),(9,45),(5,70)):
+            draw.rounded_rectangle((left-grow,top-grow,width-margin_l+grow,bottom+grow),radius=18+grow,outline=(20,190,205,alpha),width=2)
+    draw.rounded_rectangle((left-6, top-6, width-margin_l, bottom+6), radius=16, fill=palette["plot"], outline=palette["border"], width=2)
 
     price_min, price_max = _reconstructed_price_range(analysis, candles)
     def price_y(price: float) -> int:
@@ -6776,8 +6908,11 @@ def _render_reconstructed_market_chart(
         x = int(round(left + (right-left) * i / 7))
         draw.line((x, top, x, bottom), fill=palette["grid"], width=1)
 
-    # Candles occupy roughly 82% of the plot, leaving scenario space on the right.
-    candle_right = int(left + (right-left) * (0.82 if portrait else 0.80))
+    # Candles occupy only ~72% when there is a verified model/scenario/target,
+    # leaving a clear future corridor for Entry/Cancel/Stop/Targets.
+    has_plan = bool(analysis.get("pattern_overlays") or analysis.get("reference_scenario_available") or _number(analysis.get("target_1")) is not None)
+    history_ratio = 0.72 if has_plan else 0.82
+    candle_right = int(left + (right-left) * history_ratio)
     slot = (candle_right-left) / max(1, len(candles))
     body_w = max(5, min(15, int(slot * 0.58)))
     candle_x: list[int] = []
@@ -6800,9 +6935,13 @@ def _render_reconstructed_market_chart(
         x = candle_x[idx]
         draw.text((x, bottom+24), _time_label(candles[idx].get("time")), font=f_axis, fill=palette["muted"], anchor="ma")
 
-    # Compact nearest S/R only, keeping the chart educational rather than crowded.
+    # Compact nearest S/R only.  In the permanent library-video style the
+    # translucent SUPPORT/RESISTANCE bands replace R1/S1 text to avoid clutter.
     current = _number(analysis.get("current_price"))
+    video_zones = bool(str(analysis.get("educational_reference_style") or "") == "library_video" and (analysis.get("pattern_overlays") or analysis.get("reference_scenario_available")))
     for key, color, prefix in (("resistance_levels", (210,61,69,215), "R"), ("support_levels", (44,105,202,215), "S")):
+        if video_zones:
+            continue
         levels = []
         for item in analysis.get(key) or []:
             if isinstance(item, dict):
@@ -6832,10 +6971,14 @@ def _render_reconstructed_market_chart(
         draw.rounded_rectangle((right-box_w, y-22, right, y+22), radius=6, fill=(25,164,135,235))
         draw.text((right-10, y), tag, font=f_label, fill=(255,255,255,255), anchor="rm")
 
+    _draw_reconstructed_reference_zones(draw, analysis, candles, price_y, plot, f_label)
     _draw_reconstructed_reference_scenario(image, analysis, candles, candle_x, price_y, plot, palette, f_label)
 
-    # Minimal identity, not a large educational headline.
-    draw.text((left, max(8, top-34)), "XAUUSD · M5", font=_font(max(16, int(width*0.014)), True, True), fill=palette["text"], anchor="la")
+    # Reference-video identity and closest-library-model subtitle.
+    draw.text((left, max(12, top-44)), "XAUUSD · M5", font=_font(max(22, int(width*0.017)), True, True), fill=palette["text"], anchor="la")
+    model_label = str(analysis.get("reference_scenario_label") or analysis.get("pattern_type") or "").strip()
+    if model_label and model_label not in {"لا يوجد", "none"}:
+        _draw_rtl(draw, ((left+right)//2, max(18, top-42)), model_label, _font(max(18,int(width*0.014)), True), (235,78,86,235) if str(analysis.get("pattern_bias") or analysis.get("reference_scenario_bias"))=="هابط" else (54,193,123,235), anchor="ma")
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
     return out.getvalue()

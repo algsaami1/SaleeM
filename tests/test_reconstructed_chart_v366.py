@@ -147,3 +147,51 @@ def test_manual_axis_calibration_changes_visual_reference_only():
     assert analysis['image_price_high'] == 4352.51
     assert analysis['image_price_low'] == 4306.91
     assert analysis['manual_axis_calibration'] is True
+
+
+def test_landscape_upload_is_also_calibration_only_and_reconstructed(tmp_path):
+    src=tmp_path/'landscape.png'
+    Image.new('RGB',(1200,700),'white').save(src)
+    _path, meta=_prepare_analysis_image(src)
+    assert meta['reference_orientation']=='landscape'
+    assert meta['reconstructed_market_chart'] is True
+    assert meta['force_landscape_output'] is True
+    assert meta['output_chart_orientation']=='landscape'
+    assert meta['educational_reference_style']=='library_video'
+    assert int(meta['reference_library_rule_count']) == 43
+
+
+def test_library_video_reconstruction_keeps_more_left_history_and_future_room(tmp_path):
+    source=tmp_path/'portrait.png'
+    Image.new('RGB',(700,1200),'white').save(source)
+    candles=_candles(90)
+    analysis={
+        'candles': candles,
+        'current_price': float(candles[-1]['close']),
+        'support_levels': [{'price': float(candles[-1]['close'])-1.2, 'strength':80}],
+        'resistance_levels': [{'price': float(candles[-1]['close'])+2.2, 'strength':80}],
+        'reconstructed_market_chart': True,
+        'force_landscape_output': True,
+        'output_chart_orientation':'landscape',
+        'educational_reference_style':'library_video',
+        'pattern_type':'M',
+        'pattern_bias':'هابط',
+        'pattern_overlays':[{
+            'name':'M','timeframe':'M5','bias':'هابط','status':'candidate','confidence':76,
+            'reference_match_score':74,
+            'geometry':{
+                'window_size':90,
+                'anchors':[{'index':55,'price':4348.0,'role':'pivot'},{'index':63,'price':4345.0,'role':'neck'},{'index':72,'price':4348.1,'role':'pivot'}],
+                'lines':[{'p1':[55,4345.0],'p2':[72,4345.0],'role':'neckline'}],
+                'path':[[55,4348.0],[63,4345.0],[72,4348.1]],
+                'trigger':4345.0,'stop':4348.4,'target':4341.6,'breakout_index':None,
+            },
+        }],
+        'reference_scenario_available':False,
+    }
+    png=render_result(analysis, chart_background_path=source)
+    with Image.open(BytesIO(png)) as out:
+        assert out.size==(1600,900)
+        # Permanent video/library style is dark, not the white source screenshot.
+        px=out.convert('RGB').getpixel((20,20))
+        assert sum(px) < 120

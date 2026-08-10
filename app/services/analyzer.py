@@ -21,6 +21,8 @@ from PIL import Image, ImageEnhance
 from app.engine.memory_engine import memory_context
 from app.engine.pattern_engine import review_market_patterns
 from app.engine.reference_scenario_engine import review_reference_scenarios
+from app.engine.reference_matcher import match_reference_scenarios as rank_reference_library
+from app.engine.reference_rule_catalog import reference_rule_by_id, reference_rule_count
 from app.engine.reference_rule_bridge import match_reference
 from app.engine.renderer import (
     AxisCalibrationError,
@@ -954,17 +956,22 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
     """
     meta = _chart_visual_reference_meta(image_path)
     orientation = str(meta.get("reference_orientation") or "square")
-    portrait_input = orientation == "portrait"
+    # v3.76 visual-reference mode: every upload is calibration/style evidence only.
+    # The final chart is always rebuilt from real closed M5 OHLC as a wide
+    # rectangle so the closest verified library model and its targets have
+    # enough room.  This does not alter any H4/H1/M15/M5 decision gate.
     meta.update({
         "used_smart_crop": False,
         "chart_viewport_prepared": False,
         "source_chart_preserved": True,
         "smart_crop_mode": "original_pixels_no_crop",
-        "reconstructed_market_chart": portrait_input,
-        "force_landscape_output": portrait_input,
-        "output_chart_orientation": "landscape" if portrait_input else "source",
+        "reconstructed_market_chart": True,
+        "force_landscape_output": True,
+        "output_chart_orientation": "landscape",
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
+        "educational_reference_style": "library_video",
+        "reference_library_rule_count": reference_rule_count(),
     })
     return image_path, meta
 
@@ -1790,6 +1797,20 @@ def _merge_reference_pattern_review(
     """Select one drawable model by visual-source match + real M5 geometry."""
     merged = copy.deepcopy(review if isinstance(review, dict) else {})
     candidates = [item for item in merged.get("candidates") or [] if isinstance(item, dict)]
+
+    # Rank the same deterministic candidates against the full 43-rule reference
+    # library.  The library ranks/explains only; all drawing coordinates remain
+    # the current market's real M5 geometry.  This is not a second analyzer.
+    library_review = rank_reference_library(frames or {}, merged)
+    library_overlays = [
+        item for item in (library_review.get("overlay_patterns") or [])
+        if isinstance(item, dict) and int(item.get("reference_match_score") or 0) >= 68
+    ]
+    merged["reference_library_reviewed_count"] = int(library_review.get("reviewed_reference_count") or reference_rule_count())
+    merged["reference_library_primary_match"] = copy.deepcopy(library_review.get("primary_match"))
+    merged["reference_library_top_matches"] = copy.deepcopy(library_review.get("top_matches") or [])[:6]
+    merged["reference_library_policy"] = str(library_review.get("policy") or "closest_real_rule_not_visual_copy")
+
     visual_family = str(visual_match.get("pattern_family") or "none")
     visual_score = max(0, min(100, int(visual_match.get("visual_score") or 0)))
     matched = bool(visual_match.get("matched")) and visual_family != "none" and visual_score >= 55
@@ -1820,6 +1841,14 @@ def _merge_reference_pattern_review(
         else:
             merged["reference_match_status"] = "visual_match_not_verified_by_m5_geometry"
 
+    # Production v3.76 passes no visual family match because the upload is
+    # calibration only.  In that path the existing 43-rule library becomes the
+    # deterministic ranker.  Legacy direct tests with a deliberate visual match
+    # keep their old behavior and can never be rescued by library ranking.
+    if selected is None and not matched and library_overlays:
+        selected = copy.deepcopy(library_overlays[0])
+        merged["reference_match_status"] = "library_43_ranked_deterministic"
+
     if selected is None:
         # Fallback remains deterministic.  Pick the strongest drawable M5
         # candidate and still associate it with its source-model family.
@@ -1838,6 +1867,8 @@ def _merge_reference_pattern_review(
         family = _pattern_reference_family(selected.get("name"))
         reference = catalog.get(family, {})
         source_id = str(reference.get("representative_source_id") or _REFERENCE_FAMILY_SOURCE_IDS.get(family, ""))
+        rule_id = str(selected.get("reference_id") or "")
+        rule_record = reference_rule_by_id(rule_id) if rule_id else None
         merged.update(
             {
                 "available": int(selected.get("confidence") or 0) >= 60,
@@ -1851,7 +1882,10 @@ def _merge_reference_pattern_review(
                 "overlay_patterns": [selected],
                 "reference_family": family,
                 "reference_source_id": source_id,
-                "reference_rule": str(reference.get("rule_ar") or ""),
+                "reference_rule": str((rule_record or {}).get("render_rule") or reference.get("rule_ar") or ""),
+                "reference_rule_id": rule_id,
+                "reference_match_score": int(selected.get("reference_match_score") or 0),
+                "reference_match_strength": str(selected.get("reference_match_strength") or ""),
                 "reference_visual_score": visual_score if matched and family == visual_family else 0,
                 "reference_visual_evidence": str(visual_match.get("evidence") or "") if matched else "",
             }
@@ -3841,6 +3875,13 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
     data["pattern_reference_family"] = str(review.get("reference_family") or "none")
     data["pattern_reference_source_id"] = str(review.get("reference_source_id") or "")
     data["pattern_reference_rule"] = str(review.get("reference_rule") or "")[:320]
+    data["pattern_reference_rule_id"] = str(review.get("reference_rule_id") or "")
+    data["reference_match_score"] = int(review.get("reference_match_score") or 0)
+    data["reference_match_strength"] = str(review.get("reference_match_strength") or "")
+    data["reference_library_reviewed_count"] = int(review.get("reference_library_reviewed_count") or reference_rule_count())
+    data["reference_library_primary_match"] = copy.deepcopy(review.get("reference_library_primary_match"))
+    data["reference_library_top_matches"] = copy.deepcopy(review.get("reference_library_top_matches") or [])[:6]
+    data["reference_library_policy"] = str(review.get("reference_library_policy") or "closest_real_rule_not_visual_copy")
     data["pattern_reference_visual_score"] = int(review.get("reference_visual_score") or 0)
     data["pattern_reference_visual_evidence"] = str(review.get("reference_visual_evidence") or "")[:220]
     data["pattern_reference_match_status"] = str(review.get("reference_match_status") or "")
@@ -4641,7 +4682,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     raw_m5 = raw_frames.get("M5") if isinstance(raw_frames, dict) else None
     live_m5 = [c for c in raw_m5 if isinstance(c, dict)] if isinstance(raw_m5, list) else []
     closed_m5 = (market_context.get("frames") or {}).get("M5") or []
-    display_count = max(24, min(60, int(os.getenv("CHART_CANDLE_COUNT", "48"))))
+    display_count = max(72, min(120, int(os.getenv("CHART_CANDLE_COUNT", "90"))))
     normalized_market = _normalize_candles(closed_m5[-display_count:])
     if not normalized_market:
         raise RuntimeError("لا توجد شموع M5 مغلقة كافية للتحليل.")
@@ -4658,7 +4699,27 @@ def _analyze(path: Path) -> dict[str, Any]:
     # The visual match is never allowed to invent geometry; it must be verified
     # by the deterministic closed-candle M5 detector before anything is drawn.
     geometry = _extract_chart_geometry(path)
-    visual_pattern_match = _match_reference_pattern(path)
+    # The user screenshot no longer ranks pattern families.  The closest model
+    # comes from real closed OHLC + the 43-rule library; the image remains only
+    # for current-price/axis/style calibration.
+    visual_pattern_match = {
+        "matched": False,
+        "pattern_family": "none",
+        "source_reference_id": "",
+        "visual_score": 0,
+        "bias": "محايد",
+        "evidence": "",
+        "scenario_reference_id": "",
+        "scenario_score": 0,
+        "scenario_evidence": "",
+        "chart_plot_bounds": [0.0, 0.0, 1.0, 1.0],
+        "visual_geometry_score": 0,
+        "visual_pattern_path": [],
+        "visual_pattern_lines": [],
+        "visual_structure_lines": [],
+        "visual_zones": [],
+        "visual_expected_path": [],
+    }
     market_decision, snapshot_key, snapshot_reused = _get_market_decision(
         market_context,
         market_summary,
@@ -4698,8 +4759,8 @@ def _analyze(path: Path) -> dict[str, Any]:
             "analysis_rules_hash": _analysis_rules_fingerprint(),
             "rules_audit_summary": (
                 f"طُبقت قواعد H4/H1/M15/M5، ورُوجعت {len(pattern_review.get('checked_patterns') or [])} "
-                "نماذج على الشموع المغلقة، وطُبقت ذاكرة صور المصادر على الشارت ثم ثُبت "
-                "النموذج/السيناريو الأقرب بهندسة M5 حقيقية قبل الرسم."
+                f"نماذج على الشموع المغلقة، ورُتبت {int(pattern_review.get('reference_library_reviewed_count') or 43)} "
+                "قاعدة مرجعية لاختيار الأقرب فقط، ثم ثُبت النموذج/السيناريو بهندسة M5 حقيقية قبل الرسم."
             ),
             "provider_closed_m5_price": round(provider_closed_price, 3),
             "provider_live_price": round(provider_live_price, 3),
@@ -4766,14 +4827,16 @@ def analyze_chart_image(
         "تعذر تثبيت محور السعر كاملًا؛ سيبقى الشارت الأصلي كما هو وتُخفى فقط العناصر السعرية غير الموثوقة."
     )
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
-    rebuild_landscape = bool(visual_meta.get("reconstructed_market_chart"))
-    analysis["reconstructed_market_chart"] = rebuild_landscape
+    rebuild_landscape = True
+    analysis["reconstructed_market_chart"] = True
     analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
     analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
-    analysis["uploaded_chart_role"] = "visual_calibration_reference" if rebuild_landscape else "final_visual_background"
-    analysis["ohlc_source"] = "market_provider_primary" if rebuild_landscape else "market_provider_confirmation_only"
+    analysis["uploaded_chart_role"] = "visual_calibration_reference"
+    analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
-    analysis["visual_overlay_clarity_mode"] = "portrait_to_landscape_ohlc" if rebuild_landscape else "v3.68"
+    analysis["educational_reference_style"] = "library_video"
+    analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
+    analysis["visual_overlay_clarity_mode"] = "library_video_rectangular_ohlc"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
