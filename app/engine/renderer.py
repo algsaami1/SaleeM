@@ -6421,17 +6421,17 @@ def _reference_setup_status(analysis: dict[str, Any]) -> str:
 
 
 def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int, int, int]]:
-    """Dark educational-sheet palette inspired by the approved video references."""
+    """Light educational-sheet palette matching the approved reference images."""
     return {
-        "bg": (5, 10, 17, 255),
-        "plot": (12, 24, 36, 255),
-        "grid": (116, 143, 166, 28),
-        "text": (244, 247, 250, 255),
-        "muted": (154, 170, 184, 255),
-        "border": (30, 84, 101, 210),
-        "bull": (30, 181, 139, 255),
-        "bear": (238, 74, 76, 255),
-        "pivot": (87, 117, 255, 255),
+        "bg": (238, 240, 242, 255),
+        "plot": (247, 248, 249, 255),
+        "grid": (90, 100, 110, 34),
+        "text": (20, 24, 29, 255),
+        "muted": (89, 98, 108, 255),
+        "border": (177, 184, 191, 210),
+        "bull": (29, 154, 94, 255),
+        "bear": (221, 51, 63, 255),
+        "pivot": (225, 76, 86, 255),
     }
 
 def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
@@ -6582,11 +6582,11 @@ def _draw_reconstructed_pattern(
     palette: dict[str, tuple[int, int, int, int]],
     font,
 ) -> None:
-    """Make the primary deterministic model the clearest object on the chart."""
+    """Primary pattern as a bold educational sketch over real M5 pivots."""
     overlays = [item for item in (analysis.get("pattern_overlays") or []) if isinstance(item, dict)]
     if not overlays:
         return
-    overlay = overlays[0]  # hard visual cap: one primary model
+    overlay = overlays[0]
     geom = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else {}
     try:
         window_size = int(geom.get("window_size") or len(candles))
@@ -6594,10 +6594,10 @@ def _draw_reconstructed_pattern(
         window_size = len(candles)
     confirmed = str(overlay.get("status") or "candidate") == "confirmed"
     bias = str(overlay.get("bias") or analysis.get("pattern_bias") or "محايد")
-    pivot = palette.get("pivot", (87, 117, 255, 255))
-    line_color = (245, 248, 252, 238)
-    trigger_color = (244, 191, 67, 235)
-    label_color = (244, 247, 250, 245)
+    pivot = (213, 56, 70, 255) if bias == "هابط" else (36, 158, 96, 255) if bias == "صاعد" else (90, 98, 106, 255)
+    line_color = (31, 35, 40, 235)
+    trigger_color = (25, 118, 200, 235)
+    label_color = (28, 32, 37, 250)
 
     def mapped(point: Any) -> tuple[int, int] | None:
         if not (isinstance(point, list) and len(point) >= 2):
@@ -6619,7 +6619,7 @@ def _draw_reconstructed_pattern(
         if confirmed:
             draw.line((*a, *b), fill=c, width=4)
         else:
-            _dash_line(draw, a, b, c, width=3, dash=12, gap=7)
+            _dash_line(draw, a, b, c, width=4, dash=14, gap=8)
 
     path = [p for item in (geom.get("path") or []) if (p := mapped(item)) is not None]
     if len(path) >= 2:
@@ -6627,7 +6627,7 @@ def _draw_reconstructed_pattern(
             draw.line(path, fill=line_color, width=4, joint="curve")
         else:
             for a, b in zip(path[:-1], path[1:]):
-                _dash_line(draw, a, b, line_color, width=3, dash=12, gap=7)
+                _dash_line(draw, a, b, line_color, width=4, dash=14, gap=8)
 
     anchors: list[tuple[int, int, str]] = []
     for item in geom.get("anchors") or []:
@@ -6640,9 +6640,8 @@ def _draw_reconstructed_pattern(
             continue
         role = str(item.get("role") or "pivot")
         anchors.append((x, y, role))
-        # glowing pivot, matching the video language
-        draw.ellipse((x - 15, y - 15, x + 15, y + 15), fill=(pivot[0], pivot[1], pivot[2], 24))
-        draw.ellipse((x - 8, y - 8, x + 8, y + 8), fill=(pivot[0], pivot[1], pivot[2], 66), outline=(210, 222, 255, 180), width=1)
+        draw.ellipse((x - 16, y - 16, x + 16, y + 16), fill=(pivot[0], pivot[1], pivot[2], 30))
+        draw.ellipse((x - 9, y - 9, x + 9, y + 9), fill=(250, 250, 250, 235), outline=(pivot[0], pivot[1], pivot[2], 230), width=3)
         draw.ellipse((x - 4, y - 4, x + 4, y + 4), fill=pivot)
 
     name = str(overlay.get("name") or analysis.get("pattern_type") or "")
@@ -6650,17 +6649,17 @@ def _draw_reconstructed_pattern(
     if name in {"M", "قمة ثلاثية"}:
         for i, (x, y, _role) in enumerate(pivots[:3], 1):
             ordinal = "1st" if i == 1 else "2nd" if i == 2 else "3rd"
-            draw.text((x, max(20, y - 22)), f"{ordinal} TOP", font=font, fill=label_color, anchor="ms")
+            draw.text((x, max(18, y - 26)), f"{ordinal} TOP", font=font, fill=label_color, anchor="ms")
     elif name in {"W", "قاع ثلاثي"}:
         for i, (x, y, _role) in enumerate(pivots[:3], 1):
             ordinal = "1st" if i == 1 else "2nd" if i == 2 else "3rd"
-            draw.text((x, y + 22), f"{ordinal} BOTTOM", font=font, fill=label_color, anchor="ma")
+            draw.text((x, y + 26), f"{ordinal} BOTTOM", font=font, fill=label_color, anchor="ma")
     elif "رأس وكتفين" in name:
         role_names = {"shoulder": "SHOULDER", "head": "HEAD", "neck": "NECKLINE"}
         for x, y, role in anchors:
             if role in role_names:
                 inverted = "مقلوب" in name
-                draw.text((x, y + (22 if inverted else -18)), role_names[role], font=font, fill=label_color, anchor="ma" if inverted else "ms")
+                draw.text((x, y + (24 if inverted else -20)), role_names[role], font=font, fill=label_color, anchor="ma" if inverted else "ms")
 
 def _draw_reconstructed_reference_zones(
     draw: ImageDraw.ImageDraw,
@@ -6772,7 +6771,7 @@ def _draw_reconstructed_reference_scenario(
     bias = str(analysis.get("reference_scenario_bias") or "محايد")
     accent = (238, 76, 83, 230) if bias == "هابط" else (44, 185, 116, 230) if bias == "صاعد" else (210, 220, 229, 220)
     left, top, right, bottom = plot
-    helper_text = (228, 235, 242, 238)
+    helper_text = (35, 40, 46, 242)
 
     if "structure" in components:
         for event in geom.get("structure_events") or []:
@@ -6786,7 +6785,7 @@ def _draw_reconstructed_reference_scenario(
                 continue
             y = price_y(price)
             x1, x2 = sorted((candle_x[swing], candle_x[brk]))
-            _dash_line(draw, (x1, y), (x2, y), (208, 218, 227, 190), width=2, dash=8, gap=5)
+            _dash_line(draw, (x1, y), (x2, y), (72, 78, 85, 195), width=2, dash=8, gap=5)
             label = str(event.get("label") or "BOS")
             draw.text(((x1 + x2) // 2, y - 6), label, font=font, fill=helper_text, anchor="ms")
 
@@ -6801,8 +6800,8 @@ def _draw_reconstructed_reference_scenario(
             if idx >= 0:
                 x1 = max(left, candle_x[idx] - 6)
                 x2 = min(right - 28, max(candle_x[idx] + 90, candle_right + 28))
-                fill = (133, 113, 96, 50) if bias == "صاعد" else (207, 78, 78, 46)
-                outline = (164, 145, 126, 155) if bias == "صاعد" else (224, 103, 103, 165)
+                fill = (105, 105, 105, 42) if bias == "صاعد" else (222, 77, 86, 44)
+                outline = (110, 110, 110, 155) if bias == "صاعد" else (209, 76, 84, 175)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
                 draw.rectangle((x1, yy1, x2, yy2), fill=fill, outline=outline, width=1)
                 draw.text((x2 - 8, yy1 + 5), "OB", font=font, fill=helper_text, anchor="ra")
@@ -6819,8 +6818,8 @@ def _draw_reconstructed_reference_scenario(
                 x1 = max(left, candle_x[max(0, idx - 1)])
                 x2 = min(right - 28, max(candle_x[idx] + 88, candle_right + 18))
                 yy1, yy2 = min(y1, y2), max(y1, y2)
-                draw.rectangle((x1, yy1, x2, yy2), fill=(224, 188, 76, 44), outline=(228, 193, 83, 170), width=1)
-                draw.text((x2 - 8, yy1 + 5), "FVG", font=font, fill=(241, 209, 111, 235), anchor="ra")
+                draw.rectangle((x1, yy1, x2, yy2), fill=(250, 219, 86, 70), outline=(191, 155, 35, 185), width=1)
+                draw.text((x2 - 8, yy1 + 5), "FVG", font=font, fill=(119, 91, 12, 245), anchor="ra")
 
     if "liquidity" in components:
         sweep = geom.get("liquidity_sweep") if isinstance(geom.get("liquidity_sweep"), dict) else None
@@ -6833,7 +6832,7 @@ def _draw_reconstructed_reference_scenario(
             if idx >= 0:
                 x2 = candle_x[idx]
                 x1 = max(left, x2 - 180)
-                _dash_line(draw, (x1, y), (x2, y), (197, 211, 220, 180), width=2, dash=8, gap=5)
+                _dash_line(draw, (x1, y), (x2, y), (72, 78, 85, 180), width=2, dash=8, gap=5)
                 draw.text(((x1 + x2) // 2, y - 6), "LIQUIDITY SWEEP", font=font, fill=helper_text, anchor="ms")
 
     if "engulfing" in components:
@@ -6883,7 +6882,7 @@ def _draw_reference_trade_plan(
     candle_right: int,
     font,
 ) -> None:
-    """Clean reference-style entry/risk/target box entirely in future space."""
+    """Reference-like risk/reward box in future space; price cards are drawn separately."""
     plan = _resolve_reference_trade_plan(analysis)
     if not plan:
         return
@@ -6896,43 +6895,90 @@ def _draw_reference_trade_plan(
     if not bullish and not (stop > entry > target):
         return
     ey, sy, ty = price_y(entry), price_y(stop), price_y(target)
-    x1 = min(right - 210, candle_right + 34)
-    x2 = min(right - 34, x1 + 282)
-    if x2 - x1 < 150:
+    x1 = min(right - 210, candle_right + 28)
+    x2 = right - 18
+    if x2 - x1 < 155:
         return
 
-    green = (56, 186, 104, 50)
-    red = (231, 78, 82, 50)
-    green_border = (75, 204, 123, 155)
-    red_border = (236, 101, 105, 155)
-    draw.rectangle((x1, min(ey, ty), x2, max(ey, ty)), fill=green, outline=green_border, width=1)
-    draw.rectangle((x1, min(ey, sy), x2, max(ey, sy)), fill=red, outline=red_border, width=1)
-    draw.line((x1, ey, x2, ey), fill=(223, 232, 239, 170), width=1)
+    green = (71, 183, 105, 72)
+    red = (225, 73, 81, 70)
+    green_border = (52, 151, 87, 180)
+    red_border = (199, 61, 69, 180)
+    draw.rectangle((x1, min(ey, ty), x2, max(ey, ty)), fill=green, outline=green_border, width=2)
+    draw.rectangle((x1, min(ey, sy), x2, max(ey, sy)), fill=red, outline=red_border, width=2)
+    draw.line((x1, ey, x2, ey), fill=(44, 48, 53, 190), width=2)
 
-    entry_label = "ENTRY" if plan["confirmed"] else "ENTRY IF"
-    stop_label = "STOP" if plan["confirmed"] else "CANCEL"
-    draw.text((x1 - 10, ey), f"{entry_label} {_fmt_axis_price(entry)}", font=font, fill=(235, 241, 246, 240), anchor="rm")
-    draw.text((x2 - 8, sy - 6), f"{stop_label} {_fmt_axis_price(stop)}", font=font, fill=(255, 176, 179, 250), anchor="rs")
-    draw.text((x2 - 8, ty - 6), f"TARGET {_fmt_axis_price(target)}", font=font, fill=(206, 255, 222, 250), anchor="rs")
+    # Entry focus circle as in the reference images.
+    ring = (33, 148, 86, 235) if bullish else (196, 58, 68, 235)
+    draw.ellipse((x1 + 5, ey - 12, x1 + 29, ey + 12), outline=ring, width=3)
 
-    # Focus circle at the real entry; labels may move, geometry does not.
-    cx = x1 + 16
-    ring = (94, 231, 143, 235) if bullish else (244, 103, 108, 235)
-    draw.ellipse((cx - 11, ey - 11, cx + 11, ey + 11), outline=ring, width=3)
-
-    # Break -> retest/correction -> continuation. Only future-space bend is illustrative.
-    bend_x = x1 + max(58, (x2 - x1) // 3)
+    bend_x = x1 + max(64, (x2 - x1) // 3)
     end_x = x2 - 18
-    retrace = max(15, int(abs(ty - ey) * 0.14))
+    retrace = max(18, int(abs(ty - ey) * 0.13))
     bend_y = ey + retrace if bullish else ey - retrace
     bend_y = max(top + 18, min(bottom - 18, bend_y))
-    _recon_arrow(draw, [(cx + 14, ey), (bend_x, bend_y), (end_x, ty)], (242, 247, 250, 220), width=3, dashed=not bool(plan["confirmed"]))
+    _recon_arrow(draw, [(x1 + 30, ey), (bend_x, bend_y), (end_x, ty)], (41, 46, 52, 225), width=3, dashed=not bool(plan["confirmed"]))
+
+
+def _draw_reference_price_axis_and_cards(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    price_y,
+    price_min: float,
+    price_max: float,
+    plot: tuple[int, int, int, int],
+    font,
+) -> None:
+    """Generated market price axis plus exact Entry/Stop/Target/Current cards."""
+    left, top, right, bottom = plot
+    axis_x = right + 14
+    label_x = right + 104
+    tick_color = (96, 105, 114, 235)
+    line_color = (151, 158, 165, 150)
+
+    # 8 market-derived price ticks.
+    for i in range(8):
+        ratio = i / 7
+        price = price_max - (price_max - price_min) * ratio
+        y = int(round(top + (bottom - top) * ratio))
+        draw.line((right + 3, y, right + 12, y), fill=line_color, width=1)
+        draw.text((label_x, y), _fmt_axis_price(price), font=font, fill=tick_color, anchor="rm")
+
+    plan = _resolve_reference_trade_plan(analysis)
+    cards: list[tuple[str, float, tuple[int,int,int,int]]] = []
+    if plan:
+        entry_label = "ENTRY" if plan["confirmed"] else "ENTRY IF"
+        stop_label = "STOP" if plan["confirmed"] else "CANCEL"
+        cards.extend([
+            (entry_label, float(plan["entry"]), (34, 146, 84, 245)),
+            (stop_label, float(plan["stop"]), (202, 61, 70, 245)),
+            ("TARGET", float(plan["target"]), (40, 160, 91, 245)),
+        ])
+
+    current = _number(analysis.get("visual_current_price"))
+    if current is None:
+        current = _number(analysis.get("current_price"))
+    if current is not None and price_min <= float(current) <= price_max:
+        # Avoid a duplicate current card if almost equal to entry.
+        if not plan or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
+            cards.append(("PRICE", float(current), (55, 63, 71, 245)))
+
+    # Exact Y alignment; compact cards reduce collisions without moving geometry.
+    card_left = right + 8
+    card_right = right + 142
+    for label, price, color in cards:
+        if not (price_min <= price <= price_max):
+            continue
+        y = price_y(price)
+        draw.line((right - 4, y, card_left, y), fill=(color[0],color[1],color[2],190), width=1)
+        draw.rounded_rectangle((card_left, y - 15, card_right, y + 15), radius=5, fill=color)
+        draw.text((card_right - 8, y), f"{label} {_fmt_axis_price(price)}", font=font, fill=(255,255,255,255), anchor="rm")
 
 def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """Dark reference-style educational chart rebuilt only from real closed M5 OHLC."""
+    """Reference-sheet result: real OHLC + educational annotations + generated price axis."""
     width, height = _reconstructed_dimensions(analysis)
     palette = _reconstructed_palette(analysis)
     image = Image.new("RGBA", (width, height), palette["bg"])
@@ -6941,13 +6987,13 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    margin_l = 48
-    margin_r = 48
-    margin_t = 112
-    margin_b = 70
+    margin_l = 50
+    margin_r = 155  # dedicated generated price-axis/card gutter
+    margin_t = 118
+    margin_b = 72
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
-    draw.rounded_rectangle((left, top, right, bottom), radius=14, fill=palette["plot"], outline=palette["border"], width=2)
+    draw.rounded_rectangle((left, top, right, bottom), radius=10, fill=palette["plot"], outline=palette["border"], width=2)
     _draw_reference_texture(draw, plot)
 
     price_min, price_max = _reconstructed_price_range(analysis, candles)
@@ -6955,7 +7001,7 @@ def _render_reconstructed_market_chart(
         ratio = (price_max - float(price)) / max(1e-9, price_max - price_min)
         return int(round(top + ratio * (bottom - top)))
 
-    # Very quiet grid: construction aid, never the subject.
+    # Quiet educational grid.
     for i in range(1, 5):
         x = int(round(left + (right - left) * i / 5))
         draw.line((x, top, x, bottom), fill=palette["grid"], width=1)
@@ -6965,11 +7011,10 @@ def _render_reconstructed_market_chart(
 
     has_visual = bool(analysis.get("pattern_overlays") or analysis.get("reference_scenario_available"))
     has_plan = _resolve_reference_trade_plan(analysis) is not None
-    # More market context on the left while retaining clean future room on the right.
-    history_ratio = 0.72 if has_plan else 0.80 if has_visual else 0.90
+    history_ratio = 0.72 if has_plan else 0.82 if has_visual else 0.92
     candle_right = int(left + (right - left) * history_ratio)
     slot = (candle_right - left) / max(1, len(candles))
-    body_w = max(3, min(9, int(slot * 0.60)))
+    body_w = max(4, min(10, int(slot * 0.62)))
     candle_x: list[int] = []
     for i, candle in enumerate(candles):
         x = int(round(left + slot * (i + 0.5)))
@@ -6978,50 +7023,37 @@ def _render_reconstructed_market_chart(
         hy, ly = price_y(float(candle["high"])), price_y(float(candle["low"]))
         bullish = float(candle["close"]) >= float(candle["open"])
         color = palette["bull"] if bullish else palette["bear"]
-        draw.line((x, hy, x, ly), fill=(color[0], color[1], color[2], 215), width=max(1, body_w // 4))
+        draw.line((x, hy, x, ly), fill=(color[0], color[1], color[2], 230), width=max(1, body_w // 4))
         y1, y2 = sorted((oy, cy))
         if y2 - y1 < 2:
             y2 = y1 + 2
-        draw.rectangle((x - body_w // 2, y1, x + body_w // 2, y2), fill=color, outline=(240, 246, 250, 38), width=1)
+        draw.rectangle((x - body_w // 2, y1, x + body_w // 2, y2), fill=color, outline=(32, 35, 39, 90), width=1)
 
-    f_axis = _font(15, False, True)
+    f_axis = _font(16, False, True)
     for j in range(6):
         idx = round(j * (len(candles) - 1) / 5)
-        draw.text((candle_x[idx], bottom + 20), _time_label(candles[idx].get("time")), font=f_axis, fill=palette["muted"], anchor="ma")
+        draw.text((candle_x[idx], bottom + 22), _time_label(candles[idx].get("time")), font=f_axis, fill=palette["muted"], anchor="ma")
 
     f_title = _font(30, True, True)
-    f_sub = _font(16, True, True)
-    f_label = _font(15, True, True)
-    draw.text((left, 28), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
+    f_sub = _font(17, True, True)
+    f_label = _font(16, True, True)
+    draw.text((left, 30), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
 
-    primary = _reference_primary_title(analysis)
-    draw.text(((left + right) // 2, 35), primary, font=f_title, fill=palette["text"], anchor="ma")
+    # Headline follows the teaching reference; deterministic model is directly underneath.
+    headline = _reference_template_title(analysis)
+    draw.text(((left + right) // 2, 34), headline, font=f_title, fill=palette["text"], anchor="ma")
+    model = str(analysis.get("pattern_type") or "")
+    model_label = _reference_model_english(model) if model and model != "لا يوجد" else ""
     helper = _reference_confirmation_label(analysis)
     status = _reference_setup_status(analysis)
-    sub = " · ".join([v for v in (helper, status) if v])
-    if sub:
-        draw.text(((left + right) // 2, 70), sub, font=f_sub, fill=palette["muted"], anchor="ma")
+    sub_parts = [v for v in (model_label, helper, status) if v]
+    if sub_parts:
+        draw.text(((left + right) // 2, 72), " · ".join(sub_parts[:3]), font=f_sub, fill=palette["muted"], anchor="ma")
 
     _draw_reconstructed_reference_zones(draw, analysis, candles, candle_x, price_y, plot, f_label, candle_right)
     _draw_reconstructed_reference_scenario(image, analysis, candles, candle_x, price_y, plot, palette, f_label, candle_right)
     _draw_reference_trade_plan(draw, analysis, price_y, plot, candle_right, f_label)
-
-    # Current price is only a small visual reference, never a large card or an axis substitute.
-    market_current = float(_number(analysis.get("current_price")) or candles[-1]["close"])
-    display_current = market_current
-    visual_current = _number(analysis.get("visual_current_price"))
-    if visual_current is not None:
-        atr = median([max(0.01, float(c["high"]) - float(c["low"])) for c in candles[-14:]])
-        if abs(float(visual_current) - market_current) <= max(atr * 4.0, market_current * 0.0025):
-            display_current = float(visual_current)
-    if price_min <= display_current <= price_max:
-        y = price_y(display_current)
-        _dash_line(draw, (candle_x[-1] + 5, y), (right - 9, y), (156, 176, 188, 105), width=1, dash=5, gap=5)
-        tag = _fmt_axis_price(display_current)
-        bbox = draw.textbbox((0, 0), tag, font=f_label)
-        tw = bbox[2] - bbox[0] + 16
-        draw.rounded_rectangle((right - tw, y - 14, right - 3, y + 14), radius=5, fill=(32, 53, 64, 235))
-        draw.text((right - 9, y), tag, font=f_label, fill=(236, 244, 248, 255), anchor="rm")
+    _draw_reference_price_axis_and_cards(draw, analysis, price_y, price_min, price_max, plot, f_label)
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)

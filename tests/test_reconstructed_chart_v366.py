@@ -191,6 +191,7 @@ def test_library_video_reconstruction_keeps_more_left_history_and_future_room(tm
     png=render_result(analysis, chart_background_path=source)
     with Image.open(BytesIO(png)) as out:
         assert out.size==(1600,900)
-        # Permanent reference-sheet style is dark and rebuilt from OHLC.
+        # Permanent reference-sheet style is rebuilt from OHLC and now uses
+        # the approved light educational reference-sheet palette.
         px=out.convert('RGB').getpixel((20,20))
-        assert sum(px) < 120
+        assert sum(px) > 600
