@@ -1,0 +1,15 @@
+{
+  "version": "v5",
+  "policy": "style_only_ohlc_geometry_authoritative",
+  "templates": {
+    "trend_reversal": {"title": "TREND REVERSAL", "future_space_ratio": 0.22},
+    "multiple_tops": {"title": "GOOD ENTRY POINTS", "future_space_ratio": 0.22},
+    "multiple_bottoms": {"title": "REVERSAL STRUCTURE", "future_space_ratio": 0.22},
+    "bullish_smc_reversal": {"title": "SMART MONEY REVERSAL", "future_space_ratio": 0.22},
+    "bearish_smc_reversal": {"title": "SMART MONEY REVERSAL", "future_space_ratio": 0.22},
+    "distribution": {"title": "DISTRIBUTION", "future_space_ratio": 0.18},
+    "head_shoulders": {"title": "HEAD & SHOULDERS", "future_space_ratio": 0.20},
+    "inverse_head_shoulders": {"title": "INVERSE HEAD & SHOULDERS", "future_space_ratio": 0.20},
+    "break_retest_continuation": {"title": "BREAK • RETEST • CONTINUATION", "future_space_ratio": 0.22}
+  }
+}

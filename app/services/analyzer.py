@@ -1658,6 +1658,58 @@ def _pattern_reference_family(name: Any) -> str:
     return "none"
 
 
+def _select_reference_visual_template(analysis: dict[str, Any]) -> tuple[str | None, str]:
+    """Choose a drawing template only; never change SaleeM market decisions.
+
+    The template is gated by deterministic pattern/scenario confidence.  It is
+    intentionally separate from BUY/SELL/Watch logic and uses no image axis.
+    """
+    pattern = str(analysis.get("pattern_type") or "")
+    status = str(analysis.get("pattern_status") or "none")
+    score = max(
+        int(analysis.get("reference_match_score") or 0),
+        int(analysis.get("reference_scenario_confidence") or 0),
+        int(analysis.get("pattern_confidence") or 0),
+    )
+    scenario = str(analysis.get("reference_scenario_id") or "")
+
+    if score < 68:
+        return None, "pattern_score_below_68"
+    if pattern == "مثلث متماثل" and status != "confirmed":
+        return None, "symmetrical_triangle_unbroken_neutral"
+
+    scenario_map = {
+        "trend_reversal_choch_ifvg": "trend_reversal",
+        "bullish_engulfing_orderblock": "bullish_smc_reversal",
+        "bearish_fvg_liquidity_double_top": "multiple_tops",
+        "inverse_head_shoulders_ob": "inverse_head_shoulders",
+        "bearish_bos_ob_retest": "bearish_smc_reversal",
+        "distribution_structure_sequence": "distribution",
+        "multiple_tops_breakdown": "multiple_tops",
+        "bullish_smc_reversal": "bullish_smc_reversal",
+        "smart_money_sellside_reversal": "bullish_smc_reversal",
+    }
+    if scenario in scenario_map:
+        return scenario_map[scenario], ""
+
+    if pattern in {"M", "قمة ثلاثية"}:
+        return "multiple_tops", ""
+    if pattern in {"W", "قاع ثلاثي"}:
+        return "multiple_bottoms", ""
+    if pattern == "رأس وكتفين":
+        return "head_shoulders", ""
+    if pattern == "رأس وكتفين مقلوب":
+        return "inverse_head_shoulders", ""
+    if pattern == "كسر وإعادة اختبار":
+        return "break_retest_continuation", ""
+    if any(token in pattern for token in ("علم", "راية", "مثلث", "وتد", "قناة", "مستطيل")):
+        return "break_retest_continuation", ""
+
+    if bool(analysis.get("reference_scenario_available")):
+        return "break_retest_continuation", ""
+    return None, "insufficient_real_pivots"
+
+
 def _reference_catalog_by_family() -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(REFERENCE_MODEL_CATALOG_PATH.read_text(encoding="utf-8"))
@@ -3898,6 +3950,15 @@ def _apply_pattern_review(data: dict[str, Any]) -> dict[str, Any]:
     data["reference_scenario_features"] = list(scenario.get("features") or [])
     data["reference_scenario_geometry"] = dict(scenario.get("geometry") or {})
     data["reference_scenario_draw_components"] = list(scenario.get("draw_components") or [])
+
+    visual_template_id, rejection_reason = _select_reference_visual_template(data)
+    data["visual_template_id"] = visual_template_id
+    data["reference_visual_rejection_reason"] = rejection_reason
+    data["reference_visual_score"] = max(
+        int(data.get("reference_match_score") or 0),
+        int(data.get("reference_scenario_confidence") or 0),
+        int(data.get("pattern_confidence") or 0),
+    )
 
     if data["reference_scenario_available"]:
         summary = (
