@@ -40,11 +40,9 @@ def test_home_has_no_autoscale_confirmation():
     assert "قبل كل رفع" not in html
 
 
-def test_axis_failure_requests_autoscale_only_after_failed_analysis(monkeypatch):
+def test_axis_calibration_is_no_longer_a_special_upload_requirement(monkeypatch):
     def fail_axis(*_args, **_kwargs):
-        raise AxisCalibrationError(
-            "تعذر ضبط محور الأسعار بدقة. فعّل Auto-scale أو «الضبط التلقائي» ثم أعد المحاولة."
-        )
+        raise AxisCalibrationError("legacy axis error")
 
     monkeypatch.setattr("app.main.analyze_chart_image", fail_axis)
     payload = io.BytesIO()
@@ -53,7 +51,7 @@ def test_axis_failure_requests_autoscale_only_after_failed_analysis(monkeypatch)
         "/analyze",
         files={"image": ("chart.png", payload.getvalue(), "image/png")},
     )
-    assert response.status_code == 422
-    assert "تعذر ضبط محور الأسعار" in response.text
-    assert "Auto-scale" in response.text
-    assert "اختيار صورة جديدة" in response.text
+    assert response.status_code == 500
+    assert "Auto-scale" not in response.text
+    assert "الضبط التلقائي" not in response.text
+

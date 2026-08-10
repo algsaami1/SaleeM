@@ -1518,10 +1518,13 @@ body.saleem-gallery-open-v374{overflow:hidden!important;overscroll-behavior:none
 .saleem-gallery-hint-v374{position:absolute;z-index:4;left:50%;top:max(18px,env(safe-area-inset-top));transform:translateX(-50%);max-width:72vw;padding:7px 11px;border-radius:999px;background:rgba(35,35,35,.62);color:#fff;font-size:8.5px;text-align:center;pointer-events:none;transition:opacity .25s ease}
 .saleem-gallery-hint-v374.hide{opacity:0}
 
-.axis-calibration-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:12px 0 14px;padding:12px;border:1px solid #e0e7e2;border-radius:16px;background:#fbfcfb}
-.axis-calibration-title{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--ink)}
-.axis-calibration-title b{font-size:12px}.axis-calibration-title small{font-size:10px;color:var(--muted)}
-.axis-calibration-fields label{display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--muted)}
-.axis-calibration-fields input{width:100%;box-sizing:border-box;border:1px solid #dce5df;border-radius:11px;padding:10px 11px;background:#fff;color:var(--ink);font:600 13px Alexandria,sans-serif;direction:ltr;text-align:center;outline:0}
-.axis-calibration-fields input:focus{border-color:#7bcf98;box-shadow:0 0 0 3px rgba(57,185,104,.10)}
-@media(max-width:640px){.axis-calibration-fields{grid-template-columns:1fr}.axis-calibration-title{display:block}.axis-calibration-title small{display:block;margin-top:4px}}
+.current-price-reference-fields{display:grid;grid-template-columns:minmax(0,1fr);gap:10px;margin:12px 0 14px;padding:12px;border:1px solid #e0e7e2;border-radius:16px;background:#fbfcfb}
+.current-price-reference-title{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:10px;color:var(--ink)}
+.current-price-reference-title b{font-size:12px}.current-price-reference-title small{font-size:10px;color:var(--muted)}
+.current-price-reference-fields label{display:flex;flex-direction:column;gap:6px;font-size:10px;color:var(--muted)}
+.current-price-reference-fields input{width:100%;box-sizing:border-box;border:1px solid #dce5df;border-radius:11px;padding:10px 11px;background:#fff;color:var(--ink);font:600 13px Alexandria,sans-serif;direction:ltr;text-align:center;outline:0}
+.current-price-reference-fields input:focus{border-color:#7bcf98;box-shadow:0 0 0 3px rgba(57,185,104,.10)}
+@media(max-width:640px){.axis-calibration-fields{grid-template-columns:1fr}.current-price-reference-title{display:block}.current-price-reference-title small{display:block;margin-top:4px}}
+
+.current-price-reference-fields{max-width:520px;margin-left:auto;margin-right:auto}
+.current-price-reference-fields label{max-width:280px;width:100%;margin:0 auto}

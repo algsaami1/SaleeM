@@ -155,12 +155,15 @@ def test_binding_preserves_market_ohlc_and_keeps_image_price_as_visual_reference
     assert result["support_levels"][0]["price"] == canonical["support_levels"][0]["price"]
     assert result["current_price"] == canonical["current_price"]
     assert result["visual_current_price"] == 4062.4
-    assert result["current_price_y_ratio"] == 0.52
+    assert result["current_price_y_ratio"] is None
+    assert result["image_price_high"] is None
+    assert result["image_price_low"] is None
+    assert result["image_axis_labels"] == []
     assert result["analysis_snapshot_reused"] is True
     assert result["analysis_consistency_lock"] == "last_closed_m5"
     assert result["analysis_input_role"] == "market_data_only"
-    assert result["image_input_role"] == "visual_reference_current_price_axis_style"
-    assert result["price_projection_mode"] == "market_ohlc_preserved_no_screenshot_translation"
+    assert result["image_input_role"] == "visual_reference_current_price_style_only"
+    assert result["price_projection_mode"] == "market_ohlc_only_no_image_axis"
 
 
 def test_same_snapshot_and_same_broker_price_keeps_one_analysis_across_zoom_levels():
@@ -196,5 +199,7 @@ def test_same_snapshot_and_same_broker_price_keeps_one_analysis_across_zoom_leve
         assert a[key] == b[key]
     assert a["support_levels"] == b["support_levels"]
     assert a["resistance_levels"] == b["resistance_levels"]
-    assert a["current_price_y_ratio"] != b["current_price_y_ratio"]
-    assert a["image_axis_labels"] != b["image_axis_labels"]
+    assert a["current_price_y_ratio"] is None
+    assert b["current_price_y_ratio"] is None
+    assert a["image_axis_labels"] == []
+    assert b["image_axis_labels"] == []

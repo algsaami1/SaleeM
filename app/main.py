@@ -15,7 +15,6 @@ from PIL import Image
 from starlette.concurrency import run_in_threadpool
 
 from app import __version__
-from app.engine.renderer import AxisCalibrationError
 from app.services.analyzer import analyze_chart_image, load_final_spec
 from app.services.feedback_store import FeedbackStore
 from app.services.mailer import delivery_provider, email_configured, owner_email, send_note_email
@@ -97,7 +96,7 @@ class NotePayload(BaseModel):
     message: str = Field(..., min_length=1, max_length=1500)
 
 
-def page_context(request: Request, *, result=None, error=None, axis_retry=False):
+def page_context(request: Request, *, result=None, error=None):
     try:
         summary = feedback_store.summary()
     except Exception:
@@ -115,7 +114,6 @@ def page_context(request: Request, *, result=None, error=None, axis_retry=False)
         "request": request,
         "result": result,
         "error": error,
-        "axis_retry": axis_retry,
         "summary": summary,
         "owner_email": owner_email(),
         "app_version": __version__,
@@ -259,8 +257,6 @@ async def analyze(
     request: Request,
     image: UploadFile | None = File(None),
     current_price_ref: str | None = Form(None),
-    axis_high_ref: str | None = Form(None),
-    axis_low_ref: str | None = Form(None),
 ):
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
     if not image or not image.filename:
@@ -301,33 +297,21 @@ async def analyze(
         if width < 360 or height < 360:
             raise HTTPException(
                 status_code=400,
-                detail=f"دقة الصورة منخفضة ({width}×{height}). ارفع صورة أوضح يظهر فيها الشارت ومحور الأسعار.",
+                detail=f"دقة الصورة منخفضة ({width}×{height}). ارفع صورة أوضح تظهر فيها الشموع والسعر الحالي.",
             )
 
-        manual_values = [current_price_ref, axis_high_ref, axis_low_ref]
+        # v3.68 reference-sheet mode: the uploaded image supplies only a current
+        # price reference/style hint. Axis-high/axis-low inputs are intentionally
+        # ignored so no result depends on screenshot Y calibration.
         manual_calibration = None
-        if any(str(value or "").strip() for value in manual_values):
-            if not all(str(value or "").strip() for value in manual_values):
-                raise HTTPException(
-                    status_code=400,
-                    detail="للمعايرة اليدوية أدخل السعر الحالي وأعلى المحور وأدنى المحور معًا.",
-                )
+        if str(current_price_ref or "").strip():
             try:
                 manual_current = float(str(current_price_ref).strip())
-                manual_high = float(str(axis_high_ref).strip())
-                manual_low = float(str(axis_low_ref).strip())
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail="قيم محور الأسعار يجب أن تكون أرقامًا صحيحة.") from exc
-            if not (manual_low < manual_current < manual_high):
-                raise HTTPException(
-                    status_code=400,
-                    detail="يجب أن يكون أدنى المحور أقل من السعر الحالي، والسعر الحالي أقل من أعلى المحور.",
-                )
-            manual_calibration = {
-                "current_price": manual_current,
-                "axis_high": manual_high,
-                "axis_low": manual_low,
-            }
+                raise HTTPException(status_code=400, detail="السعر الحالي يجب أن يكون رقمًا صحيحًا.") from exc
+            if not (0.0 < manual_current < 1_000_000.0):
+                raise HTTPException(status_code=400, detail="السعر الحالي غير صالح.")
+            manual_calibration = {"current_price": manual_current}
 
         result = await run_in_threadpool(
             analyze_chart_image,
@@ -344,13 +328,6 @@ async def analyze(
         )
     except HTTPException:
         raise
-    except AxisCalibrationError as exc:
-        return templates.TemplateResponse(
-            request,
-            "index.html",
-            page_context(request, error=str(exc), axis_retry=True),
-            status_code=422,
-        )
     except Exception as exc:
         logging.exception("SaleeM analysis failed")
         technical_message = str(exc).strip()

@@ -25,12 +25,10 @@ from app.engine.reference_matcher import match_reference_scenarios as rank_refer
 from app.engine.reference_rule_catalog import reference_rule_by_id, reference_rule_count
 from app.engine.reference_rule_bridge import match_reference
 from app.engine.renderer import (
-    AxisCalibrationError,
     detect_market_zone_presence,
     prepare_chart_viewport_image,
     render_result,
     render_share_snapshot,
-    validate_uploaded_axis,
 )
 from app.services.market_data import (
     MarketDataError,
@@ -970,7 +968,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "output_chart_orientation": "landscape",
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
-        "educational_reference_style": "library_video",
+        "educational_reference_style": "reference_sheet_v2",
         "reference_library_rule_count": reference_rule_count(),
     })
     return image_path, meta
@@ -1082,19 +1080,8 @@ GEOMETRY_SCHEMA = {
     "properties": {
         "chart_readable": {"type": "boolean"},
         "current_price": NUM_NULL,
-        "current_price_y_ratio": NUM_NULL,
-        "image_price_high": NUM_NULL,
-        "image_price_low": NUM_NULL,
-        "image_axis_labels": {"type": "array", "items": AXIS_LABEL, "maxItems": 24},
     },
-    "required": [
-        "chart_readable",
-        "current_price",
-        "current_price_y_ratio",
-        "image_price_high",
-        "image_price_low",
-        "image_axis_labels",
-    ],
+    "required": ["chart_readable", "current_price"],
 }
 
 VISUAL_STRUCTURE_LINE = {
@@ -1596,27 +1583,35 @@ def _write_cached_market_decision(snapshot_key: str, decision: dict[str, Any]) -
 
 
 def _extract_chart_geometry(path: Path) -> dict[str, Any]:
-    """Read only broker price geometry; never ask the image to decide the trade."""
-    prompt = """أنت قارئ هندسي لمحور سعر شارت XAUUSD فقط. هذه ليست مهمة تحليل سوق.
+    """Read only the current-price label from the uploaded chart.
 
-ممنوع تمامًا استنتاج الاتجاه أو الدعم أو المقاومة أو الدخول أو الأهداف من شكل الشموع.
-استخدم الصورة فقط لاستخراج الإحداثيات السعرية التالية من بوكس الشارت ومحور السعر اليميني الأصلي:
-- chart_readable: true فقط إذا أمكن قراءة ملصق السعر الحالي أو محور متناسق.
-- current_price: الرقم الظاهر في ملصق السعر الحالي المرتبط بآخر شمعة. لا تستخدم رقم أمر التداول العلوي.
-- current_price_y_ratio: موضع مركز خط السعر الحالي كنسبة من ارتفاع الصورة المرفوعة كاملة؛ 0 عند أعلى بكسل في الصورة و1 عند أسفل بكسل في الصورة.
-- image_price_high وimage_price_low: أعلى وأدنى رقمين واضحين على المحور.
-- image_axis_labels: كل أرقام المحور الواضحة من الأعلى للأسفل مع y_ratio لمركز كل رقم، ويجب أن يكون y_ratio أيضًا بالنسبة للصورة المرفوعة كاملة وليس بالنسبة لبوكس الشارت فقط.
+    The screenshot is a visual reference, never a price-axis geometry source.
+    No Y calibration, axis ticks, pattern, trend, entry, stop or target may be
+    inferred here.
+    """
+    prompt = """أنت قارئ بصري لسعر XAUUSD الحالي فقط. هذه ليست مهمة تحليل سوق.
 
-إذا كانت الصورة كاملة للهاتف أو تحتوي شريط أمر تداول، تجاهل كل العناصر خارج بوكس الشارت. لا تخمّن رقمًا مقصوصًا، ولا تعِد أي نتيجة تحليلية."""
+استخرج عنصرين فقط من صورة الشارت:
+- chart_readable: true إذا أمكن رؤية الشارت وقراءة ملصق السعر الحالي بثقة.
+- current_price: الرقم الموجود في ملصق السعر الحالي المرتبط بآخر شمعة. تجاهل BUY/SELL أعلى الشاشة وأي أرقام أوامر تداول.
+
+ممنوع استنتاج الاتجاه أو النماذج أو الدعم أو المقاومة أو الدخول أو الوقف أو الهدف.
+ممنوع قراءة أو تخمين محور الأسعار. إذا لم يكن السعر الحالي واضحًا أعد null."""
     geometry = _request_structured_openai(
         prompt=prompt,
         schema=GEOMETRY_SCHEMA,
-        schema_name="saleem_chart_geometry_only",
+        schema_name="saleem_current_price_only",
         image_path=path,
-        max_output_tokens=1400,
+        max_output_tokens=320,
     )
-    geometry["image_axis_labels"] = _normalize_axis_labels(geometry.get("image_axis_labels"))
-    return geometry
+    return {
+        "chart_readable": bool(geometry.get("chart_readable")),
+        "current_price": _number(geometry.get("current_price")),
+        "current_price_y_ratio": None,
+        "image_price_high": None,
+        "image_price_low": None,
+        "image_axis_labels": [],
+    }
 
 
 _REFERENCE_FAMILY_SOURCE_IDS = {
@@ -2095,28 +2090,22 @@ def _bind_market_analysis_to_image(
     result["visual_current_price_source"] = "chart_image" if image_current is not None else "unavailable"
     result["current_price_source"] = "market_closed_m5"
 
-    labels = _normalize_axis_labels(geometry.get("image_axis_labels"))
-    image_high = _number(geometry.get("image_price_high"))
-    image_low = _number(geometry.get("image_price_low"))
-    current_y = _number(geometry.get("current_price_y_ratio")) if image_current is not None else None
-    if current_y is not None:
-        current_y = max(0.0, min(1.0, float(current_y)))
-
     result.update(
         {
             "chart_readable": chart_readable,
-            "current_price_y_ratio": round(current_y, 4) if current_y is not None else None,
-            "image_price_high": round(float(image_high), 2) if image_high is not None else None,
-            "image_price_low": round(float(image_low), 2) if image_low is not None else None,
-            "image_axis_labels": labels,
-            "price_range_source": "market_ohlc_with_image_range_hint",
+            "current_price_y_ratio": None,
+            "image_price_high": None,
+            "image_price_low": None,
+            "image_axis_labels": [],
+            "price_range_source": "market_ohlc_only",
             "market_price_offset": round(float(image_current) - provider_current, 3) if image_current is not None else 0.0,
             "analysis_snapshot_key": snapshot_key,
             "analysis_snapshot_reused": bool(snapshot_reused),
             "analysis_consistency_lock": "last_closed_m5",
             "analysis_input_role": "market_data_only",
-            "image_input_role": "visual_reference_current_price_axis_style",
-            "price_projection_mode": "market_ohlc_preserved_no_screenshot_translation",
+            "image_input_role": "visual_reference_current_price_style_only",
+            "price_projection_mode": "market_ohlc_only_no_image_axis",
+            "image_axis_mode": "disabled",
         }
     )
 
@@ -4658,12 +4647,13 @@ def _analyze(path: Path) -> dict[str, Any]:
     """
     try:
         market_data = fetch_market_data()
-        context_candles = max(24, min(64, int(os.getenv("MARKET_CONTEXT_CANDLES", "32"))))
+        context_candles = max(72, min(140, int(os.getenv("MARKET_CONTEXT_CANDLES", "110"))))
         raw_market_context = compact_market_context(
             market_data,
             candles_per_frame=context_candles,
         )
         market_context = _closed_market_context(raw_market_context)
+        display_m5_source = copy.deepcopy(((market_context.get("frames") or {}).get("M5") or []))
         market_frames = market_context.get("frames", {})
         if isinstance(market_frames, dict) and isinstance(market_frames.get("M5"), list):
             prompt_m5_count = max(20, min(60, int(os.getenv("PROMPT_M5_CANDLES", "40"))))
@@ -4682,8 +4672,8 @@ def _analyze(path: Path) -> dict[str, Any]:
     raw_m5 = raw_frames.get("M5") if isinstance(raw_frames, dict) else None
     live_m5 = [c for c in raw_m5 if isinstance(c, dict)] if isinstance(raw_m5, list) else []
     closed_m5 = (market_context.get("frames") or {}).get("M5") or []
-    display_count = max(72, min(120, int(os.getenv("CHART_CANDLE_COUNT", "90"))))
-    normalized_market = _normalize_candles(closed_m5[-display_count:])
+    display_count = max(90, min(140, int(os.getenv("CHART_CANDLE_COUNT", "110"))))
+    normalized_market = _normalize_candles(display_m5_source[-display_count:] if display_m5_source else closed_m5[-display_count:])
     if not normalized_market:
         raise RuntimeError("لا توجد شموع M5 مغلقة كافية للتحليل.")
 
@@ -4776,31 +4766,26 @@ def _analyze(path: Path) -> dict[str, Any]:
 
 
 def _apply_manual_visual_calibration(analysis: dict[str, Any], calibration: Any) -> bool:
-    """Apply user-entered axis values to visual calibration only.
+    """Apply only a user-entered current-price reference.
 
-    This function must never change market OHLC, current_price, direction,
-    pattern geometry, Entry/Stop/Targets, or BUY/SELL/watch gates.
+    The value is visual/reference metadata only. It never shifts OHLC, changes
+    market current_price, direction, geometry, Entry/Stop/Targets, or BUY/SELL
+    gates. Screenshot axis calibration is intentionally disabled.
     """
     if not isinstance(calibration, dict):
         return False
     current = _number(calibration.get("current_price"))
-    high = _number(calibration.get("axis_high"))
-    low = _number(calibration.get("axis_low"))
-    if current is None or high is None or low is None or not (float(low) < float(current) < float(high)):
+    if current is None or not (0.0 < float(current) < 1_000_000.0):
         return False
-    current = float(current); high = float(high); low = float(low)
-    y_ratio = (high - current) / max(1e-9, high - low)
-    analysis["visual_current_price"] = round(current, 6)
-    analysis["visual_current_price_source"] = "user_manual_calibration"
-    analysis["image_price_high"] = round(high, 6)
-    analysis["image_price_low"] = round(low, 6)
-    analysis["current_price_y_ratio"] = round(max(0.0, min(1.0, y_ratio)), 6)
-    analysis["image_axis_labels"] = [
-        {"price": round(high, 6), "y_ratio": 0.0},
-        {"price": round(current, 6), "y_ratio": round(max(0.0, min(1.0, y_ratio)), 6)},
-        {"price": round(low, 6), "y_ratio": 1.0},
-    ]
-    analysis["manual_axis_calibration"] = True
+    analysis["visual_current_price"] = round(float(current), 6)
+    analysis["visual_current_price_source"] = "user_manual_current_price"
+    analysis["current_price_y_ratio"] = None
+    analysis["image_price_high"] = None
+    analysis["image_price_low"] = None
+    analysis["image_axis_labels"] = []
+    analysis["manual_current_price_calibration"] = True
+    analysis["manual_axis_calibration"] = False
+    analysis["image_axis_mode"] = "disabled"
     return True
 
 
@@ -4812,20 +4797,15 @@ def analyze_chart_image(
 ) -> dict[str, Any]:
     prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
-    manual_axis_ok = _apply_manual_visual_calibration(analysis, manual_calibration)
+    _apply_manual_visual_calibration(analysis, manual_calibration)
 
-    # The uploaded chart is calibration/reference evidence only. Axis values
-    # used only to place price-linked overlays; failure never causes candle
-    # reconstruction.  Visual pattern anchors may still draw an educational
-    # pattern when the deterministic scenario/pattern family has been verified.
-    if manual_axis_ok:
-        axis_ok, axis_reason = True, "manual_user_calibration"
-    else:
-        axis_ok, axis_reason = validate_uploaded_axis(analysis, prepared_image_path)
-    analysis["axis_validation_passed"] = bool(axis_ok)
-    analysis["axis_warning"] = "" if axis_ok else (
-        "تعذر تثبيت محور السعر كاملًا؛ سيبقى الشارت الأصلي كما هو وتُخفى فقط العناصر السعرية غير الموثوقة."
-    )
+    # The image axis is no longer part of SaleeM calibration. The generated
+    # reference-sheet chart gets its entire vertical scale from real OHLC plus
+    # deterministic Entry/Stop/Target geometry. Only current-price text may be
+    # taken from the upload/user as a separate visual reference.
+    analysis["axis_validation_passed"] = False
+    analysis["axis_warning"] = ""
+    analysis["image_axis_mode"] = "disabled_current_price_only"
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
     rebuild_landscape = True
     analysis["reconstructed_market_chart"] = True
@@ -4834,9 +4814,9 @@ def analyze_chart_image(
     analysis["uploaded_chart_role"] = "visual_calibration_reference"
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
-    analysis["educational_reference_style"] = "library_video"
+    analysis["educational_reference_style"] = "reference_sheet_v2"
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
-    analysis["visual_overlay_clarity_mode"] = "library_video_rectangular_ohlc"
+    analysis["visual_overlay_clarity_mode"] = "reference_sheet_v2_rectangular_ohlc"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)

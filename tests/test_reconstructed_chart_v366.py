@@ -70,7 +70,7 @@ def test_market_ohlc_is_not_shifted_to_screenshot_price():
     assert result['entry']==4343.0
     assert result['current_price']==4342.0
     assert result['visual_current_price']==4352.0
-    assert result['price_projection_mode']=='market_ohlc_preserved_no_screenshot_translation'
+    assert result['price_projection_mode']=='market_ohlc_only_no_image_axis'
 
 
 def test_render_result_preserves_portrait_uploaded_pixels_when_no_overlay(tmp_path):
@@ -125,7 +125,7 @@ def test_portrait_analysis_mode_renders_generated_landscape_ohlc(tmp_path):
         assert out.convert('RGB').getpixel((out.width//2,out.height//2)) != (10,10,10)
 
 
-def test_manual_axis_calibration_changes_visual_reference_only():
+def test_manual_current_price_calibration_changes_visual_reference_only():
     analysis={
         'current_price': 4342.0,
         'entry': 4343.0,
@@ -133,10 +133,7 @@ def test_manual_axis_calibration_changes_visual_reference_only():
         'target_1': 4345.0,
         'direction': 'صاعد',
     }
-    ok=_apply_manual_visual_calibration(
-        analysis,
-        {'current_price': 4344.81, 'axis_high': 4352.51, 'axis_low': 4306.91},
-    )
+    ok=_apply_manual_visual_calibration(analysis, {'current_price': 4344.81})
     assert ok is True
     assert analysis['current_price'] == 4342.0
     assert analysis['entry'] == 4343.0
@@ -144,9 +141,11 @@ def test_manual_axis_calibration_changes_visual_reference_only():
     assert analysis['target_1'] == 4345.0
     assert analysis['direction'] == 'صاعد'
     assert analysis['visual_current_price'] == 4344.81
-    assert analysis['image_price_high'] == 4352.51
-    assert analysis['image_price_low'] == 4306.91
-    assert analysis['manual_axis_calibration'] is True
+    assert analysis['image_price_high'] is None
+    assert analysis['image_price_low'] is None
+    assert analysis['image_axis_labels'] == []
+    assert analysis['manual_current_price_calibration'] is True
+    assert analysis['manual_axis_calibration'] is False
 
 
 def test_landscape_upload_is_also_calibration_only_and_reconstructed(tmp_path):
@@ -157,7 +156,7 @@ def test_landscape_upload_is_also_calibration_only_and_reconstructed(tmp_path):
     assert meta['reconstructed_market_chart'] is True
     assert meta['force_landscape_output'] is True
     assert meta['output_chart_orientation']=='landscape'
-    assert meta['educational_reference_style']=='library_video'
+    assert meta['educational_reference_style']=='reference_sheet_v2'
     assert int(meta['reference_library_rule_count']) == 43
 
 
@@ -173,7 +172,7 @@ def test_library_video_reconstruction_keeps_more_left_history_and_future_room(tm
         'reconstructed_market_chart': True,
         'force_landscape_output': True,
         'output_chart_orientation':'landscape',
-        'educational_reference_style':'library_video',
+        'educational_reference_style':'reference_sheet_v2',
         'pattern_type':'M',
         'pattern_bias':'هابط',
         'pattern_overlays':[{
@@ -192,6 +191,6 @@ def test_library_video_reconstruction_keeps_more_left_history_and_future_room(tm
     png=render_result(analysis, chart_background_path=source)
     with Image.open(BytesIO(png)) as out:
         assert out.size==(1600,900)
-        # Permanent video/library style is dark, not the white source screenshot.
+        # Permanent reference-sheet style is light and rebuilt from OHLC.
         px=out.convert('RGB').getpixel((20,20))
-        assert sum(px) < 120
+        assert sum(px) > 600
