@@ -1546,7 +1546,10 @@ def _read_cached_market_decision(snapshot_key: str) -> dict[str, Any] | None:
         return None
     with _ANALYSIS_SNAPSHOT_CACHE_LOCK:
         payload = _load_analysis_snapshot_cache()
-        item = payload.get("entries", {}).get(snapshot_key)
+        entries = payload.get("entries") if isinstance(payload, dict) else None
+        if not isinstance(entries, dict):
+            return None
+        item = entries.get(snapshot_key)
         if not isinstance(item, dict) or not isinstance(item.get("decision"), dict):
             return None
         return copy.deepcopy(item["decision"])

@@ -66,3 +66,20 @@ def test_reference_ranked_overlays_remain_m5_and_max_two():
     assert len(review["overlay_patterns"]) <= 2
     assert all(item["timeframe"] == "M5" for item in review["overlay_patterns"])
     assert all(int(item["reference_match_score"]) >= 68 for item in review["overlay_patterns"])
+
+
+def test_liquidity_sweep_without_structure_event_does_not_crash(monkeypatch):
+    import app.engine.reference_matcher as matcher
+
+    rows = [_candle(100 + index * 0.01, index) for index in range(36)]
+    frames = {"M5": rows, "M15": rows, "H1": rows, "H4": rows}
+    monkeypatch.setattr(matcher, "_latest_liquidity_sweep", lambda _rows: "bullish")
+    monkeypatch.setattr(matcher, "_latest_structure_event", lambda _rows: None)
+
+    review = matcher.match_reference_scenarios(
+        frames,
+        {"available": False, "candidates": [], "overlay_patterns": []},
+    )
+    assert isinstance(review, dict)
+    assert review["primary_match"]["reference_id"] == "SMC_SWEEP_RECLAIM_BULL"
+    assert int(review["primary_match"]["score"]) == 80

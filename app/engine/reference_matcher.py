@@ -372,15 +372,19 @@ def match_reference_scenarios(frames: Any, pattern_review: Any) -> dict[str, Any
 
     # Add reference scenarios that are not always represented as a classical
     # pattern skeleton but are frequent in the source videos/images.
+    # ``_latest_structure_event`` legitimately returns None when no closed-candle
+    # BOS/CHOCH is present.  Normalize it before using .get(), otherwise a valid
+    # liquidity sweep with no structure event crashes the whole analysis with
+    # "'NoneType' object has no attribute 'get'".
+    structure = context.get("structure") if isinstance(context.get("structure"), dict) else None
     sweep = context.get("sweep")
     if sweep == "bullish":
-        bonus = 4 if context.get("structure", {}).get("side") == "bullish" else 0
+        bonus = 4 if structure and structure.get("side") == "bullish" else 0
         matches.append(_make_match("SMC_SWEEP_RECLAIM_BULL", 80 + bonus, source="smc_event", rationale="سحب سيولة أسفل قاع حديث ثم استعادة على شموع M5 المغلقة."))
     elif sweep == "bearish":
-        bonus = 4 if context.get("structure", {}).get("side") == "bearish" else 0
+        bonus = 4 if structure and structure.get("side") == "bearish" else 0
         matches.append(_make_match("SMC_SWEEP_REJECT_BEAR", 80 + bonus, source="smc_event", rationale="سحب سيولة أعلى قمة حديثة ثم رفض على شموع M5 المغلقة."))
 
-    structure = context.get("structure") if isinstance(context.get("structure"), dict) else None
     if structure:
         side = str(structure.get("side") or "")
         typ = str(structure.get("type") or "")
