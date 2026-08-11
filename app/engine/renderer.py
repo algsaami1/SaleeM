@@ -8530,4 +8530,3 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if bool(analysis.get("reconstructed_market_chart")):
         return _render_reconstructed_market_chart(analysis, chart_background_path)
     return _render_uploaded_chart_with_overlays(analysis, chart_background_path)
-rt_with_overlays(analysis, chart_background_path)
