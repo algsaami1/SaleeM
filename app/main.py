@@ -363,4 +363,3 @@ async def analyze(
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
-ok=True)
