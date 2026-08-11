@@ -133,4 +133,4 @@ def test_v72_expired_pattern_plan_not_drawn_as_fresh_trade():
     assert state["state"] == "expired"
     png = render_result(analysis)
     with Image.open(BytesIO(png)) as image:
-        assert image.size == (1600, 900)
+        assert image.size == (1920, 1080)

@@ -437,3 +437,7 @@ TWELVE_DATA_MINUTE_LIMIT=8
 ## V7.5 — Approved Reference-Sheet Result Layout
 
 V7.5 keeps the screenshot-matched real M5 segment anchored at the right edge while restoring approximately 42 real M5 candles of context to the left. The generated 16:9 result now follows the approved reference composition: chart on top, Arabic Arrow Rules panel, dynamic SMC legend, Trade Plan Summary with R:R, Entry/Stop/TP1/TP2/TP3 price-linked cards, and an Expected Candle Sequence inset for Break → Retest → Continuation. Completed/invalidated plans can remain visible only as re-evaluation reference geometry and never reactivate without a fresh M5 trigger.
+
+## V7.6 — Wide Dual-Watch + Below-Candle Labels
+
+V7.6 expands the approved reconstructed result to a 1920×1080 canvas, keeps both mutually-exclusive BUY and SELL conditional paths visible in WATCH / RE-EVALUATE whenever both sides have valid deterministic triggers/targets, and moves candle-event labels below their source candles using collision lanes and leader lines. Market-owned anchors and prices never move. Active confirmed trades still render only one execution path. The right axis and Trade Plan Summary expose BUY/SELL trigger prices and strength percentages during watch states.

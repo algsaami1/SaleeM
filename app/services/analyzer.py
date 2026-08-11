@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7.5",
+        "smc_real_chart_style_version": "v7.6",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -5119,7 +5119,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     # by the deterministic closed-candle M5 detector before anything is drawn.
     geometry = _extract_chart_geometry(path)
 
-    # V7.5: before SMC drawing, fingerprint the visible screenshot candles and
+    # V7.6: before SMC drawing, fingerprint the visible screenshot candles and
     # locate their real contiguous M5 segment.  This never changes the market
     # decision; it selects only the visual/SMC review window after a strict
     # deterministic match gate.
@@ -5229,7 +5229,7 @@ def _analyze(path: Path) -> dict[str, Any]:
 
     matched_segment = chart_market_match.get("segment") if bool(chart_market_match.get("matched")) else None
     if isinstance(matched_segment, list) and len(matched_segment) >= 6:
-        # V7.5 keeps the screenshot-matched candles as the anchor at the RIGHT
+        # V7.6 keeps the screenshot-matched candles as the anchor at the RIGHT
         # edge, but restores enough real M5 history on the left to reproduce
         # the approved SaleeM reference-sheet composition. The older V7.4
         # renderer showed only the 8–12 candles visible in the phone capture,
@@ -5335,7 +5335,7 @@ def analyze_chart_image(
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
     rebuild_landscape = True
     analysis["reconstructed_market_chart"] = True
-    # V7.5 keeps the screenshot-matched segment aligned at the right edge while
+    # V7.6 keeps the screenshot-matched segment aligned at the right edge while
     # showing a broader real-M5 context, matching the approved second reference
     # image. This is a presentation change only; the screenshot fingerprint
     # remains the anchor and does not alter any SMC price geometry.
@@ -5353,17 +5353,24 @@ def analyze_chart_image(
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.5"
+    analysis["smc_real_chart_style_version"] = "v7.6"
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
-    analysis["arrow_rules_version"] = "v1"
+    analysis["arrow_rules_version"] = "v2"
     analysis["arrow_rules"] = {
         "origin": "entry_only",
         "sequence": ["break", "retest", "continuation"],
-        "dual_path_when": "watch_ambiguity_only",
+        "dual_path_when": "watch_or_re_evaluate_always",
         "max_active_scenarios": 1,
         "projected_candles": True,
         "targets": ["TP1", "TP2", "TP3"],
         "m5_trigger_required": True,
+    }
+    analysis["event_label_layout"] = {
+        "default_position": "below_anchor_candle",
+        "move_text_only": True,
+        "leader_line": True,
+        "zone_labels_inside_zone": ["ORDER BLOCK", "FVG"],
+        "axis_cards": ["ENTRY", "STOP", "CANCEL", "TP1", "TP2", "TP3", "CURRENT", "BUY IF", "SELL IF"],
     }
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
     analysis["visual_overlay_clarity_mode"] = "reference_sheet_v2_rectangular_ohlc"

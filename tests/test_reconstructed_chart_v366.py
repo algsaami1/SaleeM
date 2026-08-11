@@ -121,7 +121,7 @@ def test_portrait_analysis_mode_renders_generated_landscape_ohlc(tmp_path):
     png=render_result(analysis, chart_background_path=source)
     with Image.open(BytesIO(png)) as out:
         assert out.width > out.height
-        assert out.size == (1600, 900)
+        assert out.size == (1920, 1080)
         assert out.convert('RGB').getpixel((out.width//2,out.height//2)) != (10,10,10)
 
 
@@ -190,7 +190,7 @@ def test_library_video_reconstruction_keeps_more_left_history_and_future_room(tm
     }
     png=render_result(analysis, chart_background_path=source)
     with Image.open(BytesIO(png)) as out:
-        assert out.size==(1600,900)
+        assert out.size==(1920,1080)
         # Permanent reference-sheet style is rebuilt from OHLC and now uses
         # the approved light educational reference-sheet palette.
         px=out.convert('RGB').getpixel((20,20))

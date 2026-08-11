@@ -6336,8 +6336,12 @@ def _render_uploaded_chart_with_overlays(
 
 
 def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
-    """Permanent 16:9 approved reference-sheet canvas."""
-    return 1600, 900
+    """V7.6 wide 16:9 reference-sheet canvas.
+
+    The wider 1920px canvas gives real M5 candles and anchored labels more
+    horizontal room without moving any market-owned price geometry.
+    """
+    return 1920, 1080
 
 
 def _reference_template_kind(analysis: dict[str, Any]) -> str:
@@ -6473,7 +6477,7 @@ def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int
 def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
     """Render broad real-M5 context while keeping legacy non-image scenes intact.
 
-    When the analyzer supplies ``render_candles`` (normal V7.5 image flow), the
+    When the analyzer supplies ``render_candles`` (normal V7.6 image flow), the
     screenshot-matched segment is anchored at the right and ~42 real candles are
     shown. Older direct renderer/tests that provide only ``candles`` retain the
     historical 100–120-candle viewport.
@@ -6616,6 +6620,87 @@ def _recon_arrow(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], color
     draw.polygon([b, left, right], fill=color)
 
 
+
+def _reference_boxes_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int], pad: int = 4) -> bool:
+    return not (a[2] + pad < b[0] or b[2] + pad < a[0] or a[3] + pad < b[1] or b[3] + pad < a[1])
+
+
+def _draw_reference_event_label_below_candle(
+    draw: ImageDraw.ImageDraw,
+    *,
+    candles: list[dict[str, Any]],
+    candle_x: list[int],
+    index: int,
+    price_y,
+    plot: tuple[int, int, int, int],
+    text: str,
+    font,
+    color: tuple[int, int, int, int],
+    occupied: list[tuple[int, int, int, int]],
+    anchor_y: int | None = None,
+) -> tuple[int, int, int, int] | None:
+    """V7.6 label rule: event text lives below its real anchor candle.
+
+    Only the text chip may move into a lower collision lane.  The candle, price
+    line, sweep/BOS anchor, OB/FVG geometry and all other market-owned pixels
+    remain fixed.  A thin leader keeps the moved label visually tied to the
+    source candle.
+    """
+    if index < 0 or index >= len(candles) or index >= len(candle_x):
+        return None
+    left, top, right, bottom = plot
+    x = int(candle_x[index])
+    try:
+        low_y = int(price_y(float(candles[index]["low"])))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if anchor_y is None:
+        anchor_y = low_y
+
+    bbox = draw.textbbox((0, 0), str(text), font=font)
+    tw = max(1, bbox[2] - bbox[0])
+    th = max(1, bbox[3] - bbox[1])
+    half_w = tw // 2 + 7
+    half_h = th // 2 + 4
+
+    # Four downward lanes plus modest horizontal nudges.  This resolves dense
+    # clusters while respecting the user's rule that labels stay below candles.
+    y_offsets = (22, 44, 66, 88)
+    x_offsets = (0, -30, 30, -58, 58)
+    chosen: tuple[int, int, int, int] | None = None
+    for yoff in y_offsets:
+        cy = min(bottom - half_h - 5, max(top + half_h + 5, low_y + yoff))
+        for xoff in x_offsets:
+            cx = min(right - half_w - 6, max(left + half_w + 6, x + xoff))
+            box = (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+            if all(not _reference_boxes_overlap(box, other, 5) for other in occupied):
+                chosen = box
+                break
+        if chosen is not None:
+            break
+
+    if chosen is None:
+        cy = min(bottom - half_h - 5, max(top + half_h + 5, low_y + y_offsets[-1]))
+        cx = min(right - half_w - 6, max(left + half_w + 6, x))
+        chosen = (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+    cx = (chosen[0] + chosen[2]) // 2
+    cy = (chosen[1] + chosen[3]) // 2
+    leader_end_y = chosen[1] - 3 if cy >= int(anchor_y) else chosen[3] + 3
+    leader = (color[0], color[1], color[2], min(150, color[3] if len(color) > 3 else 150))
+    draw.line((x, int(anchor_y), cx, leader_end_y), fill=leader, width=1)
+    draw.rounded_rectangle(
+        chosen,
+        radius=4,
+        fill=(250, 250, 247, 225),
+        outline=(color[0], color[1], color[2], 115),
+        width=1,
+    )
+    draw.text((cx, cy), str(text), font=font, fill=color, anchor="mm")
+    occupied.append(chosen)
+    return chosen
+
+
 def _draw_reference_texture(draw: ImageDraw.ImageDraw, plot: tuple[int, int, int, int]) -> None:
     """Very faint deterministic circuit/topographic hints like an educational sheet."""
     left, top, right, bottom = plot
@@ -6662,6 +6747,8 @@ def _draw_reconstructed_pattern(
     price_y,
     palette: dict[str, tuple[int, int, int, int]],
     font,
+    plot: tuple[int, int, int, int],
+    label_occupied: list[tuple[int, int, int, int]],
 ) -> None:
     """Primary pattern as a bold educational sketch over real M5 pivots."""
     overlays = [item for item in (analysis.get("pattern_overlays") or []) if isinstance(item, dict)]
@@ -6715,7 +6802,7 @@ def _draw_reconstructed_pattern(
                 for a, b in zip(path[:-1], path[1:]):
                     _dash_line(draw, a, b, line_color, width=4, dash=14, gap=8)
 
-    anchors: list[tuple[int, int, str]] = []
+    anchors: list[tuple[int, int, str, int]] = []
     for item in geom.get("anchors") or []:
         if not isinstance(item, dict):
             continue
@@ -6727,7 +6814,7 @@ def _draw_reconstructed_pattern(
         except (TypeError, ValueError, IndexError):
             continue
         role = str(item.get("role") or "pivot")
-        anchors.append((x, y, role))
+        anchors.append((x, y, role, idx))
         if reference_clean_pivots:
             draw.ellipse((x - 3, y - 3, x + 3, y + 3), fill=pivot)
         else:
@@ -6738,19 +6825,30 @@ def _draw_reconstructed_pattern(
     name = overlay_name
     pivots = [item for item in anchors if item[2] not in {"neck", "lower", "upper", "pole", "retest"}]
     if name in {"M", "قمة ثلاثية"}:
-        for i, (x, y, _role) in enumerate(pivots[:3], 1):
+        for i, (_x, y, _role, idx) in enumerate(pivots[:3], 1):
             ordinal = "1st" if i == 1 else "2nd" if i == 2 else "3rd"
-            draw.text((x, max(18, y - 26)), f"{ordinal} TOP", font=font, fill=label_color, anchor="ms")
+            _draw_reference_event_label_below_candle(
+                draw, candles=candles, candle_x=candle_x, index=idx, price_y=price_y,
+                plot=plot, text=f"{ordinal} TOP", font=font, color=label_color,
+                occupied=label_occupied, anchor_y=y,
+            )
     elif name in {"W", "قاع ثلاثي"}:
-        for i, (x, y, _role) in enumerate(pivots[:3], 1):
+        for i, (_x, y, _role, idx) in enumerate(pivots[:3], 1):
             ordinal = "1st" if i == 1 else "2nd" if i == 2 else "3rd"
-            draw.text((x, y + 26), f"{ordinal} BOTTOM", font=font, fill=label_color, anchor="ma")
+            _draw_reference_event_label_below_candle(
+                draw, candles=candles, candle_x=candle_x, index=idx, price_y=price_y,
+                plot=plot, text=f"{ordinal} BOTTOM", font=font, color=label_color,
+                occupied=label_occupied, anchor_y=y,
+            )
     elif "رأس وكتفين" in name:
         role_names = {"shoulder": "SHOULDER", "head": "HEAD", "neck": "NECKLINE"}
-        for x, y, role in anchors:
+        for _x, y, role, idx in anchors:
             if role in role_names:
-                inverted = "مقلوب" in name
-                draw.text((x, y + (24 if inverted else -20)), role_names[role], font=font, fill=label_color, anchor="ma" if inverted else "ms")
+                _draw_reference_event_label_below_candle(
+                    draw, candles=candles, candle_x=candle_x, index=idx, price_y=price_y,
+                    plot=plot, text=role_names[role], font=font, color=label_color,
+                    occupied=label_occupied, anchor_y=y,
+                )
 
 def _draw_reconstructed_reference_zones(
     draw: ImageDraw.ImageDraw,
@@ -6879,8 +6977,11 @@ def _draw_reconstructed_reference_scenario(
     by ``reference_scenario_engine``.  The renderer never invents a price.
     """
     draw = ImageDraw.Draw(image)
+    label_occupied: list[tuple[int, int, int, int]] = []
     if analysis.get("pattern_overlays"):
-        _draw_reconstructed_pattern(draw, analysis, candles, candle_x, price_y, palette, font)
+        _draw_reconstructed_pattern(
+            draw, analysis, candles, candle_x, price_y, palette, font, plot, label_occupied
+        )
     if not bool(analysis.get("reference_scenario_available")) or not candle_x:
         return
 
@@ -6946,7 +7047,11 @@ def _draw_reconstructed_reference_scenario(
             if not primary_owns_labels:
                 ordinal = "1st" if n == 1 else "2nd" if n == 2 else "3rd"
                 suffix = "TOP" if bias == "هابط" else "BOTTOM"
-                draw.text((x, y - 27 if bias == "هابط" else y + 27), f"{ordinal} {suffix}", font=font, fill=dark, anchor="ms" if bias == "هابط" else "ma")
+                _draw_reference_event_label_below_candle(
+                    draw, candles=candles, candle_x=candle_x, index=idx, price_y=price_y,
+                    plot=plot, text=f"{ordinal} {suffix}", font=font, color=dark,
+                    occupied=label_occupied, anchor_y=y,
+                )
 
     # Market structure. BOS is green like the reference; the first opposing
     # structural change is highlighted as MSS / CHOCH in purple.
@@ -6966,7 +7071,11 @@ def _draw_reconstructed_reference_scenario(
             else:
                 color, label = green, "BOS"
             _dash_line(draw, (x1, y), (x2, y), color, width=2, dash=9, gap=5)
-            draw.text(((x1 + x2) // 2, y - 6), label, font=font, fill=color, anchor="ms")
+            _draw_reference_event_label_below_candle(
+                draw, candles=candles, candle_x=candle_x, index=brk, price_y=price_y,
+                plot=plot, text=label, font=font, color=color,
+                occupied=label_occupied, anchor_y=y,
+            )
 
     # Order block and FVG use the direction-specific zone chosen by the engine.
     if "order_block" in components:
@@ -7022,7 +7131,11 @@ def _draw_reconstructed_reference_scenario(
                 sweep_color = red if str(sweep.get("side")) == "high" else green
                 if x2 > x1 + 5:
                     _dash_line(draw, (x1, y), (x2, y), sweep_color, width=2, dash=9, gap=5)
-                    draw.text(((x1 + x2) // 2, y - 8), "LIQUIDITY SWEEP", font=font, fill=dark, anchor="ms")
+                    _draw_reference_event_label_below_candle(
+                        draw, candles=candles, candle_x=candle_x, index=idx, price_y=price_y,
+                        plot=plot, text="LIQUIDITY SWEEP", font=font, color=dark,
+                        occupied=label_occupied, anchor_y=y,
+                    )
                 # Small directional marker on the actual sweep candle.
                 wick_price = float(candles[idx]["high"] if str(sweep.get("side")) == "high" else candles[idx]["low"])
                 wy = price_y(wick_price)
@@ -7204,12 +7317,11 @@ def _reference_trade_lifecycle(
 
 
 def _reference_dual_preview_needed(analysis: dict[str, Any]) -> bool:
-    """Return True only when two *watch* paths are genuinely useful.
+    """V7.6: WATCH / RE-EVALUATE always keeps both conditional sides visible.
 
-    Dual paths are never two active trades.  They are allowed only while SaleeM
-    is in WATCH and the buy/sell ranks are close (or price is inside an explicit
-    decision zone).  As soon as one side becomes the valid primary scenario the
-    renderer falls back to a single Entry-origin path.
+    These are not two active trades.  They are two mutually exclusive M5
+    conditions (buy breakout vs sell rejection/break).  Once SaleeM confirms a
+    real execution side, the renderer returns to one active Entry-origin path.
     """
     if str(analysis.get("draw_mode") or "watch") != "watch":
         return False
@@ -7218,19 +7330,11 @@ def _reference_dual_preview_needed(analysis: dict[str, Any]) -> bool:
         return False
     buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
     sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
-    if bool(buy.get("retest_only")) or bool(sell.get("retest_only")):
-        return False
     if _number(buy.get("trigger_price")) is None or _number(sell.get("trigger_price")) is None:
         return False
     if _number(buy.get("display_target")) is None or _number(sell.get("display_target")) is None:
         return False
-    zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
-    decision = analysis.get("dual_scenario_decision") if isinstance(analysis.get("dual_scenario_decision"), dict) else {}
-    try:
-        score_gap = float(decision.get("score_gap") or 999.0)
-    except (TypeError, ValueError):
-        score_gap = 999.0
-    return bool(zone.get("active")) or score_gap <= 8.0
+    return True
 
 
 def _draw_reference_projected_candles(
@@ -7369,6 +7473,12 @@ def _draw_reference_trade_plan(
     dashed alternatives; neither is treated as active.
     """
     plan = _resolve_reference_trade_plan(analysis)
+    if str(analysis.get("draw_mode") or "watch") == "watch" and _reference_dual_preview_needed(analysis):
+        if _draw_reference_dual_watch_paths(
+            draw, analysis, price_y, plot, candle_right, font,
+            origin_entry=float(plan["entry"]) if plan else None,
+        ):
+            return
     if not plan:
         _draw_reference_dual_watch_paths(draw, analysis, price_y, plot, candle_right, font)
         return
@@ -7489,10 +7599,9 @@ def _draw_reference_trade_plan(
         width=3,
         dashed=not confirmed,
     )
-    label_y_offset = -9 if bullish else 16
-    draw.text((break_x, break_y + label_y_offset), "BREAK", font=font, fill=path_color, anchor="mm")
-    draw.text((retest_x, retest_y - label_y_offset), "RETEST", font=font, fill=path_color, anchor="mm")
-    draw.text((end_x - 6, target_y + label_y_offset), "CONTINUATION", font=font, fill=path_color, anchor="rm")
+    # Stage names are kept in the Expected Candle Sequence inset underneath
+    # their projected candles.  Leaving the main price path unlabeled prevents
+    # BREAK/RETEST text from covering real OHLC.
     if not confirmed:
         draw.text((x1, min(bottom - 8, max(top + 12, ey + 24))), "WAIT NEW M5 TRIGGER", font=font, fill=(184, 118, 30, 215), anchor="la")
 
@@ -7557,6 +7666,18 @@ def _draw_reference_price_axis_and_cards(
             if number is not None:
                 cards.append((f"TP{i}", float(number), target_colors[i-1]))
 
+    if _reference_dual_preview_needed(analysis):
+        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+        buy_trigger = _number(buy.get("trigger_price"))
+        sell_trigger = _number(sell.get("trigger_price"))
+        buy_score = max(0, min(100, int(buy.get("score") or 0)))
+        sell_score = max(0, min(100, int(sell.get("score") or 0)))
+        if buy_trigger is not None:
+            cards.append((f"BUY {buy_score}% IF", float(buy_trigger), (94, 49, 181, 235)))
+        if sell_trigger is not None:
+            cards.append((f"SELL {sell_score}% IF", float(sell_trigger), (42, 47, 52, 238)))
+
     current = _number(analysis.get("current_price"))
     if current is None:
         current = _number(analysis.get("visual_current_price"))
@@ -7566,22 +7687,33 @@ def _draw_reference_price_axis_and_cards(
         if not plan or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
             cards.append(("CURRENT", float(current), (55, 61, 67, 238)))
 
-    # Y stays exact. If labels are close, only the X lane changes.
-    lanes = [right - 14, right - 180]
+    # Y stays exact. If labels are close, only the X lane changes.  V7.6 uses
+    # three horizontal lanes and checks collisions in every lane so BUY/SELL,
+    # Entry/TP and Current cards cannot overwrite one another.
+    lanes = [right - 14, right - 252, right - 490]
     placed: list[tuple[int, int]] = []  # (y, lane)
     for label, price, color in cards:
         if not (price_min <= price <= price_max):
             continue
         y = price_y(price)
         lane = 0
-        if any(abs(y - py) < 32 and pl == 0 for py, pl in placed):
-            lane = 1
+        for candidate in range(len(lanes)):
+            if not any(abs(y - py) < 34 and pl == candidate for py, pl in placed):
+                lane = candidate
+                break
+        else:
+            # Keep the price Y exact; reuse the least crowded lane only when
+            # all three are occupied at almost the same level.
+            lane = min(range(len(lanes)), key=lambda cand: sum(1 for py, pl in placed if pl == cand and abs(y - py) < 46))
         card_right = lanes[lane]
-        card_left = card_right - 174
-        # exact price connector remains at Y; only card shifts horizontally.
+        card_text = f"{label} {_fmt_axis_price(price)}"
+        tb = draw.textbbox((0, 0), card_text, font=font)
+        text_w = max(1, tb[2] - tb[0])
+        card_w = max(174, min(228, text_w + 22))
+        card_left = card_right - card_w
         draw.line((card_right, y, right + 3, y), fill=(color[0], color[1], color[2], 150), width=1)
         draw.rounded_rectangle((card_left, y - 16, card_right, y + 16), radius=6, fill=color)
-        draw.text((card_right - 9, y), f"{label} {_fmt_axis_price(price)}", font=font, fill=(255,255,255,255), anchor="rm")
+        draw.text((card_right - 9, y), card_text, font=font, fill=(255,255,255,255), anchor="rm")
         placed.append((y, lane))
 
 
@@ -7735,11 +7867,11 @@ def _draw_reference_expected_sequence_inset(
         cx1 = inner_l + i * (cell_w + cell_gap)
         cx2 = cx1 + cell_w
         draw.rounded_rectangle((cx1, cell_y1, cx2, cell_y2), radius=5, fill=(250, 250, 248, 255), outline=(155, 160, 164, 150), width=1)
-        draw.text(((cx1 + cx2) // 2, cell_y1 + 8), label, font=f_cell, fill=(42, 46, 50, 245), anchor="ma")
 
         # Tiny pedagogical candles. Direction mirrors the plan, but their
         # vertical positions are local to the inset and never map to prices.
-        base = cell_y2 - 10 if bullish else cell_y1 + 25
+        # V7.6 keeps the stage label underneath its miniature candles.
+        base = cell_y2 - 28 if bullish else cell_y1 + 17
         step = -10 if bullish else 10
         colors_up = (39, 151, 89, 230)
         colors_dn = (207, 58, 67, 230)
@@ -7777,6 +7909,8 @@ def _draw_reference_expected_sequence_inset(
             draw.line((x, yy1 - 4, x, yy2 + 4), fill=(color[0], color[1], color[2], 170), width=1)
             draw.rectangle((x - 3, yy1, x + 3, yy2), fill=color)
 
+        draw.text(((cx1 + cx2) // 2, cell_y2 - 5), label, font=f_cell, fill=(42, 46, 50, 245), anchor="ms")
+
         if i < 2:
             ax = cx2 + cell_gap // 2
             ay = (cell_y1 + cell_y2) // 2 + 5
@@ -7790,7 +7924,7 @@ def _draw_reference_footer_panels(
     width: int,
     height: int,
 ) -> None:
-    """V7.5 bottom composition matching the user's approved second image.
+    """V7.6 bottom composition matching the user's approved second image.
 
     Left: Arabic arrow rules. Middle: dynamic SMC legend. Right: trade-plan
     summary with Entry/Stop/TP1/TP2/TP3 and R:R.  Geometry remains market-owned;
@@ -7802,8 +7936,8 @@ def _draw_reference_footer_panels(
     gap = 14
     x0 = 20
     total_w = width - 40
-    left_w = 510
-    mid_w = 480
+    left_w = 560
+    mid_w = 520
     right_w = total_w - left_w - mid_w - gap * 2
     panels = [
         (x0, top_y, x0 + left_w, bottom_y),
@@ -7896,7 +8030,9 @@ def _draw_reference_footer_panels(
     plan = _resolve_reference_trade_plan(analysis)
     lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
     state = str(lifecycle.get("state") or "none")
-    if state == "active":
+    if _reference_dual_preview_needed(analysis):
+        type_text = "WATCH / BUY OR SELL"
+    elif state == "active":
         type_text = "BUY" if str(plan.get("side")) == "buy" else "SELL"
     elif state == "conditional":
         type_text = "WATCH / CONDITIONAL"
@@ -7912,7 +8048,8 @@ def _draw_reference_footer_panels(
     draw.line((col2, table_top, col2, ty2 - 10), fill=(185, 189, 193, 140), width=1)
     draw.text((tx1 + 45, table_top + 15), "TYPE", font=f_table, fill=(65, 70, 75, 245), anchor="mm")
     draw.text(((col1 + col2) // 2, table_top + 15), type_text, font=f_table, fill=(33, 38, 43, 245), anchor="mm")
-    draw.text(((col2 + tx2) // 2, table_top + 15), "R:R SUMMARY", font=f_table, fill=(33, 38, 43, 245), anchor="mm")
+    summary_header = "R:R / STRENGTH" if _reference_dual_preview_needed(analysis) else "R:R SUMMARY"
+    draw.text(((col2 + tx2) // 2, table_top + 15), summary_header, font=f_table, fill=(33, 38, 43, 245), anchor="mm")
     draw.line((tx1, table_top + 30, tx2, table_top + 30), fill=(185, 189, 193, 140), width=1)
 
     rows: list[tuple[str, str, tuple[int,int,int,int], str]] = []
@@ -7935,6 +8072,22 @@ def _draw_reference_footer_panels(
     else:
         current = _number(analysis.get("current_price"))
         rows.append(("CURRENT", _fmt_axis_price(current) if current is not None else "—", (55, 61, 67, 245), ""))
+
+    if _reference_dual_preview_needed(analysis):
+        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+        buy_trigger = _number(buy.get("trigger_price"))
+        sell_trigger = _number(sell.get("trigger_price"))
+        if buy_trigger is not None:
+            rows.append((
+                "BUY IF", _fmt_axis_price(float(buy_trigger)), (94, 49, 181, 245),
+                f"{max(0, min(100, int(buy.get('score') or 0)))}%",
+            ))
+        if sell_trigger is not None:
+            rows.append((
+                "SELL IF", _fmt_axis_price(float(sell_trigger)), (42, 47, 52, 245),
+                f"{max(0, min(100, int(sell.get('score') or 0)))}%",
+            ))
 
     row_top = table_top + 31
     available = max(1, ty2 - 28 - row_top)
@@ -7993,7 +8146,7 @@ def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
         # Preserve the future lane even after a plan completes so consecutive
         # renders do not jump horizontally.  Execution graphics themselves are
         # still removed by the lifecycle guard.
-        "future_space_ratio": 0.22 if plan and template_id else 0.20 if dual_watch and template_id else 0.12 if template_id else 0.06,
+        "future_space_ratio": 0.20 if plan and template_id else 0.20 if dual_watch and template_id else 0.10 if template_id else 0.05,
     }
 
 
@@ -8001,7 +8154,7 @@ def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """V7.5 approved reference sheet: broad M5 context + anchored SMC + Entry paths."""
+    """V7.6 approved wide reference sheet: broad M5 context + anchored SMC + Entry paths."""
     scene = _build_reference_visual_scene(analysis)
     width, height = int(scene["canvas"]["width"]), int(scene["canvas"]["height"])
     palette = _reconstructed_palette(analysis)
@@ -8014,7 +8167,7 @@ def _render_reconstructed_market_chart(
     # 16:9 approved composition.  The chart occupies the upper ~64% and the
     # lower third is reserved for Arrow Rules, Legend and Trade Plan Summary,
     # matching the user's approved second image.
-    margin_l, margin_r, margin_t, margin_b = 20, 175, 95, 325
+    margin_l, margin_r, margin_t, margin_b = 24, 215, 100, 360
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
     draw.rounded_rectangle((left, top, right, bottom), radius=8, fill=palette["plot"], outline=palette["border"], width=1)
@@ -8063,7 +8216,7 @@ def _render_reconstructed_market_chart(
     f_label = _font(16, True, True)
     draw.text((left, 20), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
     # Fine divider used by the approved reference header.
-    draw.line((300, 16, 300, 58), fill=(88, 93, 98, 145), width=1)
+    draw.line((325, 16, 325, 60), fill=(88, 93, 98, 145), width=1)
 
     lifecycle_state = str((scene.get("trade_lifecycle") or {}).get("state") or "none")
     expired = lifecycle_state in {"expired", "target_hit", "invalidated"} or bool(analysis.get("scenario_expired"))
@@ -8366,7 +8519,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v7.5", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v7.6", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)

@@ -122,7 +122,7 @@ def test_v7_reference_renderer_stays_16_by_9_and_renders_real_plan():
     }
     png = render_result(analysis)
     with Image.open(BytesIO(png)) as image:
-        assert image.size == (1600, 900)
+        assert image.size == (1920, 1080)
         rgb = image.convert("RGB")
         # The output must contain both red stop-side and green target-side pixels.
         pixels = list(rgb.crop((1100, 160, 1420, 720)).get_flattened_data())

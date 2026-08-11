@@ -103,7 +103,7 @@ def test_v5_renderer_outputs_reference_sheet_with_generated_axis():
     analysis['visual_template_id']='multiple_tops'
     png=render_result(analysis)
     with Image.open(BytesIO(png)) as image:
-        assert image.size == (1600,900)
+        assert image.size == (1920,1080)
         assert image.mode in {'RGB','RGBA'}
         # Light educational-sheet background and non-empty plot.
         assert sum(image.convert('RGB').getpixel((20,20))) > 600
