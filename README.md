@@ -433,3 +433,7 @@ TWELVE_DATA_MINUTE_LIMIT=8
 ## V7.4 — Screenshot ↔ Real M5 Segment Alignment
 
 قبل رسم SMC، يطابق SaleeM بصمة آخر الشموع الظاهرة في الصورة مع مقطع M5 حقيقي من بيانات السوق. الصورة لا تولد OHLC ولا مستويات؛ تستخدم فقط لاختيار المقطع الحقيقي بعد تحقق حتمي. عند فشل المطابقة الواضحة تُحجب الرسومات غير الموثوقة. كما تتبع نافذة الرسم عدد الشموع الظاهر بدل فرض 28/42 شمعة، وتعرض حالات الانعكاس غير المفعلة كمرشح ينتظر Trigger جديد على M5.
+
+## V7.5 — Approved Reference-Sheet Result Layout
+
+V7.5 keeps the screenshot-matched real M5 segment anchored at the right edge while restoring approximately 42 real M5 candles of context to the left. The generated 16:9 result now follows the approved reference composition: chart on top, Arabic Arrow Rules panel, dynamic SMC legend, Trade Plan Summary with R:R, Entry/Stop/TP1/TP2/TP3 price-linked cards, and an Expected Candle Sequence inset for Break → Retest → Continuation. Completed/invalidated plans can remain visible only as re-evaluation reference geometry and never reactivate without a fresh M5 trigger.

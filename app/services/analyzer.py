@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7.4",
+        "smc_real_chart_style_version": "v7.5",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -5119,7 +5119,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     # by the deterministic closed-candle M5 detector before anything is drawn.
     geometry = _extract_chart_geometry(path)
 
-    # V7.4: before SMC drawing, fingerprint the visible screenshot candles and
+    # V7.5: before SMC drawing, fingerprint the visible screenshot candles and
     # locate their real contiguous M5 segment.  This never changes the market
     # decision; it selects only the visual/SMC review window after a strict
     # deterministic match gate.
@@ -5229,15 +5229,46 @@ def _analyze(path: Path) -> dict[str, Any]:
 
     matched_segment = chart_market_match.get("segment") if bool(chart_market_match.get("matched")) else None
     if isinstance(matched_segment, list) and len(matched_segment) >= 6:
-        projected["render_candles"] = copy.deepcopy(matched_segment)
-        projected["render_candle_source"] = "screenshot_matched_real_m5"
-        projected["render_visible_candle_count"] = len(matched_segment)
+        # V7.5 keeps the screenshot-matched candles as the anchor at the RIGHT
+        # edge, but restores enough real M5 history on the left to reproduce
+        # the approved SaleeM reference-sheet composition. The older V7.4
+        # renderer showed only the 8–12 candles visible in the phone capture,
+        # which made SMC zones occupy most of the chart and removed the market
+        # context needed to read BOS/CHOCH, liquidity and retests.
+        try:
+            matched_end = int(chart_market_match.get("end_index"))
+        except (TypeError, ValueError):
+            matched_end = len(alignment_market) - 1
+        matched_end = max(0, min(len(alignment_market) - 1, matched_end))
+        try:
+            context_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
+        except ValueError:
+            context_count = 42
+        context_count = max(len(matched_segment), max(30, min(60, context_count)))
+        context_start = max(0, matched_end - context_count + 1)
+        render_context = alignment_market[context_start:matched_end + 1]
+        if len(render_context) < len(matched_segment):
+            render_context = matched_segment
+        projected["render_candles"] = copy.deepcopy(render_context)
+        projected["render_candle_source"] = "screenshot_matched_real_m5_with_context"
+        projected["render_visible_candle_count"] = len(render_context)
+        projected["render_matched_segment_count"] = len(matched_segment)
+        projected["render_matched_segment_start_offset"] = max(0, len(render_context) - len(matched_segment))
     else:
-        fallback_count = int(geometry.get("visible_candle_count") or 0)
-        fallback_count = max(8, min(42, fallback_count)) if fallback_count else 18
+        # The fallback must still resemble the approved reference sheet. A
+        # tiny 8–18 candle chart is visually misleading because it exaggerates
+        # every zone. Use a real 36–42 candle M5 context even when the phone
+        # screenshot cannot be fingerprint-matched.
+        try:
+            fallback_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
+        except ValueError:
+            fallback_count = 42
+        fallback_count = max(30, min(60, fallback_count))
         projected["render_candles"] = copy.deepcopy(normalized_market[-fallback_count:])
-        projected["render_candle_source"] = "recent_real_m5_alignment_fallback"
+        projected["render_candle_source"] = "recent_real_m5_reference_context_fallback"
         projected["render_visible_candle_count"] = len(projected["render_candles"])
+        projected["render_matched_segment_count"] = 0
+        projected["render_matched_segment_start_offset"] = 0
 
     # Fail closed for visual SMC geometry when a clear screenshot fingerprint
     # exists but cannot be tied to a real M5 segment. The market decision stays
@@ -5304,25 +5335,25 @@ def analyze_chart_image(
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
     rebuild_landscape = True
     analysis["reconstructed_market_chart"] = True
-    # V7.4 follows the uploaded chart's visible-candle density whenever the
-    # screenshot-to-market matcher resolved a real M5 segment.  Do not force a
-    # 28/42-candle window that makes a tight broker screenshot look unrelated.
+    # V7.5 keeps the screenshot-matched segment aligned at the right edge while
+    # showing a broader real-M5 context, matching the approved second reference
+    # image. This is a presentation change only; the screenshot fingerprint
+    # remains the anchor and does not alter any SMC price geometry.
     if isinstance(analysis.get("render_candles"), list) and len(analysis.get("render_candles") or []) >= 6:
         analysis["render_visible_candle_count"] = len(analysis["render_candles"])
     else:
-        detected_count = int(analysis.get("chart_visible_candle_count") or 0)
         try:
-            default_count = int(os.getenv("SALEEM_RENDER_CANDLES", "18"))
+            default_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
         except ValueError:
-            default_count = 18
-        analysis["render_visible_candle_count"] = max(8, min(64, detected_count or default_count))
+            default_count = 42
+        analysis["render_visible_candle_count"] = max(30, min(60, default_count))
     analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
     analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
     analysis["uploaded_chart_role"] = "visual_calibration_reference"
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.4"
+    analysis["smc_real_chart_style_version"] = "v7.5"
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
     analysis["arrow_rules_version"] = "v1"
     analysis["arrow_rules"] = {

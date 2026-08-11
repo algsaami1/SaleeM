@@ -6336,7 +6336,7 @@ def _render_uploaded_chart_with_overlays(
 
 
 def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
-    """Permanent wide reference-sheet canvas."""
+    """Permanent 16:9 approved reference-sheet canvas."""
     return 1600, 900
 
 
@@ -6471,23 +6471,30 @@ def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int
     }
 
 def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
-    """Render the recent M5 viewport while analysis may use much more history.
+    """Render broad real-M5 context while keeping legacy non-image scenes intact.
 
-    V7.2 deliberately separates *analysis history* from *visible history*.  The
-    reference image supplied by the user is normally a tight recent viewport;
-    showing 100+ candles made valid geometry look unrelated to that screenshot.
-    Detectors still receive the full closed-candle history, but the final sheet
-    focuses on roughly 3.5 hours (42 M5 candles) unless explicitly overridden.
-    Geometry outside this trailing window is simply not drawn.
+    When the analyzer supplies ``render_candles`` (normal V7.5 image flow), the
+    screenshot-matched segment is anchored at the right and ~42 real candles are
+    shown. Older direct renderer/tests that provide only ``candles`` retain the
+    historical 100–120-candle viewport.
     """
+    has_render_context = isinstance(analysis.get("render_candles"), list) and len(analysis.get("render_candles") or []) >= 6
     all_candles = _valid_renderer_candles(analysis, prefer_render_window=True)
     if not all_candles:
         return [], 0
-    try:
-        desired = int(analysis.get("render_visible_candle_count") or len(all_candles))
-    except (TypeError, ValueError):
-        desired = len(all_candles)
-    desired = max(8, min(120, desired))
+    if has_render_context:
+        try:
+            desired = int(analysis.get("render_visible_candle_count") or 42)
+        except (TypeError, ValueError):
+            desired = 42
+        desired = max(30, min(60, desired))
+    else:
+        try:
+            desired = int(analysis.get("render_visible_candle_count") or min(110, len(all_candles)))
+        except (TypeError, ValueError):
+            desired = min(110, len(all_candles))
+        desired = max(30, min(120, desired))
+    desired = min(len(all_candles), desired)
     window = all_candles[-desired:]
     return window, len(all_candles) - len(window)
 
@@ -6516,13 +6523,22 @@ def _reconstructed_price_range(analysis: dict[str, Any], candles: list[dict[str,
 
     plan = _resolve_reference_trade_plan(analysis)
     lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
-    if plan and lifecycle.get("state") in {"active", "conditional"}:
-        values.extend(float(plan[key]) for key in ("entry", "stop", "target"))
-        # Execution plans may expose additional deterministic TP levels.
-        for key in ("target_1", "target_2", "target_3"):
-            value = _number(analysis.get(key))
-            if value is not None:
-                values.append(float(value))
+    if plan:
+        # The approved reference sheet keeps Entry/Stop/TP context visible even
+        # after the old plan completes, but only when those real levels are
+        # reasonably near the displayed market. This is visual history, not a
+        # reactivation of the trade.
+        plan_values = [float(plan[key]) for key in ("entry", "stop", "target")]
+        plan_values.extend(
+            float(v) for v in (plan.get("targets") or [])
+            if _number(v) is not None
+        )
+        if lifecycle.get("state") in {"active", "conditional"}:
+            values.extend(plan_values)
+        else:
+            history_lo = base_lo - base_span * 1.25
+            history_hi = base_hi + base_span * 1.25
+            values.extend(v for v in plan_values if history_lo <= v <= history_hi)
 
     # Nearby real support/resistance may be useful context, but a historical
     # far-away level must not destroy the local viewport scale.
@@ -6776,7 +6792,7 @@ def _draw_reconstructed_reference_zones(
                     mapped.append(_recon_index_to_actual(int(point.get("index")), window_size, len(candles)))
                 except (TypeError, ValueError):
                     pass
-            zone_half = max(half, float(tolerance or 0.0) * 0.70)
+            zone_half = min(max(half, float(tolerance or 0.0) * 0.70), max(half, atr * 0.42))
             y1, y2 = price_y(float(level) + zone_half), price_y(float(level) - zone_half)
             yy1, yy2 = max(top, min(y1, y2)), min(bottom, max(y1, y2))
             if mapped and yy2 > yy1:
@@ -7290,6 +7306,8 @@ def _draw_reference_dual_watch_paths(
     plot: tuple[int, int, int, int],
     candle_right: int,
     font,
+    *,
+    origin_entry: float | None = None,
 ) -> bool:
     """Draw two conditional watch paths, never two active scenarios."""
     if not _reference_dual_preview_needed(analysis):
@@ -7302,12 +7320,16 @@ def _draw_reference_dual_watch_paths(
     if x2 <= x1 + 52:
         return False
 
+    # Approved visual grammar: purple = upside breakout path, charcoal =
+    # rejection/downside path. Both are previews, never simultaneous active
+    # trades. When an old/reference Entry exists, both previews start exactly
+    # from that same Entry to match the user's rule sheet.
     specs = [
-        ("buy", analysis.get("buy_scenario_details") or {}, (34, 151, 88, 172), "UP BREAKOUT"),
-        ("sell", analysis.get("sell_scenario_details") or {}, (203, 62, 71, 172), "DOWN REJECTION / BREAK"),
+        ("buy", analysis.get("buy_scenario_details") or {}, (94, 49, 181, 205), "UP BREAKOUT"),
+        ("sell", analysis.get("sell_scenario_details") or {}, (38, 43, 49, 205), "DOWN REJECTION"),
     ]
     for side, scenario, color, label in specs:
-        entry = _number(scenario.get("trigger_price"))
+        entry = float(origin_entry) if origin_entry is not None else _number(scenario.get("trigger_price"))
         target = _number(scenario.get("display_target"))
         if entry is None or target is None:
             continue
@@ -7325,7 +7347,8 @@ def _draw_reference_dual_watch_paths(
         p3 = (x1 + max(52, (x2 - x1) * 2 // 3), retest_y)
         p4 = (x2, ty)
         draw.ellipse((x1 - 4, ey - 4, x1 + 4, ey + 4), fill=color)
-        draw.text((x1 + 7, ey - 6), f"ENTRY · {label}", font=font, fill=color, anchor="ls")
+        # Path meaning is explained in the Arrow Rules panel; keep the price
+        # chart clean and show only the two colored path geometries.
         _recon_arrow(draw, [p1, p2, p3, p4], color, width=2, dashed=True)
     return True
 
@@ -7350,7 +7373,36 @@ def _draw_reference_trade_plan(
         _draw_reference_dual_watch_paths(draw, analysis, price_y, plot, candle_right, font)
         return
     lifecycle = _reference_trade_lifecycle(analysis, plan)
-    if lifecycle.get("state") not in {"active", "conditional"}:
+    state = str(lifecycle.get("state") or "none")
+    if state not in {"active", "conditional"}:
+        # Keep the completed/invalidated plan as a *reference* only, exactly as
+        # in the approved second image. Never reactivate it. In WATCH mode, show
+        # the two conditional paths from the historical Entry when valid.
+        if _draw_reference_dual_watch_paths(
+            draw, analysis, price_y, plot, candle_right, font,
+            origin_entry=float(plan["entry"]),
+        ):
+            return
+        # If there are no two-sided watch details, draw a muted historical
+        # Break→Retest→Continuation path from the old Entry to its real target.
+        left, top, right, bottom = plot
+        entry = float(plan["entry"])
+        targets = [float(v) for v in (plan.get("targets") or [plan.get("target")]) if _number(v) is not None]
+        if not targets:
+            return
+        x1 = max(candle_right + 24, left + int((right - left) * 0.72))
+        x2 = right - 205
+        if x2 <= x1 + 70:
+            return
+        ey, ty = price_y(entry), price_y(targets[-1])
+        bx = x1 + (x2 - x1) // 3
+        rx = x1 + (x2 - x1) * 2 // 3
+        by = int(round(ey + (ty - ey) * 0.34))
+        ry = int(round(ey + (ty - ey) * 0.10))
+        old_color = (55, 61, 67, 175)
+        draw.ellipse((x1 - 5, ey - 5, x1 + 5, ey + 5), fill=old_color)
+        _recon_arrow(draw, [(x1, ey), (bx, by), (rx, ry), (x2, ty)], old_color, width=2, dashed=True)
+        draw.text((x1 + 10, ey - 8), "OLD ENTRY · WAIT NEW M5 TRIGGER", font=font, fill=(154, 101, 28, 220), anchor="ls")
         return
 
     left, top, right, bottom = plot
@@ -7491,15 +7543,19 @@ def _draw_reference_price_axis_and_cards(
             number = _number(value)
             if number is not None:
                 cards.append((f"TP{i}", float(number), target_colors[i-1]))
-    elif plan and state == "target_hit":
-        cards.append(("TP1 HIT", float(plan["target"]), (42, 158, 91, 242)))
-    elif plan and state == "invalidated":
-        cards.append(("INVALIDATED", float(plan["stop"]), (201, 62, 70, 242)))
-    elif plan and state == "expired":
-        # Do not keep an old Entry/Target card on the axis after the objective
-        # has already been reached. The historical pattern stays on the chart,
-        # while execution returns to WATCH and only the current price is shown.
-        pass
+    elif plan and state in {"target_hit", "invalidated", "expired"}:
+        # Reference-only levels: visible for re-evaluation, never active. This
+        # matches the approved second image and keeps the user oriented when an
+        # old plan has completed or failed.
+        cards.extend([
+            ("ENTRY", float(plan["entry"]), (42, 116, 184, 232)),
+            ("STOP", float(plan["stop"]), (201, 62, 70, 232)),
+        ])
+        target_colors = [(45, 164, 95, 232), (31, 144, 83, 232), (20, 119, 72, 232)]
+        for i, value in enumerate((plan.get("targets") or [plan.get("target")])[:3], start=1):
+            number = _number(value)
+            if number is not None:
+                cards.append((f"TP{i}", float(number), target_colors[i-1]))
 
     current = _number(analysis.get("current_price"))
     if current is None:
@@ -7507,7 +7563,7 @@ def _draw_reference_price_axis_and_cards(
     if current is not None and price_min <= float(current) <= price_max:
         current_y = price_y(float(current))
         _dash_line(draw, (left, current_y), (right, current_y), (62, 112, 112, 145), width=1, dash=5, gap=4)
-        if not plan or state in {"expired", "invalidated", "target_hit"} or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
+        if not plan or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
             cards.append(("CURRENT", float(current), (55, 61, 67, 238)))
 
     # Y stays exact. If labels are close, only the X lane changes.
@@ -7626,6 +7682,280 @@ def _draw_reference_legend(
         draw.text((tx, rules_y + 18), desc, font=f_desc, fill=(92, 97, 102, 235), anchor="la")
 
 
+
+def _draw_reference_expected_sequence_inset(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    plot: tuple[int, int, int, int],
+) -> None:
+    """Approved miniature BREAK → RETEST → CONTINUATION teaching card.
+
+    This card is explanatory only.  It never creates market prices and is
+    intentionally separated from the price-scaled chart geometry.
+    """
+    components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
+    plan = _resolve_reference_trade_plan(analysis)
+    if "expectation_arrow" not in components and not plan:
+        return
+
+    left, top, right, bottom = plot
+    panel_w, panel_h = 326, 116
+    x2 = min(right - 310, left + int((right - left) * 0.74))
+    x1 = x2 - panel_w
+    y2 = bottom - 8
+    y1 = y2 - panel_h
+    if x1 < left + 360:
+        x1 = left + int((right - left) * 0.50)
+        x2 = x1 + panel_w
+    if x2 > right - 260:
+        x2 = right - 260
+        x1 = x2 - panel_w
+
+    draw.rounded_rectangle(
+        (x1, y1, x2, y2),
+        radius=8,
+        fill=(247, 248, 247, 244),
+        outline=(112, 118, 123, 170),
+        width=1,
+    )
+    f_title = _font(12, True, True)
+    f_sub = _font(10, False, True)
+    f_cell = _font(9, True, True)
+    draw.text(((x1 + x2) // 2, y1 + 11), "EXPECTED CANDLE SEQUENCE", font=f_title, fill=(28, 32, 37, 245), anchor="ma")
+    draw.text(((x1 + x2) // 2, y1 + 29), "Break → Retest → Continuation", font=f_sub, fill=(70, 75, 80, 235), anchor="ma")
+
+    side = str(plan.get("side") if plan else "buy")
+    bullish = side != "sell"
+    cell_gap = 8
+    inner_l, inner_r = x1 + 10, x2 - 10
+    cell_w = (inner_r - inner_l - cell_gap * 2) // 3
+    cell_y1, cell_y2 = y1 + 43, y2 - 7
+    labels = ("BREAK", "RETEST", "CONTINUATION")
+    for i, label in enumerate(labels):
+        cx1 = inner_l + i * (cell_w + cell_gap)
+        cx2 = cx1 + cell_w
+        draw.rounded_rectangle((cx1, cell_y1, cx2, cell_y2), radius=5, fill=(250, 250, 248, 255), outline=(155, 160, 164, 150), width=1)
+        draw.text(((cx1 + cx2) // 2, cell_y1 + 8), label, font=f_cell, fill=(42, 46, 50, 245), anchor="ma")
+
+        # Tiny pedagogical candles. Direction mirrors the plan, but their
+        # vertical positions are local to the inset and never map to prices.
+        base = cell_y2 - 10 if bullish else cell_y1 + 25
+        step = -10 if bullish else 10
+        colors_up = (39, 151, 89, 230)
+        colors_dn = (207, 58, 67, 230)
+
+        if label == "BREAK":
+            sequence = [
+                (colors_dn if bullish else colors_up, 0, 6),
+                (colors_up if bullish else colors_dn, 1, 17),
+                (colors_up if bullish else colors_dn, 2, 12),
+            ]
+        elif label == "RETEST":
+            sequence = [
+                (colors_dn if bullish else colors_up, 1, 14),
+                (colors_up if bullish else colors_dn, 0, 7),
+                (colors_dn if bullish else colors_up, -1, 7),
+                (colors_up if bullish else colors_dn, 1, 14),
+            ]
+        else:
+            sequence = [
+                (colors_up if bullish else colors_dn, 0, 8),
+                (colors_up if bullish else colors_dn, 1, 12),
+                (colors_up if bullish else colors_dn, 2, 15),
+                (colors_up if bullish else colors_dn, 3, 18),
+            ]
+        slot = max(10, (cell_w - 18) // max(1, len(sequence)))
+        for j, (color, level, body_h) in enumerate(sequence):
+            x = cx1 + 10 + slot * j + slot // 2
+            center = base + step * level
+            if bullish:
+                yy2 = center
+                yy1 = center - body_h
+            else:
+                yy1 = center
+                yy2 = center + body_h
+            draw.line((x, yy1 - 4, x, yy2 + 4), fill=(color[0], color[1], color[2], 170), width=1)
+            draw.rectangle((x - 3, yy1, x + 3, yy2), fill=color)
+
+        if i < 2:
+            ax = cx2 + cell_gap // 2
+            ay = (cell_y1 + cell_y2) // 2 + 5
+            _recon_arrow(draw, [(ax - 5, ay), (ax + 5, ay)], (48, 53, 58, 210), width=1, dashed=False)
+
+
+def _draw_reference_footer_panels(
+    draw: ImageDraw.ImageDraw,
+    analysis: dict[str, Any],
+    plot: tuple[int, int, int, int],
+    width: int,
+    height: int,
+) -> None:
+    """V7.5 bottom composition matching the user's approved second image.
+
+    Left: Arabic arrow rules. Middle: dynamic SMC legend. Right: trade-plan
+    summary with Entry/Stop/TP1/TP2/TP3 and R:R.  Geometry remains market-owned;
+    these panels are explanatory metadata only.
+    """
+    left, _top, right, bottom = plot
+    top_y = bottom + 24
+    bottom_y = height - 38
+    gap = 14
+    x0 = 20
+    total_w = width - 40
+    left_w = 510
+    mid_w = 480
+    right_w = total_w - left_w - mid_w - gap * 2
+    panels = [
+        (x0, top_y, x0 + left_w, bottom_y),
+        (x0 + left_w + gap, top_y, x0 + left_w + gap + mid_w, bottom_y),
+        (x0 + left_w + gap + mid_w + gap, top_y, width - 20, bottom_y),
+    ]
+    for rect in panels:
+        draw.rounded_rectangle(rect, radius=9, fill=(248, 249, 248, 248), outline=(171, 176, 180, 150), width=1)
+
+    # --- Arrow rules panel ---
+    ax1, ay1, ax2, ay2 = panels[0]
+    f_ar_title = _font(16, True, True)
+    f_ar = _font(11, False, True)
+    f_num = _font(10, True, True)
+    _draw_rtl(draw, ((ax1 + ax2) // 2, ay1 + 20), "قواعد خطوط الأسهم", f_ar_title, (26, 31, 36, 245), anchor="ma")
+    draw.line((ax1 + 24, ay1 + 38, ax2 - 24, ay1 + 38), fill=(112, 80, 159, 100), width=1)
+
+    rules = [
+        ("1", "خط السيناريو الصاعد (الأرجواني) يبدأ من مستوى ENTRY وينتظر الاختراق وإعادة الاختبار."),
+        ("2", "خط السيناريو الهابط (الأسود) يبدأ من مستوى ENTRY ويعبّر عن الرفض أو الكسر الهابط."),
+        ("3", "المسار المتوقع يتبع بنية السوق: اختراق → إعادة اختبار → استمرار الحركة."),
+        ("4", "جميع خطوط الأسهم تبدأ دائماً من مستوى ENTRY لربط الخطة بمستوى سعر حقيقي."),
+        ("5", "لا يتم تفعيل أي صفقة جديدة إلا بعد وجود Trigger جديد على إطار M5."),
+    ]
+    y = ay1 + 58
+    for num, rule in rules:
+        cy = y + 6
+        draw.ellipse((ax1 + 18, cy - 9, ax1 + 36, cy + 9), fill=(68, 35, 135, 245))
+        draw.text((ax1 + 27, cy), num, font=f_num, fill=(255, 255, 255, 255), anchor="mm")
+        _draw_rtl(draw, (ax2 - 18, y), rule, f_ar, (45, 50, 55, 245), anchor="ra")
+        y += 34
+
+    # --- Dynamic legend panel ---
+    lx1, ly1, lx2, ly2 = panels[1]
+    f_leg_title = _font(14, True, True)
+    f_leg = _font(10, True, True)
+    f_desc = _font(8, False, True)
+    draw.text(((lx1 + lx2) // 2, ly1 + 20), "LEGEND", font=f_leg_title, fill=(30, 35, 40, 245), anchor="ma")
+    draw.line((lx1 + 24, ly1 + 38, lx2 - 24, ly1 + 38), fill=(75, 116, 169, 100), width=1)
+
+    components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
+    geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
+    structure_labels = {
+        str(event.get("label") or "").upper()
+        for event in (geom.get("structure_events") or [])
+        if isinstance(event, dict)
+    }
+    legend_items = [
+        ("RESISTANCE / LIQUIDITY", "Supply / liquidity zone", "box_red", (199, 68, 77, 230), True),
+        ("FVG", "Fair Value Gap", "box_blue", (52, 119, 184, 230), "fvg" in components),
+        ("BOS", "Break of Structure", "dash_green", (35, 145, 83, 230), "BOS" in structure_labels),
+        ("LIQUIDITY SWEEP", "Wick beyond equal high/low", "dash_blue", (42, 110, 176, 230), "liquidity" in components),
+        ("ORDER BLOCK (OB)", "Last opposite candle", "box_green", (43, 143, 83, 230), "order_block" in components),
+        ("MSS / CHOCH", "Market Structure Shift", "dash_purple", (103, 61, 145, 230), "CHOCH" in structure_labels),
+        ("PLAN", "Entry · Stop · Target", "arrow", (45, 50, 55, 230), bool(_resolve_reference_trade_plan(analysis)) or _reference_dual_preview_needed(analysis)),
+    ]
+    legend_items = [item for item in legend_items if bool(item[4])]
+    col_w = (lx2 - lx1 - 38) // 2
+    row_h = 44
+    for i, (title, desc, kind, color, _show) in enumerate(legend_items[:8]):
+        col = i % 2
+        row = i // 2
+        x = lx1 + 18 + col * col_w
+        y0 = ly1 + 54 + row * row_h
+        ix, iy = x + 12, y0 + 8
+        if kind == "box_red":
+            draw.rectangle((ix - 10, iy - 7, ix + 14, iy + 7), fill=(223, 77, 85, 35), outline=color, width=1)
+        elif kind == "box_blue":
+            draw.rectangle((ix - 10, iy - 7, ix + 14, iy + 7), fill=(92, 157, 211, 38), outline=color, width=1)
+        elif kind == "box_green":
+            draw.rectangle((ix - 10, iy - 7, ix + 14, iy + 7), fill=(92, 168, 110, 35), outline=color, width=1)
+        elif kind.startswith("dash"):
+            _dash_line(draw, (ix - 11, iy), (ix + 15, iy), color, width=2, dash=6, gap=4)
+        else:
+            _recon_arrow(draw, [(ix - 11, iy), (ix + 15, iy)], color, width=2, dashed=True)
+        tx = x + 34
+        draw.text((tx, y0), title, font=f_leg, fill=color, anchor="la")
+        draw.text((tx, y0 + 17), desc, font=f_desc, fill=(90, 95, 100, 235), anchor="la")
+
+    # --- Trade plan summary panel ---
+    tx1, ty1, tx2, ty2 = panels[2]
+    navy = (20, 54, 101, 245)
+    f_table_title = _font(12, True, True)
+    f_table = _font(10, True, True)
+    f_table_small = _font(9, False, True)
+    header_h = 28
+    draw.rectangle((tx1, ty1, tx2, ty1 + header_h), fill=navy)
+    draw.text(((tx1 + tx2) // 2, ty1 + header_h // 2), "TRADE PLAN SUMMARY", font=f_table_title, fill=(255, 255, 255, 255), anchor="mm")
+
+    plan = _resolve_reference_trade_plan(analysis)
+    lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
+    state = str(lifecycle.get("state") or "none")
+    if state == "active":
+        type_text = "BUY" if str(plan.get("side")) == "buy" else "SELL"
+    elif state == "conditional":
+        type_text = "WATCH / CONDITIONAL"
+    elif state in {"expired", "target_hit", "invalidated"}:
+        type_text = "WATCH / RE-EVALUATE"
+    else:
+        type_text = "WATCH"
+
+    table_top = ty1 + header_h
+    col1 = tx1 + 92
+    col2 = tx1 + 265
+    draw.line((col1, table_top, col1, ty2 - 10), fill=(185, 189, 193, 140), width=1)
+    draw.line((col2, table_top, col2, ty2 - 10), fill=(185, 189, 193, 140), width=1)
+    draw.text((tx1 + 45, table_top + 15), "TYPE", font=f_table, fill=(65, 70, 75, 245), anchor="mm")
+    draw.text(((col1 + col2) // 2, table_top + 15), type_text, font=f_table, fill=(33, 38, 43, 245), anchor="mm")
+    draw.text(((col2 + tx2) // 2, table_top + 15), "R:R SUMMARY", font=f_table, fill=(33, 38, 43, 245), anchor="mm")
+    draw.line((tx1, table_top + 30, tx2, table_top + 30), fill=(185, 189, 193, 140), width=1)
+
+    rows: list[tuple[str, str, tuple[int,int,int,int], str]] = []
+    best_rr = 0.0
+    best_label = "—"
+    if plan:
+        entry = float(plan["entry"])
+        stop = float(plan["stop"])
+        targets = [float(v) for v in (plan.get("targets") or [plan.get("target")]) if _number(v) is not None][:3]
+        risk = abs(entry - stop)
+        rows.append(("ENTRY", _fmt_axis_price(entry), (42, 112, 183, 245), f"RISK {risk:.2f}"))
+        rows.append(("STOP", _fmt_axis_price(stop), (201, 62, 70, 245), ""))
+        target_cols = [(45, 164, 95, 245), (31, 144, 83, 245), (20, 119, 72, 245)]
+        for i, target in enumerate(targets, 1):
+            rr = abs(target - entry) / risk if risk > 1e-9 else 0.0
+            if rr > best_rr:
+                best_rr = rr
+                best_label = f"TP{i}"
+            rows.append((f"TP{i}", _fmt_axis_price(target), target_cols[i-1], f"1:{rr:.2f}" if risk > 1e-9 else "—"))
+    else:
+        current = _number(analysis.get("current_price"))
+        rows.append(("CURRENT", _fmt_axis_price(current) if current is not None else "—", (55, 61, 67, 245), ""))
+
+    row_top = table_top + 31
+    available = max(1, ty2 - 28 - row_top)
+    row_h = max(22, min(31, available // max(1, len(rows))))
+    for i, (label, value, color, rr_text) in enumerate(rows):
+        y1 = row_top + i * row_h
+        ymid = y1 + row_h // 2
+        draw.line((tx1, y1 + row_h, tx2, y1 + row_h), fill=(205, 208, 211, 120), width=1)
+        draw.text((tx1 + 45, ymid), label, font=f_table, fill=color, anchor="mm")
+        draw.text(((col1 + col2) // 2, ymid), value, font=f_table, fill=color, anchor="mm")
+        draw.text(((col2 + tx2) // 2, ymid), rr_text, font=f_table_small, fill=(45, 50, 55, 245), anchor="mm")
+
+    if plan and best_rr > 0:
+        badge_y1 = ty2 - 29
+        draw.rounded_rectangle((col2 + 12, badge_y1, tx2 - 12, ty2 - 8), radius=5, fill=navy)
+        draw.text(((col2 + tx2) // 2, (badge_y1 + ty2 - 8) // 2), f"BEST R:R → {best_label} (1:{best_rr:.2f})", font=f_table_small, fill=(255, 255, 255, 255), anchor="mm")
+
+    # Small educational footer matching the approved reference style.
+    f_note = _font(8, False, True)
+    draw.text((20, height - 14), "ⓘ  Educational analysis only. Wait for a new M5 trigger before executing.", font=f_note, fill=(83, 88, 93, 235), anchor="la")
+
 def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
     """Build deterministic render geometry only; never create a market decision."""
     width, height = _reconstructed_dimensions(analysis)
@@ -7663,7 +7993,7 @@ def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
         # Preserve the future lane even after a plan completes so consecutive
         # renders do not jump horizontally.  Execution graphics themselves are
         # still removed by the lifecycle guard.
-        "future_space_ratio": 0.27 if plan and template_id else 0.23 if dual_watch and template_id else 0.12 if template_id else 0.06,
+        "future_space_ratio": 0.22 if plan and template_id else 0.20 if dual_watch and template_id else 0.12 if template_id else 0.06,
     }
 
 
@@ -7671,7 +8001,7 @@ def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """V7.4 reference sheet: anchored SMC geometry + Entry-origin scenario paths."""
+    """V7.5 approved reference sheet: broad M5 context + anchored SMC + Entry paths."""
     scene = _build_reference_visual_scene(analysis)
     width, height = int(scene["canvas"]["width"]), int(scene["canvas"]["height"])
     palette = _reconstructed_palette(analysis)
@@ -7681,9 +8011,10 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    # 16:9 reference-sheet composition: title at top, chart in the middle,
-    # TradingView-like legend strip at the bottom.
-    margin_l, margin_r, margin_t, margin_b = 58, 182, 112, 182
+    # 16:9 approved composition.  The chart occupies the upper ~64% and the
+    # lower third is reserved for Arrow Rules, Legend and Trade Plan Summary,
+    # matching the user's approved second image.
+    margin_l, margin_r, margin_t, margin_b = 20, 175, 95, 325
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
     draw.rounded_rectangle((left, top, right, bottom), radius=8, fill=palette["plot"], outline=palette["border"], width=1)
@@ -7730,7 +8061,9 @@ def _render_reconstructed_market_chart(
     f_title = _font(30, True, True)
     f_sub = _font(15, True, True)
     f_label = _font(16, True, True)
-    draw.text((left, 26), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
+    draw.text((left, 20), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
+    # Fine divider used by the approved reference header.
+    draw.line((300, 16, 300, 58), fill=(88, 93, 98, 145), width=1)
 
     lifecycle_state = str((scene.get("trade_lifecycle") or {}).get("state") or "none")
     expired = lifecycle_state in {"expired", "target_hit", "invalidated"} or bool(analysis.get("scenario_expired"))
@@ -7756,7 +8089,7 @@ def _render_reconstructed_market_chart(
         headline = "BULLISH REVERSAL · SMART MONEY CONCEPTS"
     else:
         headline = _reference_template_title(analysis) if template_id else "MARKET STRUCTURE"
-    draw.text(((left + right) // 2, 30), headline, font=f_title, fill=palette["text"], anchor="ma")
+    draw.text(((left + right) // 2 + 55, 22), headline, font=f_title, fill=palette["text"], anchor="ma")
 
     components = set(str(x) for x in (analysis.get("reference_scenario_draw_components") or []))
     scenario_geom = analysis.get("reference_scenario_geometry") if isinstance(analysis.get("reference_scenario_geometry"), dict) else {}
@@ -7783,18 +8116,19 @@ def _render_reconstructed_market_chart(
         seq = [item for item in seq if item != "CONTINUATION"]
         seq.append("OLD PLAN COMPLETE · WAIT FOR NEW M5 TRIGGER")
     if seq:
-        draw.text(((left + right) // 2, 68), " · ".join(seq[:4]), font=f_sub, fill=palette["muted"], anchor="ma")
+        draw.text(((left + right) // 2 + 40, 61), " · ".join(seq[:5]), font=f_sub, fill=palette["muted"], anchor="ma")
 
     if template_id:
         _draw_reconstructed_reference_zones(draw, analysis, candles, candle_x, price_y, plot, f_label, candle_right)
         _draw_reconstructed_reference_scenario(image, analysis, candles, candle_x, price_y, plot, palette, f_label, candle_right)
         _draw_reference_trade_plan(draw, analysis, price_y, plot, candle_right, f_label)
+        _draw_reference_expected_sequence_inset(draw, analysis, plot)
     else:
         # Keep rejection visible to logs/data, not as chart clutter.
         pass
     _draw_reference_price_axis_and_cards(draw, analysis, price_y, price_min, price_max, plot, f_label)
     if template_id:
-        _draw_reference_legend(draw, analysis, plot, width, height)
+        _draw_reference_footer_panels(draw, analysis, plot, width, height)
 
     out = io.BytesIO()
     # ImageDraw writes RGBA fills by replacement; composite once onto the paper
@@ -8032,7 +8366,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v7.4", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v7.5", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)
