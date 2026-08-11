@@ -6421,11 +6421,32 @@ def _reference_confirmation_label(analysis: dict[str, Any]) -> str:
 
 
 def _reference_setup_status(analysis: dict[str, Any]) -> str:
+    """Visual lifecycle label without changing SaleeM execution gates.
+
+    A deterministic pattern can be confirmed while execution is still blocked by
+    the existing SaleeM gates.  In that case the renderer must not present an
+    actionable CONFIRMED trade.
+    """
+    plan = _resolve_reference_trade_plan(analysis)
+    lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
+    state = str(lifecycle.get("state") or "none")
+    if state == "target_hit":
+        return "TARGET HIT"
+    if state == "invalidated":
+        return "SETUP INVALIDATED"
+    if state == "expired":
+        return "SETUP EXPIRED"
+    if state == "active":
+        return "CONFIRMED"
+    if state == "conditional":
+        if plan and bool(plan.get("pattern_confirmed")):
+            return "PATTERN CONFIRMED · WATCH"
+        return "CANDIDATE"
+
     overlays = [item for item in (analysis.get("pattern_overlays") or []) if isinstance(item, dict)]
-    if overlays:
-        return "CONFIRMED" if str(overlays[0].get("status") or "candidate") == "confirmed" else "CANDIDATE"
-    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
-    return "CONFIRMED" if bool(action.get("is_confirmed")) else "WATCH"
+    if overlays and str(overlays[0].get("status") or "candidate") == "confirmed":
+        return "PATTERN CONFIRMED · WATCH"
+    return "WATCH"
 
 
 def _reconstructed_palette(analysis: dict[str, Any]) -> dict[str, tuple[int, int, int, int]]:
@@ -6817,8 +6838,8 @@ def _draw_reconstructed_reference_scenario(
             if idx >= 0:
                 x1 = max(left, candle_x[idx] - 6)
                 x2 = min(right - 28, max(candle_x[idx] + 90, candle_right + 28))
-                fill = (105, 105, 105, 42) if bias == "صاعد" else (222, 77, 86, 44)
-                outline = (110, 110, 110, 155) if bias == "صاعد" else (209, 76, 84, 175)
+                fill = (77, 153, 100, 42) if bias == "صاعد" else (225, 145, 76, 44)
+                outline = (61, 130, 82, 165) if bias == "صاعد" else (196, 116, 48, 175)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
                 draw.rectangle((x1, yy1, x2, yy2), fill=fill, outline=outline, width=1)
                 draw.text((x2 - 8, yy1 + 5), "OB", font=font, fill=helper_text, anchor="ra")
@@ -6835,8 +6856,8 @@ def _draw_reconstructed_reference_scenario(
                 x1 = max(left, candle_x[max(0, idx - 1)])
                 x2 = min(right - 28, max(candle_x[idx] + 88, candle_right + 18))
                 yy1, yy2 = min(y1, y2), max(y1, y2)
-                draw.rectangle((x1, yy1, x2, yy2), fill=(250, 219, 86, 70), outline=(191, 155, 35, 185), width=1)
-                draw.text((x2 - 8, yy1 + 5), "FVG", font=font, fill=(119, 91, 12, 245), anchor="ra")
+                draw.rectangle((x1, yy1, x2, yy2), fill=(91, 155, 211, 48), outline=(62, 126, 181, 175), width=1)
+                draw.text((x2 - 8, yy1 + 5), "FVG", font=font, fill=(43, 94, 143, 245), anchor="ra")
 
     if "liquidity" in components:
         sweep = geom.get("liquidity_sweep") if isinstance(geom.get("liquidity_sweep"), dict) else None
@@ -6867,6 +6888,12 @@ def _draw_reconstructed_reference_scenario(
                 draw.text((x, min(y1, y2) - 7), "ENGULFING", font=font, fill=accent, anchor="ms")
 
 def _resolve_reference_trade_plan(analysis: dict[str, Any]) -> dict[str, Any] | None:
+    """Return real deterministic plan geometry, never a new trade decision.
+
+    ``confirmed`` means the existing SaleeM execution gate is confirmed.
+    ``pattern_confirmed`` records deterministic pattern confirmation separately
+    so the visual layer can explain a confirmed pattern that is still WATCH.
+    """
     action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
     side = str(action.get("primary_side") or "wait")
     confirmed = bool(action.get("is_confirmed")) and side in {"buy", "sell"}
@@ -6875,7 +6902,10 @@ def _resolve_reference_trade_plan(analysis: dict[str, Any]) -> dict[str, Any] | 
         stop = _number(analysis.get("stop_loss"))
         target = _number(analysis.get("target_1"))
         if entry is not None and stop is not None and target is not None:
-            return {"side": side, "entry": float(entry), "stop": float(stop), "target": float(target), "confirmed": True}
+            return {
+                "side": side, "entry": float(entry), "stop": float(stop), "target": float(target),
+                "confirmed": True, "pattern_confirmed": True, "source": "execution",
+            }
 
     overlays = [item for item in (analysis.get("pattern_overlays") or []) if isinstance(item, dict)]
     if overlays:
@@ -6887,8 +6917,60 @@ def _resolve_reference_trade_plan(analysis: dict[str, Any]) -> dict[str, Any] | 
         bias = str(overlay.get("bias") or "محايد")
         side = "buy" if bias == "صاعد" else "sell" if bias == "هابط" else "wait"
         if side != "wait" and entry is not None and stop is not None and target is not None:
-            return {"side": side, "entry": float(entry), "stop": float(stop), "target": float(target), "confirmed": False}
+            return {
+                "side": side, "entry": float(entry), "stop": float(stop), "target": float(target),
+                "confirmed": False,
+                "pattern_confirmed": str(overlay.get("status") or "candidate") == "confirmed",
+                "source": "pattern",
+            }
     return None
+
+
+def _reference_trade_lifecycle(
+    analysis: dict[str, Any],
+    plan: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve display lifecycle from closed-market price and existing plan.
+
+    This prevents stale plans from being drawn as new entries.  It never changes
+    BUY/SELL/Watch, pattern status, trigger, stop, or target.
+    """
+    plan = plan or _resolve_reference_trade_plan(analysis)
+    if not plan:
+        return {"state": "none", "current": None}
+
+    side = str(plan.get("side") or "wait")
+    entry = float(plan["entry"]); stop = float(plan["stop"]); target = float(plan["target"])
+    valid = (side == "buy" and stop < entry < target) or (side == "sell" and stop > entry > target)
+    if not valid:
+        return {"state": "invalid_geometry", "current": None}
+
+    current = _number(analysis.get("current_price"))
+    if current is None:
+        current = _number(analysis.get("market_last_close"))
+    current_f = float(current) if current is not None else None
+    if current_f is None:
+        return {"state": "active" if bool(plan.get("confirmed")) else "conditional", "current": None}
+
+    tol = max(0.02, abs(entry) * 1e-6)
+    confirmed = bool(plan.get("confirmed"))
+    if side == "buy":
+        target_reached = current_f >= target - tol
+        invalidated = current_f <= stop + tol
+    else:
+        target_reached = current_f <= target + tol
+        invalidated = current_f >= stop - tol
+
+    if invalidated:
+        state = "invalidated"
+    elif target_reached:
+        # Only an execution-confirmed plan can be called TARGET HIT.  A
+        # conditional pattern whose price is already beyond its objective is a
+        # stale opportunity and must not be presented as a new trade.
+        state = "target_hit" if confirmed else "expired"
+    else:
+        state = "active" if confirmed else "conditional"
+    return {"state": state, "current": current_f}
 
 
 def _draw_reference_trade_plan(
@@ -6902,6 +6984,9 @@ def _draw_reference_trade_plan(
     """Compact reference-style risk/reward block in future space only."""
     plan = _resolve_reference_trade_plan(analysis)
     if not plan:
+        return
+    lifecycle = _reference_trade_lifecycle(analysis, plan)
+    if lifecycle.get("state") not in {"active", "conditional"}:
         return
     left, top, right, bottom = plot
     side = str(plan["side"])
@@ -6927,7 +7012,7 @@ def _draw_reference_trade_plan(
     red_border = (193, 63, 70, 145)
     draw.rectangle((x1, min(ey, ty), x2, max(ey, ty)), fill=green)
     draw.rectangle((x1, min(ey, sy), x2, max(ey, sy)), fill=red)
-    if bool(plan["confirmed"]):
+    if lifecycle.get("state") == "active":
         draw.rectangle((x1, min(ey, ty), x2, max(ey, ty)), outline=green_border, width=2)
         draw.rectangle((x1, min(ey, sy), x2, max(ey, sy)), outline=red_border, width=2)
     else:
@@ -6944,7 +7029,7 @@ def _draw_reference_trade_plan(
     bend_y = ey - retrace if bullish else ey + retrace
     bend_y = max(top + 16, min(bottom - 16, bend_y))
     path_color = (48, 54, 59, 205)
-    _recon_arrow(draw, [(x1 + 12, ey), (bend_x, bend_y), (end_x, ty)], path_color, width=3, dashed=not bool(plan["confirmed"]))
+    _recon_arrow(draw, [(x1 + 12, ey), (bend_x, bend_y), (end_x, ty)], path_color, width=3, dashed=lifecycle.get("state") != "active")
 
 def _draw_reference_price_axis_and_cards(
     draw: ImageDraw.ImageDraw,
@@ -6961,28 +7046,45 @@ def _draw_reference_price_axis_and_cards(
     line_color = (150, 155, 160, 100)
     tick_label_x = right + 145
 
-    for i in range(8):
-        ratio = i / 7
+    tick_count = 9
+    for i in range(tick_count):
+        ratio = i / (tick_count - 1)
         price = price_max - (price_max - price_min) * ratio
         y = int(round(top + (bottom - top) * ratio))
         draw.line((right + 3, y, right + 10, y), fill=line_color, width=1)
         draw.text((tick_label_x, y), _fmt_axis_price(price), font=font, fill=tick_color, anchor="rm")
 
     plan = _resolve_reference_trade_plan(analysis)
+    lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
+    state = str(lifecycle.get("state") or "none")
     cards: list[tuple[str, float, tuple[int,int,int,int]]] = []
-    if plan:
+    if plan and state == "active":
         cards.extend([
-            ("ENTRY" if plan["confirmed"] else "ENTRY IF", float(plan["entry"]), (36, 147, 85, 242)),
-            ("STOP" if plan["confirmed"] else "CANCEL", float(plan["stop"]), (201, 62, 70, 242)),
+            ("ENTRY", float(plan["entry"]), (36, 147, 85, 242)),
+            ("STOP", float(plan["stop"]), (201, 62, 70, 242)),
             ("TARGET", float(plan["target"]), (42, 158, 91, 242)),
         ])
+    elif plan and state == "conditional":
+        cards.extend([
+            ("ENTRY IF", float(plan["entry"]), (36, 147, 85, 242)),
+            ("CANCEL", float(plan["stop"]), (201, 62, 70, 242)),
+            ("TARGET", float(plan["target"]), (42, 158, 91, 242)),
+        ])
+    elif plan and state == "target_hit":
+        cards.append(("TARGET HIT", float(plan["target"]), (42, 158, 91, 242)))
+    elif plan and state == "invalidated":
+        cards.append(("INVALIDATED", float(plan["stop"]), (201, 62, 70, 242)))
+    elif plan and state == "expired":
+        cards.append(("SETUP EXPIRED", float(plan["entry"]), (92, 98, 104, 238)))
 
-    current = _number(analysis.get("visual_current_price"))
+    # The market closed M5 price drives lifecycle and is the preferred visible
+    # price.  Image/manual current price is a display fallback only.
+    current = _number(analysis.get("current_price"))
     if current is None:
-        current = _number(analysis.get("current_price"))
+        current = _number(analysis.get("visual_current_price"))
     if current is not None and price_min <= float(current) <= price_max:
         if not plan or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
-            cards.append(("PRICE", float(current), (55, 61, 67, 238)))
+            cards.append(("CURRENT", float(current), (55, 61, 67, 238)))
 
     # Y stays exact. If labels are close, only the X lane changes.
     lanes = [right - 14, right - 180]
@@ -6995,11 +7097,11 @@ def _draw_reference_price_axis_and_cards(
         if any(abs(y - py) < 32 and pl == 0 for py, pl in placed):
             lane = 1
         card_right = lanes[lane]
-        card_left = card_right - 158
+        card_left = card_right - 174
         # exact price connector remains at Y; only card shifts horizontally.
         draw.line((card_right, y, right + 3, y), fill=(color[0], color[1], color[2], 150), width=1)
-        draw.rounded_rectangle((card_left, y - 14, card_right, y + 14), radius=5, fill=color)
-        draw.text((card_right - 8, y), f"{label} {_fmt_axis_price(price)}", font=font, fill=(255,255,255,255), anchor="rm")
+        draw.rounded_rectangle((card_left, y - 16, card_right, y + 16), radius=6, fill=color)
+        draw.text((card_right - 9, y), f"{label} {_fmt_axis_price(price)}", font=font, fill=(255,255,255,255), anchor="rm")
         placed.append((y, lane))
 
 def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
@@ -7018,6 +7120,9 @@ def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
     if template_id and visual_score and visual_score < 68:
         rejection = rejection or "pattern_score_below_68"
         template_id = ""
+    plan = _resolve_reference_trade_plan(analysis)
+    lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none", "current": None}
+    live_plan = lifecycle.get("state") in {"active", "conditional"}
     return {
         "canvas": {"width": width, "height": height},
         "candles": candles,
@@ -7027,7 +7132,12 @@ def _build_reference_visual_scene(analysis: dict[str, Any]) -> dict[str, Any]:
         "template_id": template_id,
         "visual_score": visual_score,
         "rejection_reason": rejection,
-        "future_space_ratio": 0.22 if _resolve_reference_trade_plan(analysis) else 0.16,
+        "trade_lifecycle": lifecycle,
+        # Keep the approved reference-sheet composition stable whenever a real
+        # deterministic plan exists. Completed/invalidated plans no longer draw
+        # the risk box, but the empty future lane avoids layout jumps between
+        # consecutive renders of the same setup.
+        "future_space_ratio": 0.22 if plan and template_id else 0.16 if template_id else 0.08,
     }
 
 
@@ -7045,7 +7155,7 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    margin_l, margin_r, margin_t, margin_b = 58, 166, 126, 72
+    margin_l, margin_r, margin_t, margin_b = 58, 182, 126, 72
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
     draw.rounded_rectangle((left, top, right, bottom), radius=8, fill=palette["plot"], outline=palette["border"], width=1)
@@ -7091,10 +7201,17 @@ def _render_reconstructed_market_chart(
 
     f_title = _font(31, True, True)
     f_sub = _font(16, True, True)
-    f_label = _font(15, True, True)
+    f_label = _font(16, True, True)
     draw.text((left, 34), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
 
-    headline = _reference_template_title(analysis) if template_id else "MARKET STRUCTURE"
+    if template_id in {"multiple_tops", "bearish_smc_reversal"}:
+        headline = "BEARISH REVERSAL · SMART MONEY"
+    elif template_id in {"multiple_bottoms", "bullish_smc_reversal"}:
+        headline = "BULLISH REVERSAL · SMART MONEY"
+    elif template_id == "distribution":
+        headline = "DISTRIBUTION · STRUCTURE BREAK"
+    else:
+        headline = _reference_template_title(analysis) if template_id else "MARKET STRUCTURE"
     draw.text(((left + right) // 2, 38), headline, font=f_title, fill=palette["text"], anchor="ma")
     model = str(analysis.get("pattern_type") or "")
     model_label = _reference_model_english(model) if model and model != "لا يوجد" else ""
