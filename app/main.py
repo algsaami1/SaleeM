@@ -1,3 +1,4 @@
+from typing import Optional
 import logging
 import os
 import re
@@ -89,7 +90,7 @@ templates.env.filters["logic_text"] = _logic_text
 class TradeFeedbackPayload(BaseModel):
     trade_result: str = Field(..., pattern="^(win|loss|open|no_trade)$")
     rating: int = Field(..., ge=1, le=5)
-    notes: str | None = Field(default="", max_length=700)
+    notes: Optional[str] = Field(default="", max_length=700)
 
 
 class NotePayload(BaseModel):
@@ -255,8 +256,8 @@ async def submit_note(payload: NotePayload):
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(
     request: Request,
-    image: UploadFile | None = File(None),
-    current_price_ref: str | None = Form(None),
+    image: Optional[UploadFile] = File(None),
+    current_price_ref: Optional[str] = Form(None),
 ):
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
     if not image or not image.filename:
