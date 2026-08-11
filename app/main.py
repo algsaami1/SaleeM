@@ -137,8 +137,8 @@ async def health():
         "window": "flexible market candle window",
         "storage": "market-and-analysis-snapshot-json-cache",
         "memory": "read-only",
-        "renderer": "saleem-visual-overlay-clarity-v3.68.0",
-        "ui": "saleem-rich-original-chart-overlay-ui-v3.68.0",
+        "renderer": "saleem-clean-chart-ui-v3.77.0",
+        "ui": "saleem-clean-chart-external-rules-ui-v3.77.0",
         "market_data": "Twelve Data: M5/M15/H1/H4",
         "openai_configured": bool(os.getenv("OPENAI_API_KEY", "").strip()),
         "twelve_data_configured": bool(os.getenv("TWELVE_DATA_API_KEY", "").strip()),
@@ -363,3 +363,4 @@ async def analyze(
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
+ok=True)

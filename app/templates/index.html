@@ -191,23 +191,54 @@
         <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
       </section>
 
-      <nav class="terminal-timeframes" aria-label="الفريمات"><span>M1</span><strong>M5</strong><span>M15</span><span>H1</span><span>H4</span><span>D1</span></nav>
-
-      <div class="terminal-metrics terminal-metrics-bottom" aria-label="ملخص القرار">
-        <article class="recommendation-tile"><span>القرار الآن</span><b>{{ action_title }}</b><small>{{ action_instruction }}</small></article>
-        <article><span>تفعيل صعود</span><b class="tone-green">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
-        <article><span>تفعيل هبوط</span><b class="tone-red">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b><small>بعد إغلاق M5</small></article>
-        <article><span>سبب الانتظار</span><b class="tone-gold">{% if decision_zone.get('active') %}داخل منطقة قرار{% elif result.rule_check and result.rule_check.first_missing %}{{ result.rule_check.first_missing }}{% else %}{{ action_badge }}{% endif %}</b><small>{{ action_reason|truncate(32, True, '…') }}</small></article>
-      </div>
-
-      <section class="saleem-ui-rule-card" id="saleem-ui-rule-card-v371" aria-label="القاعدة الأساسية">
-        <div class="saleem-ui-rule-title">
-          <span>القاعدة الأساسية</span>
-          <b>{{ result.reference_scenario_label or result.pattern_type or 'السيناريو الأقرب' }}</b>
+      <section class="v77-scenarios" aria-label="سيناريوهات الشراء والبيع">
+        <div class="v77-section-head">
+          <div><span>السيناريوهات</span><b>{{ action_title }}</b></div>
+          <small>{{ action_instruction }}</small>
         </div>
-        <p>{{ result.reference_scenario_rule or result.pattern_reference_rule or action_reason or 'لا توجد قاعدة مرجعية مكتملة بدرجة كافية لهذه النتيجة.' }}</p>
+        <div class="v77-scenario-grid">
+          {% if result.draw_mode == 'watch' or action_primary in ['wait','buy'] %}
+          <article class="v77-scenario v77-buy{% if action_primary == 'buy' and action_confirmed %} active{% endif %}">
+            <header><span aria-hidden="true">↗</span><b>اختراق صاعد</b><strong>{{ buy_plan.get('score', result.buy_probability or 0)|int }}٪</strong></header>
+            <div><span>التفعيل</span><b dir="ltr">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b></div>
+            <div><span>الهدف الأقرب</span><b dir="ltr">{% if buy_plan.get('display_target') %}{{ '%.2f'|format(buy_plan.get('display_target')) }}{% else %}—{% endif %}</b></div>
+            <small>Break → Retest → Continuation بعد إغلاق M5 صالح.</small>
+          </article>
+          {% endif %}
+          {% if result.draw_mode == 'watch' or action_primary in ['wait','sell'] %}
+          <article class="v77-scenario v77-sell{% if action_primary == 'sell' and action_confirmed %} active{% endif %}">
+            <header><span aria-hidden="true">↘</span><b>رفض / كسر هابط</b><strong>{{ sell_plan.get('score', result.sell_probability or 0)|int }}٪</strong></header>
+            <div><span>التفعيل</span><b dir="ltr">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b></div>
+            <div><span>الهدف الأقرب</span><b dir="ltr">{% if sell_plan.get('display_target') %}{{ '%.2f'|format(sell_plan.get('display_target')) }}{% else %}—{% endif %}</b></div>
+            <small>Break → Retest → Continuation بعد إغلاق M5 صالح.</small>
+          </article>
+          {% endif %}
+        </div>
       </section>
 
+      <section class="v77-trade-plan" aria-label="خطة الصفقة">
+        <div class="v77-section-head"><div><span>خطة الصفقة</span><b>المستويات الحقيقية</b></div><small>لا تُفعّل صفقة جديدة دون Trigger جديد على M5.</small></div>
+        <div class="v77-plan-levels">
+          <div><span>Entry</span><b dir="ltr">{% if result.entry %}{{ '%.2f'|format(result.entry) }}{% elif action_trigger %}{{ '%.2f'|format(action_trigger) }}{% else %}—{% endif %}</b></div>
+          <div class="stop"><span>Stop / Cancel</span><b dir="ltr">{% if result.stop_loss %}{{ '%.2f'|format(result.stop_loss) }}{% elif action_cancel %}{{ '%.2f'|format(action_cancel) }}{% else %}—{% endif %}</b></div>
+          <div class="tp"><span>TP1</span><b dir="ltr">{% if result.target_1 %}{{ '%.2f'|format(result.target_1) }}{% else %}—{% endif %}</b></div>
+          <div class="tp"><span>TP2</span><b dir="ltr">{% if result.target_2 %}{{ '%.2f'|format(result.target_2) }}{% else %}—{% endif %}</b></div>
+          <div class="tp"><span>TP3</span><b dir="ltr">{% if result.target_3 %}{{ '%.2f'|format(result.target_3) }}{% else %}—{% endif %}</b></div>
+        </div>
+      </section>
+
+      <details class="v77-drawing-rules">
+        <summary><span><b>قواعد الرسم</b><small>شرح الأسهم والرموز — خارج الشارت</small></span><i aria-hidden="true">⌄</i></summary>
+        <div class="v77-rule-grid">
+          <div><i class="rule-up">↗</i><span><b>المسار الصاعد</b><small>بنفسجي — اختراق ثم إعادة اختبار ثم استمرار.</small></span></div>
+          <div><i class="rule-down">↘</i><span><b>المسار الهابط</b><small>أسود — رفض أو كسر ثم إعادة اختبار ثم استمرار.</small></span></div>
+          <div><i class="rule-origin">●</i><span><b>بداية المسار</b><small>جميع الأسهم تبدأ من Entry الحقيقي فقط.</small></span></div>
+          <div><i class="rule-trigger">M5</i><span><b>التفعيل</b><small>لا صفقة جديدة قبل Trigger جديد على شمعة M5 مغلقة.</small></span></div>
+        </div>
+        <div class="v77-legend" aria-label="دليل رموز الشارت">
+          <span class="liq">Liquidity Sweep</span><span class="bos">BOS</span><span class="choch">MSS / CHOCH</span><span class="ob">Order Block</span><span class="fvg">FVG</span>
+        </div>
+      </details>
 
       <div class="result-actions terminal-actions" aria-label="خيارات النتيجة">
         <button class="result-action save-button" id="save-image-button" type="button">حفظ النتيجة</button>
@@ -235,6 +266,11 @@
           <span aria-hidden="true">✓</span>
           <div><b>الخلاصة</b><p>اكتملت قراءة الصورة. {{ explanation.summary or result.market_reading_comment }}</p></div>
         </div>
+
+        <section class="explanation-block v77-reference-rule">
+          <h3><span aria-hidden="true">R</span> القاعدة المرجعية</h3>
+          <p><strong>{{ result.reference_scenario_label or result.pattern_type or 'السيناريو الأقرب' }}:</strong> {{ result.reference_scenario_rule or result.pattern_reference_rule or action_reason or 'لم تكتمل قاعدة مرجعية بدرجة كافية.' }}</p>
+        </section>
 
         <section class="quick-reading-panel" id="reading-card" aria-label="قراءة التحليل">
           <div class="quick-reading-grid">

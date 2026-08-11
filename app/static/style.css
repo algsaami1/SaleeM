@@ -1528,3 +1528,62 @@ body.saleem-gallery-open-v374{overflow:hidden!important;overscroll-behavior:none
 
 .current-price-reference-fields{max-width:520px;margin-left:auto;margin-right:auto}
 .current-price-reference-fields label{max-width:280px;width:100%;margin:0 auto}
+
+
+/* =====================================================================
+   V7.7 — CLEAN CHART / UI-OWNED RULES
+   The PNG contains only market geometry. Rules, legend, scenarios and trade
+   plan are native interface components outside the chart.
+   ===================================================================== */
+body[data-has-result="true"] .terminal-chart-card.result-chart-box,
+body[data-has-result="true"] .terminal-chart-card.result-chart-box-v371{
+  margin:10px 0 12px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:14px!important;
+  background:#fff!important;
+  box-shadow:none!important;
+}
+body[data-has-result="true"] .result-chart-box .chart-pan-viewport,
+body[data-has-result="true"] .result-chart-box-v371 .chart-pan-viewport{
+  border-radius:14px!important;
+  background:#fff!important;
+}
+body[data-has-result="true"] .terminal-timeframes{display:none!important}
+
+.v77-scenarios,.v77-trade-plan,.v77-drawing-rules{
+  margin:10px 0 0;
+  padding:12px;
+  border:1px solid #e8ecef;
+  border-radius:16px;
+  background:#fff;
+  box-shadow:0 3px 12px rgba(22,29,37,.035);
+}
+.v77-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px}
+.v77-section-head>div{display:grid;gap:2px}.v77-section-head span{color:#858b93;font-size:8px;font-weight:700}.v77-section-head b{font-size:12px;color:#23272d}.v77-section-head>small{max-width:55%;color:#858b93;font-size:7.5px;line-height:1.6;text-align:left}
+.v77-scenario-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.v77-scenario{min-width:0;padding:10px;border:1px solid #e8ecef;border-radius:13px;background:#fbfcfd}
+.v77-scenario header{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:6px;margin-bottom:8px}.v77-scenario header span{font-size:18px}.v77-scenario header b{font-size:10px}.v77-scenario header strong{padding:3px 6px;border-radius:999px;font-size:9px}
+.v77-scenario>div{display:flex;align-items:center;justify-content:space-between;gap:7px;padding:5px 0;border-top:1px solid #eef1f3}.v77-scenario>div span{color:#858b93;font-size:7.5px}.v77-scenario>div b{font-size:10px}.v77-scenario>small{display:block;margin-top:6px;color:#858b93;font-size:7px;line-height:1.5}
+.v77-buy{border-color:#d9ece0;background:#fbfefc}.v77-buy header span,.v77-buy header b,.v77-buy>div b{color:#27854c}.v77-buy header strong{background:#eaf7ee;color:#27854c}.v77-buy.active{box-shadow:0 0 0 2px rgba(39,133,76,.10)}
+.v77-sell{border-color:#efdadd;background:#fffdfd}.v77-sell header span,.v77-sell header b,.v77-sell>div b{color:#c43e48}.v77-sell header strong{background:#fcecef;color:#c43e48}.v77-sell.active{box-shadow:0 0 0 2px rgba(196,62,72,.10)}
+
+.v77-plan-levels{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}.v77-plan-levels>div{display:grid;gap:3px;padding:8px 5px;border:1px solid #edf0f2;border-radius:10px;background:#fafbfc;text-align:center}.v77-plan-levels span{color:#858b93;font-size:7px}.v77-plan-levels b{color:#2d333a;font-size:10px;font-variant-numeric:tabular-nums}.v77-plan-levels .stop b{color:#c43e48}.v77-plan-levels .tp b{color:#27854c}
+
+.v77-drawing-rules{padding:0;overflow:hidden}.v77-drawing-rules>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px}.v77-drawing-rules>summary::-webkit-details-marker{display:none}.v77-drawing-rules>summary span{display:grid;gap:2px}.v77-drawing-rules>summary b{font-size:11px;color:#252a30}.v77-drawing-rules>summary small{font-size:7.5px;color:#858b93}.v77-drawing-rules>summary i{font-style:normal;color:#7b828a}.v77-drawing-rules[open]>summary{border-bottom:1px solid #eef1f3}
+.v77-rule-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:10px}.v77-rule-grid>div{display:flex;align-items:center;gap:8px;padding:8px;border-radius:11px;background:#f8f9fa}.v77-rule-grid i{width:28px;height:28px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;font-style:normal;font-weight:800;font-size:13px}.v77-rule-grid span{display:grid;gap:2px}.v77-rule-grid b{font-size:9px}.v77-rule-grid small{color:#7f868e;font-size:7px;line-height:1.45}.v77-rule-grid .rule-up{background:#efe9fb;color:#6334b5}.v77-rule-grid .rule-down{background:#edf0f2;color:#2f353b}.v77-rule-grid .rule-origin{background:#eef2f5;color:#69717a}.v77-rule-grid .rule-trigger{background:#eaf2fc;color:#2b70c9;font-size:9px}
+.v77-legend{display:flex;flex-wrap:wrap;gap:6px;padding:0 10px 11px}.v77-legend span{padding:5px 8px;border-radius:999px;border:1px solid #e6eaed;background:#fff;font-size:7px;font-weight:750}.v77-legend .liq{color:#d34a53}.v77-legend .bos{color:#27854c}.v77-legend .choch{color:#6e45a3}.v77-legend .ob{color:#b16b2b}.v77-legend .fvg{color:#397bae}
+.v77-reference-rule{background:#fbfcfd!important}
+
+@media(max-width:640px){
+  .v77-scenario-grid{grid-template-columns:1fr 1fr}
+  .v77-section-head>small{max-width:58%;font-size:6.8px}
+  .v77-plan-levels{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+  .v77-plan-levels>div{padding:7px 2px}.v77-plan-levels span{font-size:6.2px}.v77-plan-levels b{font-size:8.2px}
+  .v77-rule-grid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:430px){
+  .v77-scenarios,.v77-trade-plan,.v77-drawing-rules{border-radius:14px}
+  .v77-scenario{padding:8px}.v77-scenario header b{font-size:8.5px}.v77-scenario header strong{font-size:7.8px}
+  .v77-scenario>div b{font-size:8.5px}.v77-scenario>small{font-size:6.3px}
+}

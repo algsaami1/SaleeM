@@ -441,3 +441,8 @@ V7.5 keeps the screenshot-matched real M5 segment anchored at the right edge whi
 ## V7.6 — Wide Dual-Watch + Below-Candle Labels
 
 V7.6 expands the approved reconstructed result to a 1920×1080 canvas, keeps both mutually-exclusive BUY and SELL conditional paths visible in WATCH / RE-EVALUATE whenever both sides have valid deterministic triggers/targets, and moves candle-event labels below their source candles using collision lanes and leader lines. Market-owned anchors and prices never move. Active confirmed trades still render only one execution path. The right axis and Trade Plan Summary expose BUY/SELL trigger prices and strength percentages during watch states.
+
+
+## V7.7 — Clean Chart + UI-owned Rules
+
+V7.7 turns the reconstructed result PNG into a chart-only visual surface. Arrow rules, legend, scenario conditions and trade-plan summary are native HTML UI below the chart; the timeframe strip is removed. The chart keeps only real candles, validated SMC geometry, projected Entry-origin paths/candles and exact right-axis price cards.

@@ -8154,7 +8154,7 @@ def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """V7.6 approved wide reference sheet: broad M5 context + anchored SMC + Entry paths."""
+    """V7.7 clean chart: market geometry only; explanations live in the app UI."""
     scene = _build_reference_visual_scene(analysis)
     width, height = int(scene["canvas"]["width"]), int(scene["canvas"]["height"])
     palette = _reconstructed_palette(analysis)
@@ -8164,13 +8164,13 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    # 16:9 approved composition.  The chart occupies the upper ~64% and the
-    # lower third is reserved for Arrow Rules, Legend and Trade Plan Summary,
-    # matching the user's approved second image.
-    margin_l, margin_r, margin_t, margin_b = 24, 215, 100, 360
+    # V7.7: the PNG is a chart, not a report sheet.  Rules, legend and plan
+    # summaries are rendered as real HTML UI outside the image.  This gives
+    # the candles substantially more vertical room and removes report boxes.
+    margin_l, margin_r, margin_t, margin_b = 24, 215, 100, 72
     plot = (margin_l, margin_t, width - margin_r, height - margin_b)
     left, top, right, bottom = plot
-    draw.rounded_rectangle((left, top, right, bottom), radius=8, fill=palette["plot"], outline=palette["border"], width=1)
+    draw.rectangle((left, top, right, bottom), fill=palette["plot"])
     _draw_reference_texture(draw, plot)
 
     price_min, price_max = float(scene["price_min"]), float(scene["price_max"])
@@ -8275,13 +8275,12 @@ def _render_reconstructed_market_chart(
         _draw_reconstructed_reference_zones(draw, analysis, candles, candle_x, price_y, plot, f_label, candle_right)
         _draw_reconstructed_reference_scenario(image, analysis, candles, candle_x, price_y, plot, palette, f_label, candle_right)
         _draw_reference_trade_plan(draw, analysis, price_y, plot, candle_right, f_label)
-        _draw_reference_expected_sequence_inset(draw, analysis, plot)
     else:
         # Keep rejection visible to logs/data, not as chart clutter.
         pass
     _draw_reference_price_axis_and_cards(draw, analysis, price_y, price_min, price_max, plot, f_label)
-    if template_id:
-        _draw_reference_footer_panels(draw, analysis, plot, width, height)
+    # V7.7 deliberately does not paint Expected-Sequence, Arrow-Rules, Legend
+    # or Trade-Plan report boxes into the PNG.  Those belong to the app UI.
 
     out = io.BytesIO()
     # ImageDraw writes RGBA fills by replacement; composite once onto the paper
@@ -8531,3 +8530,4 @@ def render_result(analysis: dict[str, Any], chart_background_path: str | os.Path
     if bool(analysis.get("reconstructed_market_chart")):
         return _render_reconstructed_market_chart(analysis, chart_background_path)
     return _render_uploaded_chart_with_overlays(analysis, chart_background_path)
+rt_with_overlays(analysis, chart_background_path)
