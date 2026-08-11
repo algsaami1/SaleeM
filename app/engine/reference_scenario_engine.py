@@ -1,4 +1,4 @@
-"""Reference-scenario matcher for SaleeM v7.3.
+"""Reference-scenario matcher for SaleeM v7.4.
 
 This module converts the user's approved reference examples into deterministic
 scenario templates.  Visual similarity may rank a template, but no scenario is
@@ -251,16 +251,23 @@ def _order_blocks(candles: list[dict[str, float]]) -> list[dict[str, Any]]:
         impulse_bull = impulse["close"] >= impulse["open"]
         if body < baseline * 1.35 or prev_bull == impulse_bull:
             continue
+        body_low = min(prev["open"], prev["close"])
+        body_high = max(prev["open"], prev["close"])
         out.append({
             "index": i-1,
             "anchor_index": i-1,
+            # Preserve the full source candle range for audit, but use the real
+            # body as the primary visual OB band so one long wick cannot create
+            # an oversized rectangle across the chart.
             "low": prev["low"],
             "high": prev["high"],
-            "price_level": (prev["low"] + prev["high"]) / 2.0,
+            "zone_low": body_low,
+            "zone_high": body_high,
+            "price_level": (body_low + body_high) / 2.0,
             "strength": min(100, int(58 + body / baseline * 12)),
             "side": "bull" if impulse_bull else "bear",
             "impulse_index": i,
-            "validation_reason": "last_opposite_candle_before_real_impulse",
+            "validation_reason": "last_opposite_candle_body_before_real_impulse",
         })
     return out[-8:]
 

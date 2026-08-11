@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7.3",
+        "smc_real_chart_style_version": "v7.4",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -1076,6 +1076,22 @@ ANALYSIS_SCHEMA = {
     ],
 }
 
+VISUAL_CANDLE_SIGNATURE = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "side": {"type": "string", "enum": ["bull", "bear", "doji"]},
+        # Ratios are visual only: 0 = top of the visible candle cluster,
+        # 1 = bottom. They are never converted directly into a market price.
+        "high_ratio": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "low_ratio": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    },
+    "required": ["side", "high_ratio", "low_ratio"],
+}
+
+# Keep the legacy current-price-only schema as a public invariant used by the
+# app/tests. V7.4's richer screenshot fingerprint has its own isolated schema
+# so it still cannot be confused with price-axis calibration.
 GEOMETRY_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -1085,6 +1101,20 @@ GEOMETRY_SCHEMA = {
     },
     "required": ["chart_readable", "current_price"],
 }
+
+CHART_FINGERPRINT_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "chart_readable": {"type": "boolean"},
+        "current_price": NUM_NULL,
+        "visible_candle_count": {"type": ["integer", "null"], "minimum": 0, "maximum": 60},
+        "last_visible_time_label": {"type": "string"},
+        "visible_candles": {"type": "array", "items": VISUAL_CANDLE_SIGNATURE, "maxItems": 24},
+    },
+    "required": ["chart_readable", "current_price", "visible_candle_count", "last_visible_time_label", "visible_candles"],
+}
+
 
 VISUAL_STRUCTURE_LINE = {
     "type": "object",
@@ -1588,35 +1618,215 @@ def _write_cached_market_decision(snapshot_key: str, decision: dict[str, Any]) -
 
 
 def _extract_chart_geometry(path: Path) -> dict[str, Any]:
-    """Read only the current-price label from the uploaded chart.
+    """Read current price plus a *shape-only* signature of visible candles.
 
-    The screenshot is a visual reference, never a price-axis geometry source.
-    No Y calibration, axis ticks, pattern, trend, entry, stop or target may be
-    inferred here.
+    The screenshot never supplies OHLC prices, support/resistance, OB/FVG,
+    Entry/Stop/Targets or a market decision.  V7.4 uses the visible candle
+    colors and relative wick positions only as a fingerprint to locate the
+    matching contiguous M5 segment from the real market feed.  The match must
+    then pass a deterministic score gate before it may drive the rendered
+    candle window or SMC geometry.
     """
-    prompt = """أنت قارئ بصري لسعر XAUUSD الحالي فقط. هذه ليست مهمة تحليل سوق.
+    prompt = """أنت قارئ بصري لمطابقة شارت XAUUSD فقط، وليست هذه مهمة تحليل سوق.
 
-استخرج عنصرين فقط من صورة الشارت:
-- chart_readable: true إذا أمكن رؤية الشارت وقراءة ملصق السعر الحالي بثقة.
-- current_price: الرقم الموجود في ملصق السعر الحالي المرتبط بآخر شمعة. تجاهل BUY/SELL أعلى الشاشة وأي أرقام أوامر تداول.
+استخرج من صورة الشارت العناصر التالية فقط:
+1) chart_readable: true إذا كان الشارت واضحًا.
+2) current_price: الرقم الموجود في ملصق السعر الحالي المرتبط بآخر شمعة. تجاهل BUY/SELL وأي أوامر تداول.
+3) visible_candle_count: عدد الشموع الظاهرة فعليًا داخل نافذة الشارت تقريبًا، دون عد أيقونات الواجهة.
+4) last_visible_time_label: آخر وقت ظاهر أسفل الشارت كما هو، أو نص فارغ إذا لم يكن واضحًا.
+5) visible_candles: من اليسار إلى اليمين، خذ آخر 6 إلى 18 شمعة واضحة فقط. لكل شمعة أعد:
+   - side = bull أو bear أو doji.
+   - high_ratio و low_ratio كنسبة بصرية فقط داخل مجموعة الشموع المختارة: 0 يعني أعلى المجموعة و1 يعني أسفلها.
 
-ممنوع استنتاج الاتجاه أو النماذج أو الدعم أو المقاومة أو الدخول أو الوقف أو الهدف.
-ممنوع قراءة أو تخمين محور الأسعار. إذا لم يكن السعر الحالي واضحًا أعد null."""
+ممنوع تحويل high_ratio/low_ratio إلى أسعار. ممنوع قراءة أو تخمين محور الأسعار. ممنوع استنتاج اتجاه أو نموذج أو BOS/CHOCH/OB/FVG أو دخول/وقف/هدف. إذا تعذر تمييز الشموع أعد visible_candles فارغة."""
     geometry = _request_structured_openai(
         prompt=prompt,
-        schema=GEOMETRY_SCHEMA,
-        schema_name="saleem_current_price_only",
+        schema=CHART_FINGERPRINT_SCHEMA,
+        schema_name="saleem_chart_segment_fingerprint_v74",
         image_path=path,
-        max_output_tokens=320,
+        max_output_tokens=1200,
     )
+    signature: list[dict[str, Any]] = []
+    for item in geometry.get("visible_candles") or []:
+        if not isinstance(item, dict):
+            continue
+        side = str(item.get("side") or "doji")
+        if side not in {"bull", "bear", "doji"}:
+            side = "doji"
+        hi = _number(item.get("high_ratio")); lo = _number(item.get("low_ratio"))
+        if hi is None or lo is None:
+            continue
+        hi_f = max(0.0, min(1.0, float(hi)))
+        lo_f = max(0.0, min(1.0, float(lo)))
+        if lo_f < hi_f:
+            hi_f, lo_f = lo_f, hi_f
+        signature.append({"side": side, "high_ratio": round(hi_f, 4), "low_ratio": round(lo_f, 4)})
+    count = geometry.get("visible_candle_count")
+    try:
+        count_i = int(count) if count is not None else None
+    except (TypeError, ValueError):
+        count_i = None
+    if count_i is not None:
+        count_i = max(0, min(60, count_i))
     return {
         "chart_readable": bool(geometry.get("chart_readable")),
         "current_price": _number(geometry.get("current_price")),
+        "visible_candle_count": count_i,
+        "last_visible_time_label": str(geometry.get("last_visible_time_label") or "")[:48],
+        "visible_candles": signature[-18:],
         "current_price_y_ratio": None,
         "image_price_high": None,
         "image_price_low": None,
         "image_axis_labels": [],
     }
+
+
+def _visual_signature_normalized(signature: Any) -> list[dict[str, Any]]:
+    """Normalize visual wick ratios to the signature's own visible span."""
+    rows = [item for item in (signature or []) if isinstance(item, dict)]
+    if len(rows) < 6:
+        return []
+    highs = [_number(item.get("high_ratio")) for item in rows]
+    lows = [_number(item.get("low_ratio")) for item in rows]
+    if any(v is None for v in highs + lows):
+        return []
+    top = min(float(v) for v in highs if v is not None)
+    bottom = max(float(v) for v in lows if v is not None)
+    span = bottom - top
+    if span < 0.08:
+        return []
+    out: list[dict[str, Any]] = []
+    for item in rows:
+        hi = (float(item["high_ratio"]) - top) / span
+        lo = (float(item["low_ratio"]) - top) / span
+        out.append({
+            "side": str(item.get("side") or "doji"),
+            "high_ratio": max(0.0, min(1.0, hi)),
+            "low_ratio": max(0.0, min(1.0, lo)),
+        })
+    return out
+
+
+def _market_segment_signature(candles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    if len(candles) < 2:
+        return []
+    hi = max(float(c["high"]) for c in candles)
+    lo = min(float(c["low"]) for c in candles)
+    span = hi - lo
+    if span <= 1e-9:
+        return []
+    out: list[dict[str, Any]] = []
+    for candle in candles:
+        open_, close = float(candle["open"]), float(candle["close"])
+        body = abs(close - open_)
+        full = max(0.01, float(candle["high"]) - float(candle["low"]))
+        if body <= full * 0.08:
+            side = "doji"
+        else:
+            side = "bull" if close > open_ else "bear"
+        out.append({
+            "side": side,
+            "high_ratio": (hi - float(candle["high"])) / span,
+            "low_ratio": (hi - float(candle["low"])) / span,
+        })
+    return out
+
+
+def _match_visual_market_segment(
+    geometry: dict[str, Any],
+    market_candles: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Deterministically match the screenshot fingerprint to real M5 OHLC.
+
+    A visual fingerprint can select *which* real candles to display, but it can
+    never create or move a price.  Acceptance requires wick-shape agreement,
+    candle-side agreement and (when present) proximity of the screenshot's
+    literal current-price label to the candidate's last candle.
+    """
+    visual = _visual_signature_normalized(geometry.get("visible_candles"))
+    if len(visual) < 6 or len(market_candles) < len(visual):
+        return {
+            "matched": False,
+            "score": None,
+            "confidence": 0,
+            "reason": "insufficient_visual_signature",
+            "visible_count": int(geometry.get("visible_candle_count") or len(visual) or 0),
+        }
+
+    n = len(visual)
+    recent_limit = max(n, min(len(market_candles), 120))
+    search_start = max(0, len(market_candles) - recent_limit)
+    current = _number(geometry.get("current_price"))
+    best: dict[str, Any] | None = None
+
+    for start in range(search_start, len(market_candles) - n + 1):
+        segment = market_candles[start:start+n]
+        market_sig = _market_segment_signature(segment)
+        if len(market_sig) != n:
+            continue
+        wick_error = 0.0
+        side_mismatch = 0.0
+        side_comparable = 0
+        for v, m in zip(visual, market_sig):
+            wick_error += (abs(float(v["high_ratio"]) - float(m["high_ratio"])) + abs(float(v["low_ratio"]) - float(m["low_ratio"]))) / 2.0
+            vs, ms = str(v.get("side")), str(m.get("side"))
+            if vs != "doji" and ms != "doji":
+                side_comparable += 1
+                if vs != ms:
+                    side_mismatch += 1.0
+            elif vs != ms:
+                side_mismatch += 0.35
+        wick_error /= n
+        side_error = side_mismatch / max(1, side_comparable if side_comparable else n)
+
+        ranges = [max(0.01, float(c["high"]) - float(c["low"])) for c in segment]
+        atr = max(0.05, statistics.median(ranges))
+        endpoint_error = 0.0
+        if current is not None:
+            last = segment[-1]
+            # The screenshot label may belong to a forming candle, so accept a
+            # hit anywhere inside/near its real wick before penalizing close.
+            if float(last["low"]) - atr * 0.35 <= float(current) <= float(last["high"]) + atr * 0.35:
+                endpoint_error = 0.0
+            else:
+                endpoint_error = min(2.0, abs(float(last["close"]) - float(current)) / max(atr, 0.05))
+
+        # Shape dominates. Side sequence is a strong second gate. Current-price
+        # proximity is a tie-breaker rather than a source of geometry.
+        score = wick_error * 0.64 + side_error * 0.28 + min(1.0, endpoint_error) * 0.08
+        candidate = {
+            "matched": False,
+            "score": round(score, 4),
+            "wick_error": round(wick_error, 4),
+            "side_error": round(side_error, 4),
+            "endpoint_error": round(endpoint_error, 4),
+            "start_index": start,
+            "end_index": start + n - 1,
+            "segment": copy.deepcopy(segment),
+        }
+        if best is None or float(candidate["score"]) < float(best["score"]):
+            best = candidate
+
+    if best is None:
+        return {"matched": False, "score": None, "confidence": 0, "reason": "no_candidate", "visible_count": n}
+
+    accepted = bool(
+        float(best["score"]) <= 0.31
+        and float(best["side_error"]) <= 0.42
+        and float(best["wick_error"]) <= 0.34
+        and (current is None or float(best["endpoint_error"]) <= 1.25)
+    )
+    confidence = max(0, min(100, int(round((1.0 - min(1.0, float(best["score"]) / 0.45)) * 100))))
+    best.update({
+        "matched": accepted,
+        "confidence": confidence if accepted else min(confidence, 54),
+        "reason": "visual_shape_market_ohlc_match" if accepted else "visual_shape_match_below_gate",
+        "visible_count": int(geometry.get("visible_candle_count") or n),
+        "last_visible_time_label": str(geometry.get("last_visible_time_label") or "")[:48],
+        "matched_start_time": str((best.get("segment") or [{}])[0].get("time") or ""),
+        "matched_end_time": str((best.get("segment") or [{}])[-1].get("time") or ""),
+    })
+    return best
 
 
 _REFERENCE_FAMILY_SOURCE_IDS = {
@@ -4874,8 +5084,8 @@ def _analyze(path: Path) -> dict[str, Any]:
         market_context = _closed_market_context(raw_market_context)
         display_m5_source = copy.deepcopy(((market_context.get("frames") or {}).get("M5") or []))
         market_frames = market_context.get("frames", {})
+        prompt_m5_count = max(20, min(60, int(os.getenv("PROMPT_M5_CANDLES", "40"))))
         if isinstance(market_frames, dict) and isinstance(market_frames.get("M5"), list):
-            prompt_m5_count = max(20, min(60, int(os.getenv("PROMPT_M5_CANDLES", "40"))))
             market_frames["M5"] = market_frames["M5"][-prompt_m5_count:]
 
         closed_market_data = copy.deepcopy(market_data)
@@ -4908,9 +5118,35 @@ def _analyze(path: Path) -> dict[str, Any]:
     # The visual match is never allowed to invent geometry; it must be verified
     # by the deterministic closed-candle M5 detector before anything is drawn.
     geometry = _extract_chart_geometry(path)
+
+    # V7.4: before SMC drawing, fingerprint the visible screenshot candles and
+    # locate their real contiguous M5 segment.  This never changes the market
+    # decision; it selects only the visual/SMC review window after a strict
+    # deterministic match gate.
+    alignment_market = _normalize_candles(live_m5[-display_count:] if live_m5 else (display_m5_source[-display_count:] if display_m5_source else closed_m5[-display_count:]))
+    chart_market_match = _match_visual_market_segment(geometry, alignment_market)
+    visual_review_frames = copy.deepcopy(market_context.get("frames") or {})
+    if bool(chart_market_match.get("matched")) and alignment_market:
+        try:
+            matched_end = int(chart_market_match.get("end_index"))
+        except (TypeError, ValueError):
+            matched_end = len(alignment_market) - 1
+        matched_end = max(0, min(len(alignment_market) - 1, matched_end))
+        closed_times = {
+            str(item.get("time") or "")
+            for item in display_m5_source
+            if isinstance(item, dict)
+        }
+        aligned_closed = [
+            item for item in alignment_market[:matched_end + 1]
+            if not closed_times or str(item.get("time") or "") in closed_times
+        ]
+        if len(aligned_closed) >= 8:
+            visual_review_frames["M5"] = copy.deepcopy(aligned_closed[-prompt_m5_count:])
+
     # The user screenshot no longer ranks pattern families.  The closest model
-    # comes from real closed OHLC + the 43-rule library; the image remains only
-    # for current-price/axis/style calibration.
+    # comes from real OHLC; the image contributes only a shape fingerprint that
+    # must match real M5 candles before it can select the visual review window.
     visual_pattern_match = {
         "matched": False,
         "pattern_family": "none",
@@ -4935,9 +5171,9 @@ def _analyze(path: Path) -> dict[str, Any]:
     )
 
     pattern_review = _merge_reference_pattern_review(
-        review_market_patterns(market_context.get("frames") or {}),
+        review_market_patterns(visual_review_frames),
         visual_pattern_match,
-        market_context.get("frames") or {},
+        visual_review_frames,
     )
 
     canonical_input = {
@@ -4981,6 +5217,38 @@ def _analyze(path: Path) -> dict[str, Any]:
         snapshot_key=snapshot_key,
         snapshot_reused=snapshot_reused,
     )
+
+    projected["chart_market_alignment_passed"] = bool(chart_market_match.get("matched"))
+    projected["chart_market_alignment_score"] = chart_market_match.get("score")
+    projected["chart_market_alignment_confidence"] = int(chart_market_match.get("confidence") or 0)
+    projected["chart_market_alignment_reason"] = str(chart_market_match.get("reason") or "")
+    projected["chart_market_alignment_start_time"] = str(chart_market_match.get("matched_start_time") or "")
+    projected["chart_market_alignment_end_time"] = str(chart_market_match.get("matched_end_time") or "")
+    projected["chart_visible_candle_count"] = int(geometry.get("visible_candle_count") or chart_market_match.get("visible_count") or 0)
+    projected["chart_last_visible_time_label"] = str(geometry.get("last_visible_time_label") or "")[:48]
+
+    matched_segment = chart_market_match.get("segment") if bool(chart_market_match.get("matched")) else None
+    if isinstance(matched_segment, list) and len(matched_segment) >= 6:
+        projected["render_candles"] = copy.deepcopy(matched_segment)
+        projected["render_candle_source"] = "screenshot_matched_real_m5"
+        projected["render_visible_candle_count"] = len(matched_segment)
+    else:
+        fallback_count = int(geometry.get("visible_candle_count") or 0)
+        fallback_count = max(8, min(42, fallback_count)) if fallback_count else 18
+        projected["render_candles"] = copy.deepcopy(normalized_market[-fallback_count:])
+        projected["render_candle_source"] = "recent_real_m5_alignment_fallback"
+        projected["render_visible_candle_count"] = len(projected["render_candles"])
+
+    # Fail closed for visual SMC geometry when a clear screenshot fingerprint
+    # exists but cannot be tied to a real M5 segment. The market decision stays
+    # intact; only unrelated drawings are suppressed.
+    if len(geometry.get("visible_candles") or []) >= 6 and not bool(chart_market_match.get("matched")):
+        projected["reference_scenario_available"] = False
+        projected["reference_scenario_draw_components"] = []
+        projected["pattern_overlays"] = []
+        projected["visual_template_id"] = None
+        projected["reference_visual_rejection_reason"] = "chart_market_segment_unmatched"
+
     return _enrich_dual_scenarios(projected)
 
 
@@ -5036,17 +5304,25 @@ def analyze_chart_image(
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
     rebuild_landscape = True
     analysis["reconstructed_market_chart"] = True
-    try:
-        analysis["render_visible_candle_count"] = max(28, min(64, int(os.getenv("SALEEM_RENDER_CANDLES", "42"))))
-    except ValueError:
-        analysis["render_visible_candle_count"] = 42
+    # V7.4 follows the uploaded chart's visible-candle density whenever the
+    # screenshot-to-market matcher resolved a real M5 segment.  Do not force a
+    # 28/42-candle window that makes a tight broker screenshot look unrelated.
+    if isinstance(analysis.get("render_candles"), list) and len(analysis.get("render_candles") or []) >= 6:
+        analysis["render_visible_candle_count"] = len(analysis["render_candles"])
+    else:
+        detected_count = int(analysis.get("chart_visible_candle_count") or 0)
+        try:
+            default_count = int(os.getenv("SALEEM_RENDER_CANDLES", "18"))
+        except ValueError:
+            default_count = 18
+        analysis["render_visible_candle_count"] = max(8, min(64, detected_count or default_count))
     analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
     analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
     analysis["uploaded_chart_role"] = "visual_calibration_reference"
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.3"
+    analysis["smc_real_chart_style_version"] = "v7.4"
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
     analysis["arrow_rules_version"] = "v1"
     analysis["arrow_rules"] = {

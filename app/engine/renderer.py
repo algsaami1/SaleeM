@@ -3550,9 +3550,14 @@ def _reference_direction(analysis: dict[str, Any], entry: float | None = None, t
     return "هابط"
 
 
-def _valid_renderer_candles(analysis: dict[str, Any]) -> list[dict[str, Any]]:
+def _valid_renderer_candles(
+    analysis: dict[str, Any],
+    *,
+    prefer_render_window: bool = False,
+) -> list[dict[str, Any]]:
     items = []
-    for candle in analysis.get("candles") or []:
+    raw = analysis.get("render_candles") if prefer_render_window and isinstance(analysis.get("render_candles"), list) else analysis.get("candles")
+    for candle in raw or []:
         if not isinstance(candle, dict):
             continue
         if all(_number(candle.get(key)) is not None for key in ("open", "high", "low", "close")):
@@ -6475,14 +6480,14 @@ def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]
     focuses on roughly 3.5 hours (42 M5 candles) unless explicitly overridden.
     Geometry outside this trailing window is simply not drawn.
     """
-    all_candles = _valid_renderer_candles(analysis)
+    all_candles = _valid_renderer_candles(analysis, prefer_render_window=True)
     if not all_candles:
         return [], 0
     try:
-        desired = int(analysis.get("render_visible_candle_count") or 104)
+        desired = int(analysis.get("render_visible_candle_count") or len(all_candles))
     except (TypeError, ValueError):
-        desired = 104
-    desired = max(28, min(120, desired))
+        desired = len(all_candles)
+    desired = max(8, min(120, desired))
     window = all_candles[-desired:]
     return window, len(all_candles) - len(window)
 
@@ -6952,11 +6957,13 @@ def _draw_reconstructed_reference_scenario(
         block = geom.get("order_block") if isinstance(geom.get("order_block"), dict) else None
         if block:
             idx = map_index(block.get("index"))
-            hi, lo = _number(block.get("high")), _number(block.get("low"))
+            hi = _number(block.get("zone_high")) or _number(block.get("high"))
+            lo = _number(block.get("zone_low")) or _number(block.get("low"))
             if idx is not None and hi is not None and lo is not None:
                 y1, y2 = price_y(float(hi)), price_y(float(lo))
                 x1 = max(left, candle_x[idx] - 8)
-                x2 = min(right - 26, max(candle_x[idx] + 100, candle_right + 42))
+                zone_width = max(110, min(260, int((right - left) * 0.22)))
+                x2 = min(right - 26, x1 + zone_width)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
                 fill = (231, 174, 116, 62) if bias == "هابط" else (99, 176, 116, 50)
                 outline = orange if bias == "هابط" else green
@@ -6971,7 +6978,8 @@ def _draw_reconstructed_reference_scenario(
             if idx is not None and hi is not None and lo is not None:
                 y1, y2 = price_y(float(hi)), price_y(float(lo))
                 x1 = max(left, candle_x[max(0, idx - 1)] - 4)
-                x2 = min(right - 26, max(candle_x[idx] + 86, candle_right + 30))
+                zone_width = max(100, min(240, int((right - left) * 0.20)))
+                x2 = min(right - 26, x1 + zone_width)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
                 draw.rectangle((x1, yy1, x2, yy2), fill=(114, 173, 219, 48), outline=blue, width=1)
                 draw.text((x1 + 12, (yy1 + yy2) // 2), "FVG", font=font, fill=blue, anchor="lm")
@@ -7086,9 +7094,26 @@ def _resolve_reference_trade_plan(analysis: dict[str, Any]) -> dict[str, Any] | 
         bias = str(overlay.get("bias") or "محايد")
         side = "buy" if bias == "صاعد" else "sell" if bias == "هابط" else "wait"
         if side != "wait" and entry is not None and stop is not None and target is not None:
+            pattern_targets: list[float] = [float(target)]
+            # Reuse only analyzer-owned TP prices that are directionally valid
+            # for this same pattern geometry.  This exposes TP2/TP3 when real
+            # deterministic targets already exist; the renderer never creates
+            # synthetic filler levels.
+            for key in ("target_1", "target_2", "target_3"):
+                value = _number(analysis.get(key))
+                if value is None:
+                    continue
+                value_f = float(value)
+                valid = (side == "buy" and float(stop) < float(entry) < value_f) or (side == "sell" and float(stop) > float(entry) > value_f)
+                if not valid:
+                    continue
+                if all(abs(value_f - existing) >= 0.05 for existing in pattern_targets):
+                    pattern_targets.append(value_f)
+            pattern_targets.sort(reverse=(side == "sell"))
+            pattern_targets = pattern_targets[:3]
             return {
-                "side": side, "entry": float(entry), "stop": float(stop), "target": float(target),
-                "targets": [float(target)],
+                "side": side, "entry": float(entry), "stop": float(stop), "target": float(pattern_targets[0]),
+                "targets": pattern_targets,
                 "confirmed": False,
                 "pattern_confirmed": str(overlay.get("status") or "candidate") == "confirmed",
                 "source": "pattern",
@@ -7646,7 +7671,7 @@ def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """V7.3 reference sheet: anchored SMC geometry + Entry-origin scenario paths."""
+    """V7.4 reference sheet: anchored SMC geometry + Entry-origin scenario paths."""
     scene = _build_reference_visual_scene(analysis)
     width, height = int(scene["canvas"]["width"]), int(scene["canvas"]["height"])
     palette = _reconstructed_palette(analysis)
@@ -7709,13 +7734,22 @@ def _render_reconstructed_market_chart(
 
     lifecycle_state = str((scene.get("trade_lifecycle") or {}).get("state") or "none")
     expired = lifecycle_state in {"expired", "target_hit", "invalidated"} or bool(analysis.get("scenario_expired"))
+    scenario_bias = str(analysis.get("reference_scenario_bias") or analysis.get("pattern_bias") or "محايد")
+    confirmed_execution = lifecycle_state == "active" and str(analysis.get("draw_mode") or "watch") == "confirmed"
     if expired:
-        if template_id in {"multiple_tops", "bearish_smc_reversal", "distribution"}:
+        if scenario_bias == "هابط":
             headline = "BEARISH STRUCTURE · WATCH / RE-EVALUATE"
-        elif template_id in {"multiple_bottoms", "bullish_smc_reversal"}:
+        elif scenario_bias == "صاعد":
             headline = "BULLISH STRUCTURE · WATCH / RE-EVALUATE"
         else:
             headline = "MARKET STRUCTURE · WATCH / RE-EVALUATE"
+    elif not confirmed_execution and template_id:
+        if scenario_bias == "هابط":
+            headline = "BEARISH REVERSAL CANDIDATE · WAIT M5 TRIGGER"
+        elif scenario_bias == "صاعد":
+            headline = "BULLISH REVERSAL CANDIDATE · WAIT M5 TRIGGER"
+        else:
+            headline = "MARKET STRUCTURE · WATCH / M5 TRIGGER"
     elif template_id in {"multiple_tops", "bearish_smc_reversal", "distribution"}:
         headline = "BEARISH REVERSAL · SMART MONEY CONCEPTS"
     elif template_id in {"multiple_bottoms", "bullish_smc_reversal"}:
@@ -7998,7 +8032,7 @@ def render_share_snapshot(analysis: dict[str, Any], chart_png: bytes) -> bytes:
 
     footer_y = bottom_y2 + 28
     _draw_rtl(draw, (canvas_w - pad, footer_y), "تحليل فني تعليمي، وليس توصية استثمارية.", f_small, (145, 163, 187, 255), anchor="ra")
-    draw.text((pad, footer_y), "SaleeM v7.3", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
+    draw.text((pad, footer_y), "SaleeM v7.4", font=f_small_latin, fill=(117, 137, 162, 255), anchor="la")
 
     out = io.BytesIO()
     image.convert("RGB").save(out, format="PNG", optimize=True)

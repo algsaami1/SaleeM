@@ -429,3 +429,7 @@ TWELVE_DATA_MINUTE_LIMIT=8
 ## V7.3 — Entry-origin Arrow Rules
 
 تمت إضافة TP1/TP2/TP3، شموع السيناريو Break → Retest → Continuation، ومسارات تبدأ من Entry فقط، مع بوابة تثبيت حقيقي لـ Liquidity Sweep/BOS/MSS-CHOCH/OB/FVG. راجع `V73_CHANGELOG_AR.md`.
+
+## V7.4 — Screenshot ↔ Real M5 Segment Alignment
+
+قبل رسم SMC، يطابق SaleeM بصمة آخر الشموع الظاهرة في الصورة مع مقطع M5 حقيقي من بيانات السوق. الصورة لا تولد OHLC ولا مستويات؛ تستخدم فقط لاختيار المقطع الحقيقي بعد تحقق حتمي. عند فشل المطابقة الواضحة تُحجب الرسومات غير الموثوقة. كما تتبع نافذة الرسم عدد الشموع الظاهر بدل فرض 28/42 شمعة، وتعرض حالات الانعكاس غير المفعلة كمرشح ينتظر Trigger جديد على M5.
