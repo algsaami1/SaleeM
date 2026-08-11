@@ -1,10 +1,10 @@
-from typing import Optional
 import logging
 import os
 import re
 import uuid
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -270,7 +270,7 @@ async def analyze(
         raise HTTPException(status_code=400, detail="حجم الصورة أكبر من 12 ميجابايت.")
 
     suffix = Path(image.filename).suffix.lower() or ".png"
-    temp_path: Path | None = None
+    temp_path: Optional[Path] = None
     try:
         with NamedTemporaryFile(delete=False, suffix=suffix) as temp:
             temp.write(raw)

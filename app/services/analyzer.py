@@ -969,6 +969,8 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
+        "smc_real_chart_style_version": "v7",
+        "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
     return image_path, meta
@@ -2124,26 +2126,46 @@ def _bind_market_analysis_to_image(
     snapshot_key: str,
     snapshot_reused: bool,
 ) -> dict[str, Any]:
-    """Attach screenshot reference metadata without shifting real market OHLC.
+    """Lock the *current* displayed price to the uploaded chart when trustworthy.
 
-    v3.68 keeps market decisions numerically independent from screenshot pixels.  Historical candles, levels,
-    pattern anchors and trade geometry stay at the prices returned by the
-    market provider.  A readable screenshot price is preserved separately as
-    ``visual_current_price`` and may be displayed when it remains reasonably
-    close to the live/closed market price.  This prevents stale screenshots
-    from translating the entire market structure by an artificial offset.
+    V7.2 keeps all historical OHLC, pivots, support/resistance, OB/FVG and
+    pattern geometry on the real market-provider scale.  The only screenshot
+    number allowed to become authoritative is the literal current-price label.
+    It is accepted only when it is close to the provider's live/closed price;
+    this prevents a stale screenshot from translating or corrupting structure.
     """
     result = copy.deepcopy(canonical)
-    provider_current = float(canonical.get("current_price") or canonical.get("market_last_close") or 0.0)
+    provider_closed = float(canonical.get("current_price") or canonical.get("market_last_close") or 0.0)
+    provider_live = _number(canonical.get("provider_live_price"))
+    provider_reference = float(provider_live) if provider_live is not None else provider_closed
     image_current = _number(geometry.get("current_price"))
     chart_readable = bool(geometry.get("chart_readable") and image_current is not None)
 
-    # Keep the real market decision anchored to market prices.
-    result["current_price"] = round(provider_current, 2)
-    result["provider_market_last_close"] = round(provider_current, 2)
+    raw_candles = canonical.get("candles") if isinstance(canonical.get("candles"), list) else []
+    ranges: list[float] = []
+    for candle in raw_candles[-20:]:
+        if not isinstance(candle, dict):
+            continue
+        hi, lo = _number(candle.get("high")), _number(candle.get("low"))
+        if hi is not None and lo is not None and float(hi) > float(lo):
+            ranges.append(float(hi) - float(lo))
+    atr = max(0.05, statistics.median(ranges)) if ranges else 1.0
+    # A current forming M5 candle can move materially away from the last closed
+    # candle.  Use an ATR-aware gate, but never allow a very stale screenshot.
+    lock_tolerance = max(1.25, min(12.0, atr * 3.0))
+    image_gap = abs(float(image_current) - provider_reference) if image_current is not None else None
+    image_locked = bool(chart_readable and image_gap is not None and image_gap <= lock_tolerance)
+
+    effective_current = float(image_current) if image_locked else provider_reference
+    result["current_price"] = round(effective_current, 2)
+    result["provider_market_last_close"] = round(provider_closed, 2)
+    result["provider_reference_price"] = round(provider_reference, 2)
     result["visual_current_price"] = round(float(image_current), 2) if image_current is not None else None
     result["visual_current_price_source"] = "chart_image" if image_current is not None else "unavailable"
-    result["current_price_source"] = "market_closed_m5"
+    result["current_price_source"] = "chart_image_locked" if image_locked else ("market_live" if provider_live is not None else "market_closed_m5")
+    result["current_price_reference_locked"] = image_locked
+    result["current_price_lock_tolerance"] = round(lock_tolerance, 3)
+    result["current_price_reference_gap"] = round(float(image_gap), 3) if image_gap is not None else None
 
     result.update(
         {
@@ -2152,13 +2174,14 @@ def _bind_market_analysis_to_image(
             "image_price_high": None,
             "image_price_low": None,
             "image_axis_labels": [],
-            "price_range_source": "market_ohlc_only",
-            "market_price_offset": round(float(image_current) - provider_current, 3) if image_current is not None else 0.0,
+            "price_range_source": "visible_ohlc_plus_effective_current",
+            "market_price_offset": round(float(image_current) - provider_closed, 3) if image_current is not None else 0.0,
             "analysis_snapshot_key": snapshot_key,
             "analysis_snapshot_reused": bool(snapshot_reused),
             "analysis_consistency_lock": "last_closed_m5",
             "analysis_input_role": "market_data_only",
             "image_input_role": "visual_reference_current_price_style_only",
+            "current_price_lock_mode": "trusted_chart_label_no_geometry_shift",
             "price_projection_mode": "market_ohlc_only_no_image_axis",
             "image_axis_mode": "disabled",
         }
@@ -3032,6 +3055,86 @@ def _build_decision_zone(analysis: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _apply_scenario_freshness_guard(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Prevent an already-completed plan from being shown as a fresh entry.
+
+    This is a current-state display/execution guard.  It never deletes the
+    verified historical pattern.  Once price reaches/passes the first valid
+    target, the old Entry/Target plan becomes educational history and SaleeM
+    returns to WATCH until a new closed-M5 trigger is built.
+    """
+    current = _number(analysis.get("current_price"))
+    direction = str(analysis.get("direction") or analysis.get("higher_timeframe_direction") or "غير واضح")
+    if current is None or direction not in {"صاعد", "هابط"}:
+        analysis["scenario_freshness"] = "unknown"
+        return analysis
+
+    targets = [
+        float(v) for key in ("target_1", "target_2", "target_3")
+        if (v := _number(analysis.get(key))) is not None
+    ]
+    entry = _number(analysis.get("entry"))
+    candles = _normalize_candles(analysis.get("candles"))
+    atr = max(0.05, _atr(candles)) if candles else 1.0
+    tol = max(0.05, atr * 0.06)
+
+    reached = False
+    first_target = None
+    if targets:
+        directional_targets = sorted(
+            [t for t in targets if (t > float(entry) if entry is not None and direction == "صاعد" else t < float(entry) if entry is not None else True)],
+            reverse=(direction == "هابط"),
+        )
+        if directional_targets:
+            first_target = directional_targets[0]
+            reached = float(current) >= first_target - tol if direction == "صاعد" else float(current) <= first_target + tol
+
+    if reached:
+        analysis["scenario_freshness"] = "target_reached"
+        analysis["scenario_expired"] = True
+        analysis["scenario_freshness_reason"] = (
+            f"السعر الحالي {float(current):.2f} وصل/تجاوز الهدف السابق {float(first_target):.2f}؛ "
+            "لا يُعرض الدخول القديم كفرصة جديدة."
+        )
+        analysis["draw_mode"] = "watch"
+        analysis["trade_side"] = "مراقبة"
+        analysis["confirmation_status"] = "مراقبة"
+        analysis["show_targets_as_active"] = False
+    else:
+        analysis["scenario_freshness"] = "fresh"
+        analysis["scenario_expired"] = False
+
+    # Independently mark side scenarios as retest-only if price has already
+    # travelled well beyond their old trigger. This avoids "buy now" language
+    # when the sensible use of that level is only a future retest.
+    chase_distance = max(1.0, atr * 1.15)
+    for key, bullish in (("buy_scenario_details", True), ("sell_scenario_details", False)):
+        item = analysis.get(key) if isinstance(analysis.get(key), dict) else None
+        if not item:
+            continue
+        trigger = _number(item.get("trigger_price"))
+        display_target = _number(item.get("display_target"))
+        if trigger is None:
+            continue
+        travelled = float(current) - float(trigger) if bullish else float(trigger) - float(current)
+        target_passed = bool(
+            display_target is not None and
+            ((bullish and float(current) >= float(display_target) - tol) or (not bullish and float(current) <= float(display_target) + tol))
+        )
+        if travelled > chase_distance or target_passed:
+            item["retest_only"] = True
+            item["is_active"] = False
+            item["state"] = "مراقبة"
+            item["state_code"] = "watch"
+            item["activation_status"] = "waiting_retest"
+            item["display_activation"] = f"مراقبة إعادة اختبار {float(trigger):.2f}؛ لا تطارد السعر"
+            item["waiting_for"] = item["display_activation"]
+            if target_passed:
+                item["scenario_expired"] = True
+                item["display_target"] = None
+    return analysis
+
+
 def _build_rule_check(analysis: dict[str, Any]) -> dict[str, Any]:
     """Expose the strict four-gate audit used by the result UI."""
     evidence = analysis.get("confirmation_evidence") if isinstance(analysis.get("confirmation_evidence"), dict) else {}
@@ -3049,6 +3152,7 @@ def _build_rule_check(analysis: dict[str, Any]) -> dict[str, Any]:
     trigger_ok = bool(evidence.get("m15_m5_aligned") and evidence.get("closed_m5_confirmed"))
     risk_ok = bool(evidence.get("geometry_valid"))
     blocked_by_zone = bool(zone.get("active") and zone.get("contains_current"))
+    expired_setup = bool(analysis.get("scenario_expired"))
 
     first_missing = None
     if not structure_ok:
@@ -3057,13 +3161,15 @@ def _build_rule_check(analysis: dict[str, Any]) -> dict[str, Any]:
         first_missing = "لا توجد منطقة سعرية صالحة"
     elif blocked_by_zone:
         first_missing = "السعر داخل منطقة قرار"
+    elif expired_setup:
+        first_missing = "السيناريو السابق وصل هدفه؛ بانتظار تفعيل جديد"
     elif not trigger_ok:
         first_missing = "ينقص تفعيل M15/M5 بإغلاق M5"
     elif not risk_ok:
         first_missing = "هندسة الدخول والوقف والأهداف غير صالحة"
 
-    effective_location_ok = bool(location_ok and not blocked_by_zone)
-    effective_trigger_ok = bool(trigger_ok and not blocked_by_zone)
+    effective_location_ok = bool(location_ok and not blocked_by_zone and not expired_setup)
+    effective_trigger_ok = bool(trigger_ok and not blocked_by_zone and not expired_setup)
     if not structure_ok:
         match_percent = 0
     elif not effective_location_ok:
@@ -3112,6 +3218,31 @@ def _build_action_summary(analysis: dict[str, Any]) -> dict[str, Any]:
             "strength": 0,
             "primary_side": "wait",
             "is_confirmed": False,
+        }
+
+    if bool(analysis.get("scenario_expired")):
+        current = _number(analysis.get("current_price"))
+        resistance = _nearest_level_price(analysis.get("resistance_levels"), float(current or 0.0), side="resistance") if current is not None else None
+        support = _nearest_level_price(analysis.get("support_levels"), float(current or 0.0), side="support") if current is not None else None
+        direction = str(analysis.get("direction") or "غير واضح")
+        if direction == "صاعد":
+            badge = "وصل الهدف السابق — مراقبة عند المقاومة"
+            instruction = (f"لا تطارد الشراء؛ راقب اختراق/ثبات فوق {resistance:.2f} أو إعادة اختبار جديدة" if resistance is not None else "لا تطارد الشراء؛ انتظر اختراقًا جديدًا أو إعادة اختبار صالحة")
+        elif direction == "هابط":
+            badge = "وصل الهدف السابق — مراقبة عند الدعم"
+            instruction = (f"لا تطارد البيع؛ راقب كسر/ثبات تحت {support:.2f} أو إعادة اختبار جديدة" if support is not None else "لا تطارد البيع؛ انتظر كسرًا جديدًا أو إعادة اختبار صالحة")
+        else:
+            badge = "السيناريو السابق انتهى"
+            instruction = "انتظر تفعيلًا جديدًا على شمعة M5 مغلقة"
+        return {
+            "code": "watch_fresh_setup",
+            "title": "مراقبة — إعادة تقييم",
+            "badge": badge,
+            "instruction": instruction,
+            "reason": str(analysis.get("scenario_freshness_reason") or "الهدف القديم لم يعد صالحًا كهدف جديد."),
+            "trigger": None, "target": None, "cancel": None,
+            "strength": max(int(buy.get("score") or 0), int(sell.get("score") or 0)),
+            "primary_side": "wait", "is_confirmed": False,
         }
 
     decision_zone = analysis.get("decision_zone") if isinstance(analysis.get("decision_zone"), dict) else {}
@@ -4843,6 +4974,9 @@ def _apply_manual_visual_calibration(analysis: dict[str, Any], calibration: Any)
         return False
     analysis["visual_current_price"] = round(float(current), 6)
     analysis["visual_current_price_source"] = "user_manual_current_price"
+    # Manual calibration remains display/reference metadata only. Automatic
+    # screenshot locking is handled earlier by _bind_market_analysis_to_image
+    # and is accepted only through its stale-price safety gate.
     analysis["current_price_y_ratio"] = None
     analysis["image_price_high"] = None
     analysis["image_price_low"] = None
@@ -4861,7 +4995,12 @@ def analyze_chart_image(
 ) -> dict[str, Any]:
     prepared_image_path, visual_meta = _prepare_analysis_image(image_path)
     analysis = _analyze(prepared_image_path)
-    _apply_manual_visual_calibration(analysis, manual_calibration)
+    manual_price_applied = _apply_manual_visual_calibration(analysis, manual_calibration)
+    if manual_price_applied:
+        # Side scenarios depend on the effective current location, so rebuild
+        # only those deterministic current-state cards after an explicit user
+        # price lock. The closed-candle market decision itself remains intact.
+        analysis = _enrich_dual_scenarios(analysis)
 
     # The image axis is no longer part of SaleeM calibration. The generated
     # reference-sheet chart gets its entire vertical scale from real OHLC plus
@@ -4873,12 +5012,18 @@ def analyze_chart_image(
     analysis["chart_reference_meta"] = copy.deepcopy(visual_meta)
     rebuild_landscape = True
     analysis["reconstructed_market_chart"] = True
+    try:
+        analysis["render_visible_candle_count"] = max(28, min(64, int(os.getenv("SALEEM_RENDER_CANDLES", "42"))))
+    except ValueError:
+        analysis["render_visible_candle_count"] = 42
     analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
     analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
     analysis["uploaded_chart_role"] = "visual_calibration_reference"
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
+    analysis["smc_real_chart_style_version"] = "v7.2"
+    analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
     analysis["visual_overlay_clarity_mode"] = "reference_sheet_v2_rectangular_ohlc"
     analysis["original_chart_immutable"] = True
@@ -4887,6 +5032,7 @@ def analyze_chart_image(
     analysis["breakout_summary"] = _build_breakout_summary(analysis)
     analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
     analysis["decision_zone"] = _build_decision_zone(analysis)
+    _apply_scenario_freshness_guard(analysis)
     analysis["rule_check"] = _build_rule_check(analysis)
 
     # A failed trade-entry rule does not erase a verified educational reference
