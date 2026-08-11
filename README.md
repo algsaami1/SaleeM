@@ -1,5 +1,9 @@
 # SaleeM
 
+## V7 — SMC Real Chart Renderer (2026-08-11)
+
+النتيجة الأفقية الآن تُرسم من OHLC الحقيقي بأسلوب قريب من المرجع: Equal Highs/Lows، Liquidity Sweep، BOS، MSS/CHOCH، Order Block، FVG، وخطة Entry/Stop/Target، مع منع اختلاق أي سعر أو مرساة. راجع `docs/SMC_REAL_CHART_V7_20260811.md`.
+
 ### Portrait → Landscape chart output
 
 - يمكن رفع لقطة الهاتف رأسية أو أفقية.
@@ -420,3 +424,8 @@ TWELVE_DATA_MINUTE_LIMIT=8
  v3.62 — Light Four-Color UI
 
 تم تحديث الواجهة بصريًا إلى نظام فاتح بألوان الحالات الأربع (شراء أخضر، بيع أحمر، مراقبة أزرق، مشروط برتقالي) مع إبقاء منطق التحليل ورسم الشارت دون تغيير. راجع `docs/V362_LIGHT_FOUR_COLOR_UI.md`.
+
+
+## V7.3 — Entry-origin Arrow Rules
+
+تمت إضافة TP1/TP2/TP3، شموع السيناريو Break → Retest → Continuation، ومسارات تبدأ من Entry فقط، مع بوابة تثبيت حقيقي لـ Liquidity Sweep/BOS/MSS-CHOCH/OB/FVG. راجع `V73_CHANGELOG_AR.md`.

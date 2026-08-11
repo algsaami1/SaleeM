@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7",
+        "smc_real_chart_style_version": "v7.3",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -3059,9 +3059,11 @@ def _apply_scenario_freshness_guard(analysis: dict[str, Any]) -> dict[str, Any]:
     """Prevent an already-completed plan from being shown as a fresh entry.
 
     This is a current-state display/execution guard.  It never deletes the
-    verified historical pattern.  Once price reaches/passes the first valid
-    target, the old Entry/Target plan becomes educational history and SaleeM
-    returns to WATCH until a new closed-M5 trigger is built.
+    verified historical pattern.  A confirmed multi-target plan remains alive
+    through TP1/TP2 and completes only at the final available target.  A plan
+    that was never triggered becomes stale as soon as price has already passed
+    its first objective.  In both cases a completed/stale plan returns to WATCH
+    until a new closed-M5 trigger is built.
     """
     current = _number(analysis.get("current_price"))
     direction = str(analysis.get("direction") or analysis.get("higher_timeframe_direction") or "غير واضح")
@@ -3078,8 +3080,10 @@ def _apply_scenario_freshness_guard(analysis: dict[str, Any]) -> dict[str, Any]:
     atr = max(0.05, _atr(candles)) if candles else 1.0
     tol = max(0.05, atr * 0.06)
 
-    reached = False
+    completed = False
     first_target = None
+    final_target = None
+    reached_targets: list[float] = []
     if targets:
         directional_targets = sorted(
             [t for t in targets if (t > float(entry) if entry is not None and direction == "صاعد" else t < float(entry) if entry is not None else True)],
@@ -3087,13 +3091,29 @@ def _apply_scenario_freshness_guard(analysis: dict[str, Any]) -> dict[str, Any]:
         )
         if directional_targets:
             first_target = directional_targets[0]
-            reached = float(current) >= first_target - tol if direction == "صاعد" else float(current) <= first_target + tol
+            final_target = directional_targets[-1]
+            if direction == "صاعد":
+                reached_targets = [t for t in directional_targets if float(current) >= t - tol]
+            else:
+                reached_targets = [t for t in directional_targets if float(current) <= t + tol]
+            is_confirmed_execution = str(analysis.get("draw_mode") or "watch") == "confirmed"
+            completion_level = final_target if is_confirmed_execution else first_target
+            completed = (
+                float(current) >= float(completion_level) - tol
+                if direction == "صاعد"
+                else float(current) <= float(completion_level) + tol
+            )
 
-    if reached:
-        analysis["scenario_freshness"] = "target_reached"
+    analysis["scenario_targets_reached"] = len(reached_targets)
+    analysis["scenario_target_count"] = len(directional_targets) if targets and 'directional_targets' in locals() else 0
+    analysis["scenario_last_reached_target"] = reached_targets[-1] if reached_targets else None
+
+    if completed:
+        analysis["scenario_freshness"] = "plan_complete"
         analysis["scenario_expired"] = True
+        completed_level = final_target if str(analysis.get("draw_mode") or "watch") == "confirmed" else first_target
         analysis["scenario_freshness_reason"] = (
-            f"السعر الحالي {float(current):.2f} وصل/تجاوز الهدف السابق {float(first_target):.2f}؛ "
+            f"السعر الحالي {float(current):.2f} وصل/تجاوز نهاية الخطة {float(completed_level):.2f}؛ "
             "لا يُعرض الدخول القديم كفرصة جديدة."
         )
         analysis["draw_mode"] = "watch"
@@ -3101,8 +3121,12 @@ def _apply_scenario_freshness_guard(analysis: dict[str, Any]) -> dict[str, Any]:
         analysis["confirmation_status"] = "مراقبة"
         analysis["show_targets_as_active"] = False
     else:
-        analysis["scenario_freshness"] = "fresh"
+        analysis["scenario_freshness"] = "progress" if reached_targets else "fresh"
         analysis["scenario_expired"] = False
+        if reached_targets:
+            analysis["scenario_freshness_reason"] = (
+                f"تم الوصول إلى TP{len(reached_targets)}؛ تبقى الخطة الأصلية فعالة حتى الهدف النهائي أو الإلغاء."
+            )
 
     # Independently mark side scenarios as retest-only if price has already
     # travelled well beyond their old trigger. This avoids "buy now" language
@@ -5022,8 +5046,18 @@ def analyze_chart_image(
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.2"
+    analysis["smc_real_chart_style_version"] = "v7.3"
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
+    analysis["arrow_rules_version"] = "v1"
+    analysis["arrow_rules"] = {
+        "origin": "entry_only",
+        "sequence": ["break", "retest", "continuation"],
+        "dual_path_when": "watch_ambiguity_only",
+        "max_active_scenarios": 1,
+        "projected_candles": True,
+        "targets": ["TP1", "TP2", "TP3"],
+        "m5_trigger_required": True,
+    }
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
     analysis["visual_overlay_clarity_mode"] = "reference_sheet_v2_rectangular_ohlc"
     analysis["original_chart_immutable"] = True
