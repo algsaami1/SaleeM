@@ -156,24 +156,48 @@
     {% set display_down_trigger = zone_down if decision_zone.get('active') else sell_trigger %}
     {% set peak = result.most_probable_peak or {} %}
     {% set trough = result.most_probable_trough or {} %}
+    {% set m5view = result.m5_decision_view or {} %}
+    {% set m5targets = result.m5_target_landmarks or [] %}
+    {% set next_station = m5view.get('next_station') or {} %}
 
     <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM">
-      <header class="terminal-header">
+      <header class="terminal-header m5-terminal-header">
         <a class="terminal-brand" href="/" aria-label="SaleeM"><b>SaleeM</b><small>XAUUSD / M5</small></a>
         <div class="terminal-state state-{{ trade_type_class }}"><strong>{{ trade_type_label }}</strong><span aria-hidden="true">◉</span></div>
-        <div class="terminal-update"><span>آخر تحديث</span><b>{{ result.analysis_last_closed_m5_time or '—' }}</b></div>
+        <div class="terminal-update"><span>آخر تحديث M5</span><b>{{ result.analysis_last_closed_m5_time or '—' }}</b></div>
         <a class="terminal-new" href="/" aria-label="تحليل صورة جديدة">＋</a>
       </header>
 
-      <div class="terminal-metrics terminal-metrics-top" aria-label="قراءة السوق">
-        <article><span>الاتجاه العام</span><b class="{% if (result.higher_timeframe_direction or result.direction) == 'صاعد' %}tone-green{% elif (result.higher_timeframe_direction or result.direction) == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.higher_timeframe_direction or result.direction or 'غير واضح' }}</b><small>من H4 / H1</small></article>
-        <article><span>الحركة الحالية</span><b class="{% if result.current_movement == 'صاعد' %}tone-green{% elif result.current_movement == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ result.current_movement or 'مراقبة' }}</b><small>{{ result.current_movement_strength or '—' }}</small></article>
-        <article><span>منطقة القرار</span><b class="{% if decision_zone.get('active') %}tone-gold{% else %}tone-blue{% endif %}">{% if decision_zone.get('active') %}{{ '%.2f'|format(decision_zone.low) }} - {{ '%.2f'|format(decision_zone.high) }}{% else %}{{ result.zone_behavior or 'بين مستويات' }}{% endif %}</b><small>{% if decision_zone.get('active') %}لا دخول داخلها{% else %}{{ action_badge }}{% endif %}</small></article>
-        <article><span>التفعيل</span><b class="tone-orange">{% if decision_zone.get('active') %}انتظار خروج{% elif action_confirmed %}مفعّل{% else %}منتظر{% endif %}</b><small>{% if decision_zone.get('active') %}إغلاق M5 خارج المنطقة{% else %}{{ action_instruction|truncate(34, True, '…') }}{% endif %}</small></article>
-        <article><span>النموذج</span><b class="tone-purple">{{ result.pattern_type or 'غير مكتمل' }}</b><small>{% if result.pattern_status == 'confirmed' %}مؤكد · {{ result.pattern_confidence }}٪{% elif result.pattern_status == 'candidate' %}مرشح · {{ result.pattern_confidence }}٪{% elif result.pattern_confidence %}{{ result.pattern_confidence }}٪{% else %}متابعة{% endif %}</small></article>
-      </div>
+      <section class="m5-decision-hero state-{{ trade_type_class }}" aria-label="قرار M5 الآن">
+        <div class="m5-decision-copy">
+          <small>قرار M5 الآن</small>
+          <h1>{{ action_title }}</h1>
+          <p>{{ action_instruction }}</p>
+        </div>
+        <div class="m5-decision-strength">
+          <span>الأفضلية</span>
+          <b>{{ action_strength|int }}٪</b>
+          <small>{{ action_badge }}</small>
+        </div>
+      </section>
 
-      <div class="terminal-strength"><span>تطابق القاعدة</span><div class="strength-track"><i style="width:{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}%"></i></div><b>{{ (result.rule_check.match_percent if result.rule_check else action_strength)|int }}٪</b></div>
+      <section class="m5-next-station" aria-label="المحطة السعرية التالية">
+        <span>المحطة التالية</span>
+        {% if next_station and next_station.get('price') %}
+          <b dir="ltr">{{ next_station.get('label') }} · {{ '%.2f'|format(next_station.get('price')) }}</b>
+          <small>{% if next_station.get('strength') %}قوة {{ next_station.get('strength')|int }}٪ · {% endif %}هدف تقريبي من قمة/قاع حقيقي</small>
+        {% else %}
+          <b>لا توجد قمة/قاع واضحة بعد</b>
+          <small>يبقى القرار مراقبة حتى تظهر محطة M5 حقيقية.</small>
+        {% endif %}
+      </section>
+
+      <div class="m5-quick-grid" aria-label="قراءة M5 السريعة">
+        <article><span>الاتجاه</span><b class="{% if m5view.get('direction') == 'صاعد' %}tone-green{% elif m5view.get('direction') == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ m5view.get('direction') or result.current_movement or 'غير واضح' }}</b></article>
+        <article><span>الموقع</span><b class="tone-gold">{{ m5view.get('location') or 'بين دعم ومقاومة' }}</b>{% if m5view.get('location_price') %}<small dir="ltr">{{ '%.2f'|format(m5view.get('location_price')) }}</small>{% endif %}</article>
+        <article><span>السلوك</span><b class="tone-purple">{{ m5view.get('behavior') or result.pattern_type or 'متابعة' }}</b></article>
+        <article><span>التأكيد</span><b class="tone-orange">{{ 'مفعّل' if action_confirmed else 'إغلاق M5' }}</b><small>{{ action_badge }}</small></article>
+      </div>
 
       <section class="terminal-chart-card result-chart-box" aria-label="الشارت التحليلي الثابت والقابل للتكبير">
         <div class="chart-zoom-controls" aria-label="التحكم في تكبير الشارت">
@@ -191,52 +215,43 @@
         <div class="chart-pan-hint" id="chart-pan-hint"><span>↔</span> اسحب الشارت — قرّب بإصبعين للزوم</div>
       </section>
 
-      <section class="v77-scenarios" aria-label="سيناريوهات الشراء والبيع">
-        <div class="v77-section-head">
-          <div><span>السيناريوهات</span><b>{{ action_title }}</b></div>
-          <small>{{ action_instruction }}</small>
-        </div>
-        <div class="v77-scenario-grid">
-          {% if result.draw_mode == 'watch' or action_primary in ['wait','buy'] %}
-          <article class="v77-scenario v77-buy{% if action_primary == 'buy' and action_confirmed %} active{% endif %}">
-            <header><span aria-hidden="true">↗</span><b>اختراق صاعد</b><strong>{{ buy_plan.get('score', result.buy_probability or 0)|int }}٪</strong></header>
-            <div><span>التفعيل</span><b dir="ltr">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b></div>
-            <div><span>الهدف الأقرب</span><b dir="ltr">{% if buy_plan.get('display_target') %}{{ '%.2f'|format(buy_plan.get('display_target')) }}{% else %}—{% endif %}</b></div>
-            <small>Break → Retest → Continuation بعد إغلاق M5 صالح.</small>
-          </article>
-          {% endif %}
-          {% if result.draw_mode == 'watch' or action_primary in ['wait','sell'] %}
-          <article class="v77-scenario v77-sell{% if action_primary == 'sell' and action_confirmed %} active{% endif %}">
-            <header><span aria-hidden="true">↘</span><b>رفض / كسر هابط</b><strong>{{ sell_plan.get('score', result.sell_probability or 0)|int }}٪</strong></header>
-            <div><span>التفعيل</span><b dir="ltr">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b></div>
-            <div><span>الهدف الأقرب</span><b dir="ltr">{% if sell_plan.get('display_target') %}{{ '%.2f'|format(sell_plan.get('display_target')) }}{% else %}—{% endif %}</b></div>
-            <small>Break → Retest → Continuation بعد إغلاق M5 صالح.</small>
-          </article>
-          {% endif %}
-        </div>
+      <section class="m5-trigger-strip" aria-label="شروط التفعيل">
+        {% if action_confirmed %}
+          <div class="m5-trigger active"><span>Entry</span><b dir="ltr">{% if result.entry %}{{ '%.2f'|format(result.entry) }}{% elif action_trigger %}{{ '%.2f'|format(action_trigger) }}{% else %}—{% endif %}</b></div>
+          <div class="m5-trigger cancel"><span>Cancel / Stop</span><b dir="ltr">{% if result.stop_loss %}{{ '%.2f'|format(result.stop_loss) }}{% elif action_cancel %}{{ '%.2f'|format(action_cancel) }}{% else %}—{% endif %}</b></div>
+        {% else %}
+          <div class="m5-trigger buy{% if action_primary == 'buy' %} preferred{% endif %}"><span>شراء إذا</span><b dir="ltr">{% if display_up_trigger %}&gt; {{ '%.2f'|format(display_up_trigger) }}{% else %}—{% endif %}</b><small>{{ buy_plan.get('score', result.buy_probability or 0)|int }}٪</small></div>
+          <div class="m5-trigger sell{% if action_primary == 'sell' %} preferred{% endif %}"><span>بيع إذا</span><b dir="ltr">{% if display_down_trigger %}&lt; {{ '%.2f'|format(display_down_trigger) }}{% else %}—{% endif %}</b><small>{{ sell_plan.get('score', result.sell_probability or 0)|int }}٪</small></div>
+        {% endif %}
       </section>
 
-      <section class="v77-trade-plan" aria-label="خطة الصفقة">
-        <div class="v77-section-head"><div><span>خطة الصفقة</span><b>المستويات الحقيقية</b></div><small>لا تُفعّل صفقة جديدة دون Trigger جديد على M5.</small></div>
-        <div class="v77-plan-levels">
-          <div><span>Entry</span><b dir="ltr">{% if result.entry %}{{ '%.2f'|format(result.entry) }}{% elif action_trigger %}{{ '%.2f'|format(action_trigger) }}{% else %}—{% endif %}</b></div>
-          <div class="stop"><span>Stop / Cancel</span><b dir="ltr">{% if result.stop_loss %}{{ '%.2f'|format(result.stop_loss) }}{% elif action_cancel %}{{ '%.2f'|format(action_cancel) }}{% else %}—{% endif %}</b></div>
-          <div class="tp"><span>TP1</span><b dir="ltr">{% if result.target_1 %}{{ '%.2f'|format(result.target_1) }}{% else %}—{% endif %}</b></div>
-          <div class="tp"><span>TP2</span><b dir="ltr">{% if result.target_2 %}{{ '%.2f'|format(result.target_2) }}{% else %}—{% endif %}</b></div>
-          <div class="tp"><span>TP3</span><b dir="ltr">{% if result.target_3 %}{{ '%.2f'|format(result.target_3) }}{% else %}—{% endif %}</b></div>
+      <section class="m5-target-stations" aria-label="الأهداف التقريبية من القمم والقيعان">
+        <div class="m5-target-head"><div><span>الأهداف التقريبية</span><b>قمم وقيعان حقيقية</b></div><small>قد يزور السعر هذه المحطات ويرتد منها قبل الاستمرار.</small></div>
+        {% if m5targets %}
+        <div class="m5-target-grid">
+          {% for station in m5targets[:3] %}
+          <article>
+            <span>TP{{ loop.index }}</span>
+            <b dir="ltr">{{ '%.2f'|format(station.get('price')) }}</b>
+            <small>{{ station.get('label') }}{% if station.get('strength') %} · {{ station.get('strength')|int }}٪{% endif %}</small>
+          </article>
+          {% endfor %}
         </div>
+        {% else %}
+        <p class="m5-target-empty">لا توجد حاليًا ثلاث قمم/قيعان مؤكدة صالحة لعرضها كأهداف. لن يصنع SaleeM أهدافًا وهمية.</p>
+        {% endif %}
       </section>
 
-      <details class="v77-drawing-rules">
-        <summary><span><b>قواعد الرسم</b><small>شرح الأسهم والرموز — خارج الشارت</small></span><i aria-hidden="true">⌄</i></summary>
+      <details class="v77-drawing-rules m5-drawing-rules">
+        <summary><span><b>تفاصيل الرسم</b><small>افتحها فقط عند الحاجة</small></span><i aria-hidden="true">⌄</i></summary>
         <div class="v77-rule-grid">
-          <div><i class="rule-up">↗</i><span><b>المسار الصاعد</b><small>بنفسجي — اختراق ثم إعادة اختبار ثم استمرار.</small></span></div>
-          <div><i class="rule-down">↘</i><span><b>المسار الهابط</b><small>أسود — رفض أو كسر ثم إعادة اختبار ثم استمرار.</small></span></div>
+          <div><i class="rule-up">↗</i><span><b>المسار الصاعد</b><small>أخضر — يبدأ من Entry ويُظهر المقاومة التي قد يرجع منها.</small></span></div>
+          <div><i class="rule-down">↘</i><span><b>المسار الهابط</b><small>أحمر — يبدأ من Entry ويُظهر الدعم الذي قد يرتد منه.</small></span></div>
           <div><i class="rule-origin">●</i><span><b>بداية المسار</b><small>جميع الأسهم تبدأ من Entry الحقيقي فقط.</small></span></div>
-          <div><i class="rule-trigger">M5</i><span><b>التفعيل</b><small>لا صفقة جديدة قبل Trigger جديد على شمعة M5 مغلقة.</small></span></div>
+          <div><i class="rule-trigger">M5</i><span><b>التفعيل</b><small>التفعيل بعد إغلاق M5 صالح، وليس بمجرد لمس المستوى.</small></span></div>
         </div>
         <div class="v77-legend" aria-label="دليل رموز الشارت">
-          <span class="liq">Liquidity Sweep</span><span class="bos">BOS</span><span class="choch">MSS / CHOCH</span><span class="ob">Order Block</span><span class="fvg">FVG</span>
+          <span class="liq">Liquidity</span><span class="bos">BOS</span><span class="choch">MSS / CHOCH</span><span class="ob">OB</span><span class="fvg">FVG</span>
         </div>
       </details>
 
@@ -274,7 +289,7 @@
 
         <section class="quick-reading-panel" id="reading-card" aria-label="قراءة التحليل">
           <div class="quick-reading-grid">
-            <div><span>الاتجاه العام</span><b>{{ result.higher_timeframe_direction or result.direction }}</b></div>
+            <div><span>اتجاه M5</span><b>{{ m5view.get('direction') or result.current_movement or result.direction }}</b></div>
             <div><span>حركة M5 الحالية</span><b>{{ result.current_movement }} — {{ result.current_movement_strength }}</b></div>
             <div><span>حالة القرار</span><b>{{ action_title }}</b></div>
             <div><span>المطلوب الآن</span><b>{{ action_instruction }}</b></div>
@@ -294,15 +309,6 @@
           <p>درجة الثقة: {{ result.rule_check.confidence_label or 'منخفضة' }} — تطابق {{ result.rule_check.match_percent or 0 }}٪.</p>
         </section>
         {% endif %}
-
-        <section class="explanation-block">
-          <h3><span aria-hidden="true">H</span> اتجاه الفريمات</h3>
-          <div class="frame-explanation-grid">
-            {% for frame in explanation.frames or [] %}
-            <div><strong dir="ltr">{{ frame.timeframe }}</strong><b>{{ frame.direction }}</b>{% if frame.detail %}<small>{{ frame.detail }}</small>{% endif %}</div>
-            {% endfor %}
-          </div>
-        </section>
 
         <div class="explanation-two-column">
           <section class="explanation-block"><h3><span aria-hidden="true">↕</span> البنية والحركة</h3><p>{{ explanation.structure }}</p><p class="analysis-breakout-line">{{ result.breakout_summary }}</p></section>

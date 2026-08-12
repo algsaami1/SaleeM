@@ -1591,3 +1591,145 @@ body[data-has-result="true"] .terminal-timeframes{display:none!important}
     max-height:none!important;
   }
 }
+
+/* =====================================================================
+   V7.9 — M5 SIMPLE DECISION VIEW
+   Decision first: state → next station → chart → triggers → real swing targets.
+   ===================================================================== */
+body[data-has-result="true"] .saleem-terminal{
+  width:min(100%,1040px);
+  margin:0 auto;
+  padding:10px 10px 18px;
+}
+body[data-has-result="true"] .m5-terminal-header{
+  margin-bottom:10px;
+}
+.m5-decision-hero{
+  --m5-accent:#3d8df5;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:14px;
+  align-items:center;
+  margin:0 0 8px;
+  padding:14px 16px;
+  border:1px solid color-mix(in srgb,var(--m5-accent) 58%,#27415d);
+  border-radius:16px;
+  background:linear-gradient(135deg,#081b2e,#0a2036);
+  box-shadow:inset 4px 0 0 var(--m5-accent);
+  color:#fff;
+}
+.m5-decision-hero.state-buy{--m5-accent:#24b86b}
+.m5-decision-hero.state-sell{--m5-accent:#e34e55}
+.m5-decision-hero.state-conditional{--m5-accent:#f0a33c}
+.m5-decision-hero.state-watch{--m5-accent:#438fff}
+.m5-decision-copy{min-width:0}
+.m5-decision-copy>small{display:block;color:#8fa8c2;font-size:9px;font-weight:800}
+.m5-decision-copy h1{margin:3px 0 4px;color:var(--m5-accent);font-size:24px;line-height:1.2}
+.m5-decision-copy p{margin:0;color:#e5edf6;font-size:11px;line-height:1.7;font-weight:650}
+.m5-decision-strength{
+  min-width:96px;
+  padding:10px 12px;
+  border:1px solid #294663;
+  border-radius:13px;
+  background:#061526;
+  text-align:center;
+}
+.m5-decision-strength span,.m5-decision-strength small{display:block;color:#8da3ba;font-size:8px}
+.m5-decision-strength b{display:block;margin:2px 0;color:var(--m5-accent);font-size:22px;direction:ltr}
+
+.m5-next-station{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  gap:10px;
+  align-items:center;
+  margin:0 0 8px;
+  padding:9px 12px;
+  border:1px solid #2a435c;
+  border-radius:12px;
+  background:#071728;
+  color:#dce8f4;
+}
+.m5-next-station>span{padding:4px 8px;border-radius:999px;background:#102a43;color:#7eb4f5;font-size:8px;font-weight:800;white-space:nowrap}
+.m5-next-station>b{font-size:11px;text-align:center}
+.m5-next-station>small{color:#91a6bc;font-size:7.5px;text-align:left}
+
+.m5-quick-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:7px;
+  margin:0 0 8px;
+}
+.m5-quick-grid article{
+  min-width:0;
+  padding:9px 10px;
+  border:1px solid #243d56;
+  border-radius:12px;
+  background:#08192b;
+}
+.m5-quick-grid span,.m5-quick-grid small{display:block;color:#8ea2b6;font-size:7px}
+.m5-quick-grid b{display:block;margin-top:3px;color:#eef4fa;font-size:10px;line-height:1.4;overflow-wrap:anywhere}
+
+.m5-trigger-strip{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:8px;
+  margin:8px 0;
+}
+.m5-trigger{
+  display:grid;
+  grid-template-columns:auto 1fr auto;
+  gap:8px;
+  align-items:center;
+  min-height:52px;
+  padding:9px 12px;
+  border:1px solid #2b445c;
+  border-radius:13px;
+  background:#08192a;
+}
+.m5-trigger span{font-size:8px;color:#94a8bd;font-weight:800}
+.m5-trigger b{font-size:14px;color:#eef5fb;text-align:center}
+.m5-trigger small{font-size:9px;color:#9eb1c3;direction:ltr}
+.m5-trigger.buy{border-color:#216444}.m5-trigger.buy b,.m5-trigger.buy small{color:#39c978}
+.m5-trigger.sell{border-color:#6f3037}.m5-trigger.sell b,.m5-trigger.sell small{color:#ef666d}
+.m5-trigger.active{border-color:#26774e}.m5-trigger.active b{color:#3fd083}
+.m5-trigger.cancel{border-color:#72333a}.m5-trigger.cancel b{color:#f06b72}
+.m5-trigger.preferred{box-shadow:0 0 0 1px currentColor inset;background:#0b2234}
+
+.m5-target-stations{
+  margin:8px 0;
+  padding:11px;
+  border:1px solid #27415b;
+  border-radius:14px;
+  background:#071728;
+}
+.m5-target-head{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;margin-bottom:8px}
+.m5-target-head span{display:block;color:#8ea4ba;font-size:7px}
+.m5-target-head b{display:block;margin-top:2px;color:#eef4fb;font-size:11px}
+.m5-target-head>small{color:#91a5ba;font-size:7px;text-align:left}
+.m5-target-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.m5-target-grid article{padding:9px;border:1px solid #25583f;border-radius:11px;background:#0a1d2b;text-align:center}
+.m5-target-grid span{display:block;color:#42cf82;font-size:8px;font-weight:900}
+.m5-target-grid b{display:block;margin:3px 0;color:#f4f8fb;font-size:13px}
+.m5-target-grid small{display:block;color:#9ab0a3;font-size:7px}
+.m5-target-empty{margin:0;padding:9px;border-radius:10px;background:#0a1b2c;color:#9eb0c2;font-size:8px;line-height:1.7;text-align:center}
+
+.m5-drawing-rules{margin:8px 0!important}
+.m5-drawing-rules .rule-up{color:#30b86d!important}
+.m5-drawing-rules .rule-down{color:#e34e55!important}
+
+/* Keep the decision surface light on cognitive load. Advanced analysis remains collapsed. */
+body[data-has-result="true"] .terminal-metrics-top,
+body[data-has-result="true"] .terminal-strength,
+body[data-has-result="true"] .v77-scenarios,
+body[data-has-result="true"] .v77-trade-plan{display:none!important}
+
+@media(max-width:640px){
+  body[data-has-result="true"] .saleem-terminal{padding:7px 7px 16px}
+  .m5-decision-hero{grid-template-columns:minmax(0,1fr) 78px;gap:8px;padding:11px 12px;border-radius:13px}
+  .m5-decision-copy h1{font-size:18px}.m5-decision-copy p{font-size:9px}.m5-decision-strength{min-width:0;padding:8px 5px}.m5-decision-strength b{font-size:16px}
+  .m5-next-station{grid-template-columns:auto 1fr;gap:6px;padding:8px}.m5-next-station>small{grid-column:1/-1;text-align:center}
+  .m5-quick-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}.m5-quick-grid article{padding:8px}
+  .m5-trigger-strip{gap:5px}.m5-trigger{grid-template-columns:1fr;gap:2px;text-align:center;padding:7px}.m5-trigger b{font-size:11px}
+  .m5-target-head{display:block}.m5-target-head>small{display:block;margin-top:4px;text-align:right}
+  .m5-target-grid{gap:5px}.m5-target-grid article{padding:7px 4px}.m5-target-grid b{font-size:10px}.m5-target-grid small{font-size:6.2px}
+}

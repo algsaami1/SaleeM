@@ -40,7 +40,7 @@ def test_v78_analyzer_marks_full_only_profile():
     source = Path('app/services/analyzer.py').read_text()
     assert 'analysis["render_profile"] = "full_only"' in source
     assert 'analysis["compact_chart_enabled"] = False' in source
-    assert 'analysis["smc_real_chart_style_version"] = "v7.8"' in source
+    assert 'analysis["smc_real_chart_style_version"] = "v7.9"' in source
 
 
 def test_v78_watch_cards_do_not_add_conditional_entry_targets():

@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7.8",
+        "smc_real_chart_style_version": "v7.9",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -3647,6 +3647,113 @@ def _enrich_dual_scenarios(analysis: dict[str, Any]) -> dict[str, Any]:
 
 
 
+
+def _build_m5_target_landmarks(analysis: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return up to three REAL nearby swing/level stations for the simple M5 view.
+
+    These are display landmarks only.  They never replace Entry/Stop logic and
+    never invent a peak/low when no structural candidate exists.
+    """
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    side = str(action.get("primary_side") or "wait")
+    if side not in {"buy", "sell"}:
+        buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+        sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+        buy_score = int(buy.get("score") or analysis.get("buy_probability") or 0)
+        sell_score = int(sell.get("score") or analysis.get("sell_probability") or 0)
+        side = "buy" if buy_score >= sell_score else "sell"
+
+    reference = _number(action.get("trigger"))
+    if reference is None:
+        reference = _number(analysis.get("current_price")) or _number(analysis.get("market_last_close"))
+    if reference is None:
+        return []
+
+    kind = "peak" if side == "buy" else "trough"
+    candidates = _structural_candidates(analysis, kind=kind, reference_price=float(reference))
+    candidates.sort(key=lambda item: float(item.get("price") or 0.0), reverse=(side == "sell"))
+
+    names = (
+        ["القمة القريبة", "القمة التالية", "القمة الرئيسية"]
+        if side == "buy"
+        else ["القاع القريب", "القاع التالي", "القاع الرئيسي"]
+    )
+    output: list[dict[str, Any]] = []
+    for idx, item in enumerate(candidates[:3]):
+        price = _number(item.get("price"))
+        if price is None:
+            continue
+        output.append({
+            "label": names[idx],
+            "price": round(float(price), 2),
+            "strength": max(0, min(100, int(item.get("strength") or 0))),
+            "source": str(item.get("source") or ("قمة" if side == "buy" else "قاع")),
+            "side": side,
+            "approximate": True,
+        })
+    return output
+
+
+def _build_m5_decision_view(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Compact M5-only presentation data used by the decision-first UI."""
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    current = _number(analysis.get("current_price")) or _number(analysis.get("market_last_close"))
+
+    def nearest_level(key: str, *, above: bool) -> dict[str, Any] | None:
+        if current is None:
+            return None
+        items: list[dict[str, Any]] = []
+        for raw in analysis.get(key) or []:
+            if not isinstance(raw, dict):
+                continue
+            price = _number(raw.get("price"))
+            if price is None:
+                continue
+            if above and float(price) <= float(current):
+                continue
+            if not above and float(price) >= float(current):
+                continue
+            items.append(raw)
+        if not items:
+            return None
+        return min(items, key=lambda raw: abs(float(_number(raw.get("price")) or 0.0) - float(current)))
+
+    support = nearest_level("support_levels", above=False)
+    resistance = nearest_level("resistance_levels", above=True)
+    location_label = "بين دعم ومقاومة"
+    location_strength = 0
+    location_price = None
+    if current is not None and (support or resistance):
+        support_distance = abs(float(current) - float(_number((support or {}).get("price")) or current)) if support else float("inf")
+        resistance_distance = abs(float(_number((resistance or {}).get("price")) or current) - float(current)) if resistance else float("inf")
+        chosen = support if support_distance <= resistance_distance else resistance
+        if chosen:
+            location_price = _number(chosen.get("price"))
+            location_strength = max(0, min(100, int(chosen.get("strength") or 0)))
+            location_label = ("قرب دعم" if chosen is support else "قرب مقاومة")
+            if location_strength:
+                location_label += f" {location_strength}%"
+
+    pattern = _pattern_short_name(analysis.get("pattern_type"))
+    zone_behavior = str(analysis.get("zone_behavior") or "").strip()
+    behavior = pattern if pattern and pattern != "لا يوجد" else (zone_behavior or str(analysis.get("current_movement_strength") or "متابعة"))
+
+    landmarks = _build_m5_target_landmarks(analysis)
+    next_station = landmarks[0] if landmarks else None
+    return {
+        "direction": str(analysis.get("current_movement") or analysis.get("direction") or "غير واضح"),
+        "location": location_label,
+        "location_price": round(float(location_price), 2) if location_price is not None else None,
+        "location_strength": location_strength,
+        "behavior": behavior,
+        "confirmation": str(action.get("instruction") or analysis.get("entry_activation_reason") or "انتظر إغلاق M5 واضح"),
+        "state": str(action.get("title") or "مراقبة"),
+        "strength": int(action.get("strength") or analysis.get("trade_probability") or 0),
+        "primary_side": str(action.get("primary_side") or "wait"),
+        "next_station": next_station,
+    }
+
+
 def _current_m5_movement(candles: list[dict[str, Any]]) -> dict[str, Any]:
     """Describe the latest CLOSED M5 movement independently from H4/H1.
 
@@ -5049,7 +5156,7 @@ def _validate_analysis(
             "bearish_scenario": bearish_scenario,
             "invalidation_condition": invalidation_condition,
             "macro_note": macro_note,
-            "analysis_style": "سكالب تعليمي — XAUUSD — تنفيذ M5 مع مراجعة M15/H1/H4",
+            "analysis_style": "سكالب تعليمي — XAUUSD — واجهة قرار M5 مبسطة",
             "note": " ".join(str(data.get("note") or "").split())[:100],
             "market_data_source": (market_summary or {}).get("source"),
             "market_data_fetched_at": (market_summary or {}).get("fetched_at"),
@@ -5353,7 +5460,7 @@ def analyze_chart_image(
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.8"
+    analysis["smc_real_chart_style_version"] = "v7.9"
     analysis["render_profile"] = "full_only"
     analysis["compact_chart_enabled"] = False
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
@@ -5375,7 +5482,7 @@ def analyze_chart_image(
         "axis_cards": ["ENTRY", "STOP", "CANCEL", "TP1", "TP2", "TP3", "CURRENT", "BUY IF", "SELL IF"],
     }
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
-    analysis["visual_overlay_clarity_mode"] = "v7.8_full_visual_clarity"
+    analysis["visual_overlay_clarity_mode"] = "v7.9_m5_simple_decision"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
@@ -5396,6 +5503,8 @@ def analyze_chart_image(
         analysis["show_targets_as_active"] = False
 
     analysis["action_summary"] = _build_action_summary(analysis)
+    analysis["m5_target_landmarks"] = _build_m5_target_landmarks(analysis)
+    analysis["m5_decision_view"] = _build_m5_decision_view(analysis)
     analysis["result_explanation"] = _build_result_explanation(analysis)
 
     # Portrait input is rebuilt as a wide market-OHLC chart for clearer model
@@ -5407,7 +5516,7 @@ def analyze_chart_image(
         **visual_meta,
         "symbol": "XAUUSD",
         "timeframe": "M5",
-        "window": ("شارت أفقي من OHLC الحقيقي + تحقق M5/M15/H1/H4" if analysis.get("reconstructed_market_chart") else "الشارت الأصلي + تحقق بنيوي من M5/M15/H1/H4"),
+        "window": ("شارت أفقي من OHLC الحقيقي + قرار M5" if analysis.get("reconstructed_market_chart") else "الشارت الأصلي + قرار M5"),
         "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
         "share_result_url": "data:image/png;base64," + base64.b64encode(share_png).decode(),
     }

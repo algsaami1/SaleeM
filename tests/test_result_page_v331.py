@@ -24,7 +24,7 @@ def test_result_page_uses_the_approved_information_order():
 def test_detailed_reason_panel_keeps_advanced_information_collapsed():
     html = (ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
     for label in (
-        "اتجاه الفريمات",
+        "حركة M5 الحالية",
         "البنية والحركة",
         "الزخم",
         "السيولة",

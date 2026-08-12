@@ -14,9 +14,9 @@ def test_v77_keeps_wide_canvas_but_uses_chart_space_not_footer_sheet():
 
 def test_v77_result_page_moves_rules_and_plan_outside_chart_and_removes_timeframe_strip():
     html = (Path(__file__).parents[1] / "app/templates/index.html").read_text()
-    assert 'class="v77-scenarios"' in html
-    assert 'class="v77-trade-plan"' in html
-    assert 'class="v77-drawing-rules"' in html
+    assert 'class="m5-trigger-strip"' in html
+    assert 'class="m5-target-stations"' in html
+    assert 'class="v77-drawing-rules m5-drawing-rules"' in html
     assert '<nav class="terminal-timeframes"' not in html
     assert 'id="saleem-ui-rule-card-v371"' not in html
     assert "القاعدة المرجعية" in html
