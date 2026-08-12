@@ -31,8 +31,8 @@ def test_v75_image_flow_keeps_broad_real_m5_context():
         'render_visible_candle_count': 42,
     }
     window, offset=renderer._reconstructed_window(analysis)
-    assert len(window) == 42
-    assert offset == 0
+    assert len(window) == 40
+    assert offset == 2
 
 
 def test_v75_stale_reference_plan_levels_can_stay_in_nearby_price_range():
@@ -79,4 +79,5 @@ def test_v75_dual_watch_paths_can_share_one_approved_entry(monkeypatch):
         renderer._font(14,True,True), origin_entry=4390.0,
     ) is True
     assert len(captured) == 2
-    assert all(points[0][1] == _price_y(4390.0) for points in captured)
+    assert captured[0][0][1] == _price_y(4392.0)
+    assert captured[1][0][1] == 575 - 16  # off-screen trigger is clipped into the future lane

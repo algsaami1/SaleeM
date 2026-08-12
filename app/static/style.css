@@ -1427,76 +1427,6 @@ body.chart-focus-open-v371{overflow:hidden!important;touch-action:none!important
   }
 }
 
-/* =====================================================================
-   v3.73 COMPACT CHART + REAL PAN/ZOOM
-   ===================================================================== */
-
-.terminal-chart-card.result-chart-box-v371,
-.terminal-chart-card.result-chart-box{
-  width:100%!important;
-  margin:10px 0!important;
-  padding:7px!important;
-  border:2px solid #2fa75a!important;
-  border-radius:20px!important;
-  background:#fff!important;
-  overflow:hidden!important;
-}
-
-.result-chart-box-v371:not(.chart-focus-v371) .chart-pan-viewport,
-.result-chart-box:not(.chart-focus-v371) .chart-pan-viewport{
-  width:100%!important;
-  min-height:0!important;
-  max-height:none!important;
-  overflow:auto!important;
-  border-radius:14px!important;
-  background:#fff!important;
-  touch-action:none!important;
-  overscroll-behavior:contain!important;
-  -webkit-overflow-scrolling:touch!important;
-  scrollbar-width:none!important;
-}
-
-.result-chart-box-v371 .chart-pan-viewport::-webkit-scrollbar,
-.result-chart-box .chart-pan-viewport::-webkit-scrollbar{
-  display:none!important;
-}
-
-.result-chart-box-v371 .chart-pan-canvas,
-.result-chart-box .chart-pan-canvas{
-  display:block!important;
-  max-width:none!important;
-  max-height:none!important;
-  overflow:visible!important;
-  background:#fff!important;
-}
-
-.result-chart-box-v371 #result-image,
-.result-chart-box #result-image{
-  display:block!important;
-  max-width:none!important;
-  max-height:none!important;
-  object-position:center center!important;
-  user-select:none!important;
-  -webkit-user-select:none!important;
-  -webkit-user-drag:none!important;
-}
-
-.result-chart-box-v371.chart-focus-v371 .chart-pan-viewport{
-  flex:1 1 auto!important;
-  width:100%!important;
-  height:auto!important;
-  min-height:0!important;
-  max-height:none!important;
-  overflow:auto!important;
-  background:#090d12!important;
-}
-
-.result-chart-box-v371 .chart-gesture-hint-v371{
-  padding:7px 11px!important;
-  font-size:8px!important;
-  bottom:10px!important;
-}
-
 /* v3.74 FIX — gallery + horizontal upload */
 .upload-orientation-note{margin:8px 2px 0;min-height:18px;color:#66727a;font-size:9.5px;line-height:1.6;text-align:center}
 .upload-orientation-note.good{color:#27854c;font-weight:750}
@@ -1586,4 +1516,78 @@ body[data-has-result="true"] .terminal-timeframes{display:none!important}
   .v77-scenarios,.v77-trade-plan,.v77-drawing-rules{border-radius:14px}
   .v77-scenario{padding:8px}.v77-scenario header b{font-size:8.5px}.v77-scenario header strong{font-size:7.8px}
   .v77-scenario>div b{font-size:8.5px}.v77-scenario>small{font-size:6.3px}
+}
+
+
+/* =====================================================================
+   V7.8 — FULL VISUAL CLARITY ONLY
+   No compact chart exists in the result UI. The same 16:9 full chart is
+   fitted in the page and opened unchanged in the gallery/full-screen viewer.
+   ===================================================================== */
+body[data-has-result="true"] .terminal-chart-card.result-chart-box,
+body[data-has-result="true"] .terminal-chart-card.result-chart-box-v371{
+  width:100%!important;
+  margin:10px 0 14px!important;
+  padding:0!important;
+  border:0!important;
+  border-radius:12px!important;
+  background:#fff!important;
+  box-shadow:none!important;
+  overflow:visible!important;
+}
+body[data-has-result="true"] .result-chart-box .chart-pan-viewport,
+body[data-has-result="true"] .result-chart-box-v371 .chart-pan-viewport{
+  width:100%!important;
+  height:auto!important;
+  min-height:0!important;
+  max-height:none!important;
+  aspect-ratio:16 / 9!important;
+  overflow:hidden!important;
+  border-radius:12px!important;
+  background:#fff!important;
+  touch-action:manipulation!important;
+}
+body[data-has-result="true"] .result-chart-box .chart-pan-canvas,
+body[data-has-result="true"] .result-chart-box-v371 .chart-pan-canvas{
+  width:100%!important;
+  height:100%!important;
+  min-width:0!important;
+  min-height:0!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  overflow:hidden!important;
+  background:#fff!important;
+}
+body[data-has-result="true"] .result-chart-box #result-image,
+body[data-has-result="true"] .result-chart-box-v371 #result-image{
+  display:block!important;
+  width:100%!important;
+  height:100%!important;
+  max-width:100%!important;
+  max-height:100%!important;
+  object-fit:contain!important;
+  object-position:center center!important;
+  transform:none!important;
+  margin:0!important;
+}
+body[data-has-result="true"] .chart-gesture-hint-v371{display:none!important}
+body[data-has-result="true"] .gallery-open-button-v374{
+  top:8px!important;
+  right:8px!important;
+  min-height:34px!important;
+  padding:0 10px!important;
+  border-radius:10px!important;
+  font-size:9px!important;
+}
+body[data-has-result="true"] .terminal-timeframes{display:none!important}
+
+@media(max-width:640px){
+  body[data-has-result="true"] .result-chart-box .chart-pan-viewport,
+  body[data-has-result="true"] .result-chart-box-v371 .chart-pan-viewport{
+    aspect-ratio:16 / 9!important;
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+  }
 }

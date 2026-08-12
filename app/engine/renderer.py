@@ -6336,10 +6336,10 @@ def _render_uploaded_chart_with_overlays(
 
 
 def _reconstructed_dimensions(analysis: dict[str, Any]) -> tuple[int, int]:
-    """V7.6 wide 16:9 reference-sheet canvas.
+    """V7.8 single full-view 16:9 canvas used everywhere in the UI.
 
-    The wider 1920px canvas gives real M5 candles and anchored labels more
-    horizontal room without moving any market-owned price geometry.
+    There is no compact renderer.  The same 1920x1080 chart is used in the
+    result card, gallery/full-screen view, and downstream save/share flow.
     """
     return 1920, 1080
 
@@ -6487,11 +6487,14 @@ def _reconstructed_window(analysis: dict[str, Any]) -> tuple[list[dict[str, Any]
     if not all_candles:
         return [], 0
     if has_render_context:
+        # V7.8: one full visual profile everywhere.  32–40 candles gives the
+        # 1920px canvas enough market context while keeping bodies comfortably
+        # wide and readable on phones.
         try:
-            desired = int(analysis.get("render_visible_candle_count") or 42)
+            desired = int(analysis.get("render_visible_candle_count") or 36)
         except (TypeError, ValueError):
-            desired = 42
-        desired = max(30, min(60, desired))
+            desired = 36
+        desired = max(32, min(40, desired))
     else:
         try:
             desired = int(analysis.get("render_visible_candle_count") or min(110, len(all_candles)))
@@ -6790,17 +6793,17 @@ def _draw_reconstructed_pattern(
             role = str(item.get("role") or "")
             c = trigger_color if role in {"neckline", "trigger"} else line_color
             if confirmed:
-                draw.line((*a, *b), fill=c, width=4)
+                draw.line((*a, *b), fill=c, width=2)
             else:
-                _dash_line(draw, a, b, c, width=4, dash=14, gap=8)
+                _dash_line(draw, a, b, c, width=2, dash=10, gap=7)
 
         path = [p for item in (geom.get("path") or []) if (p := mapped(item)) is not None]
         if len(path) >= 2:
             if confirmed:
-                draw.line(path, fill=line_color, width=4, joint="curve")
+                draw.line(path, fill=line_color, width=2, joint="curve")
             else:
                 for a, b in zip(path[:-1], path[1:]):
-                    _dash_line(draw, a, b, line_color, width=4, dash=14, gap=8)
+                    _dash_line(draw, a, b, line_color, width=2, dash=10, gap=7)
 
     anchors: list[tuple[int, int, str, int]] = []
     for item in geom.get("anchors") or []:
@@ -6894,12 +6897,12 @@ def _draw_reconstructed_reference_zones(
             y1, y2 = price_y(float(level) + zone_half), price_y(float(level) - zone_half)
             yy1, yy2 = max(top, min(y1, y2)), min(bottom, max(y1, y2))
             if mapped and yy2 > yy1:
-                x1 = max(left + 10, candle_x[min(mapped)] - 360)
-                x2 = min(right - 24, max(candle_right + 48, candle_x[max(mapped)] + 140))
+                x1 = max(left + 10, candle_x[min(mapped)] - 220)
+                x2 = min(candle_right + 150, max(candle_right + 40, candle_x[max(mapped)] + 110))
                 if bias == "هابط":
-                    fill, outline, label = (224, 66, 78, 34), (196, 67, 76, 190), "RESISTANCE / SELL SIDE LIQUIDITY"
+                    fill, outline, label = (224, 66, 78, 24), (196, 67, 76, 155), "RESISTANCE / SELL SIDE LIQUIDITY"
                 else:
-                    fill, outline, label = (50, 170, 91, 32), (49, 145, 82, 190), "SUPPORT / BUY SIDE LIQUIDITY"
+                    fill, outline, label = (50, 170, 91, 22), (49, 145, 82, 155), "SUPPORT / BUY SIDE LIQUIDITY"
                 draw.rectangle((x1, yy1, x2, yy2), fill=fill, outline=outline, width=1)
                 draw.text((x1 + 12, (yy1 + yy2) // 2), label, font=font, fill=outline, anchor="lm")
                 return
@@ -6948,8 +6951,8 @@ def _draw_reconstructed_reference_zones(
     if x2 <= x1 + 80:
         x1 = max(left + 10, candle_right - 240)
     specs = (
-        (resistance, "RESISTANCE", (224, 66, 78, 30), (196, 67, 76, 180)),
-        (support, "SUPPORT", (50, 170, 91, 28), (49, 145, 82, 180)),
+        (resistance, "RESISTANCE", (224, 66, 78, 20), (196, 67, 76, 145)),
+        (support, "SUPPORT", (50, 170, 91, 18), (49, 145, 82, 145)),
     )
     for value, label, fill, outline in specs:
         if value is None: continue
@@ -7087,10 +7090,10 @@ def _draw_reconstructed_reference_scenario(
             if idx is not None and hi is not None and lo is not None:
                 y1, y2 = price_y(float(hi)), price_y(float(lo))
                 x1 = max(left, candle_x[idx] - 8)
-                zone_width = max(110, min(260, int((right - left) * 0.22)))
+                zone_width = max(105, min(220, int((right - left) * 0.16)))
                 x2 = min(right - 26, x1 + zone_width)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
-                fill = (231, 174, 116, 62) if bias == "هابط" else (99, 176, 116, 50)
+                fill = (231, 174, 116, 42) if bias == "هابط" else (99, 176, 116, 36)
                 outline = orange if bias == "هابط" else green
                 draw.rectangle((x1, yy1, x2, yy2), fill=fill, outline=outline, width=1)
                 draw.text((x1 + 12, (yy1 + yy2) // 2), "ORDER BLOCK", font=font, fill=orange if bias == "هابط" else green, anchor="lm")
@@ -7103,10 +7106,10 @@ def _draw_reconstructed_reference_scenario(
             if idx is not None and hi is not None and lo is not None:
                 y1, y2 = price_y(float(hi)), price_y(float(lo))
                 x1 = max(left, candle_x[max(0, idx - 1)] - 4)
-                zone_width = max(100, min(240, int((right - left) * 0.20)))
+                zone_width = max(100, min(205, int((right - left) * 0.15)))
                 x2 = min(right - 26, x1 + zone_width)
                 yy1, yy2 = min(y1, y2), max(y1, y2)
-                draw.rectangle((x1, yy1, x2, yy2), fill=(114, 173, 219, 48), outline=blue, width=1)
+                draw.rectangle((x1, yy1, x2, yy2), fill=(114, 173, 219, 34), outline=blue, width=1)
                 draw.text((x1 + 12, (yy1 + yy2) // 2), "FVG", font=font, fill=blue, anchor="lm")
 
     if "liquidity" in components:
@@ -7413,27 +7416,36 @@ def _draw_reference_dual_watch_paths(
     *,
     origin_entry: float | None = None,
 ) -> bool:
-    """Draw two conditional watch paths, never two active scenarios."""
+    """V7.8 WATCH paths: two conditional previews in the future lane only.
+
+    Each path starts from its own real trigger.  The stronger scenario is more
+    prominent; the alternative stays visible but lighter.  End points are
+    clipped to the plot so an off-screen target can never create a giant arrow.
+    ``origin_entry`` is accepted only for backward compatibility and ignored.
+    """
     if not _reference_dual_preview_needed(analysis):
         return False
     left, top, right, bottom = plot
-    x1 = max(candle_right + 24, left + int((right - left) * 0.74))
-    x2 = right - 205
-    if x2 <= x1 + 72:
-        x1 = max(candle_right + 14, x2 - 122)
-    if x2 <= x1 + 52:
+    lane_left = max(candle_right + 22, left + int((right - left) * 0.80))
+    lane_right = right - 250  # reserve the rightmost area for price cards
+    if lane_right <= lane_left + 76:
+        lane_left = max(candle_right + 12, lane_right - 112)
+    if lane_right <= lane_left + 56:
         return False
 
-    # Approved visual grammar: purple = upside breakout path, charcoal =
-    # rejection/downside path. Both are previews, never simultaneous active
-    # trades. When an old/reference Entry exists, both previews start exactly
-    # from that same Entry to match the user's rule sheet.
+    buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+    sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+    buy_score = max(0, min(100, int(buy.get("score") or analysis.get("buy_probability") or 0)))
+    sell_score = max(0, min(100, int(sell.get("score") or analysis.get("sell_probability") or 0)))
+    strongest = "buy" if buy_score >= sell_score else "sell"
+
     specs = [
-        ("buy", analysis.get("buy_scenario_details") or {}, (94, 49, 181, 205), "UP BREAKOUT"),
-        ("sell", analysis.get("sell_scenario_details") or {}, (38, 43, 49, 205), "DOWN REJECTION"),
+        ("buy", buy, buy_score, (94, 49, 181)),
+        ("sell", sell, sell_score, (42, 47, 52)),
     ]
-    for side, scenario, color, label in specs:
-        entry = float(origin_entry) if origin_entry is not None else _number(scenario.get("trigger_price"))
+    drew = False
+    for side, scenario, score, rgb in specs:
+        entry = _number(scenario.get("trigger_price"))
         target = _number(scenario.get("display_target"))
         if entry is None or target is None:
             continue
@@ -7441,21 +7453,32 @@ def _draw_reference_dual_watch_paths(
             continue
         if side == "sell" and target >= entry:
             continue
-        ey, ty = price_y(float(entry)), price_y(float(target))
-        sign = -1 if side == "buy" else 1
-        break_y = int(round(ey + (ty - ey) * 0.42))
-        retest_y = int(round(ey + sign * min(28, max(12, abs(ty - ey) * 0.12))))
-        retest_y = max(top + 14, min(bottom - 14, retest_y))
-        p1 = (x1, ey)
-        p2 = (x1 + max(28, (x2 - x1) // 3), break_y)
-        p3 = (x1 + max(52, (x2 - x1) * 2 // 3), retest_y)
-        p4 = (x2, ty)
-        draw.ellipse((x1 - 4, ey - 4, x1 + 4, ey + 4), fill=color)
-        # Path meaning is explained in the Arrow Rules panel; keep the price
-        # chart clean and show only the two colored path geometries.
-        _recon_arrow(draw, [p1, p2, p3, p4], color, width=2, dashed=True)
-    return True
 
+        ey = max(top + 16, min(bottom - 16, price_y(float(entry))))
+        ty_raw = price_y(float(target))
+        ty = max(top + 24, min(bottom - 24, ty_raw))
+        # Keep the explanatory preview compact even if the target sits at the
+        # opposite edge of the visible price range.
+        max_vertical = 118
+        if abs(ty - ey) > max_vertical:
+            ty = ey + (max_vertical if ty > ey else -max_vertical)
+            ty = max(top + 24, min(bottom - 24, ty))
+
+        stronger = side == strongest
+        alpha = 230 if stronger else 125
+        width = 3 if stronger else 2
+        color = (rgb[0], rgb[1], rgb[2], alpha)
+        span_x = lane_right - lane_left
+        break_x = lane_left + max(26, span_x // 3)
+        retest_x = lane_left + max(50, span_x * 2 // 3)
+        break_y = int(round(ey + (ty - ey) * 0.44))
+        # Retest comes back toward the real trigger, not to an arbitrary point.
+        retest_y = int(round(ey + (ty - ey) * 0.10))
+        points = [(lane_left, ey), (break_x, break_y), (retest_x, retest_y), (lane_right, ty)]
+        draw.ellipse((lane_left - 4, ey - 4, lane_left + 4, ey + 4), fill=color)
+        _recon_arrow(draw, points, color, width=width, dashed=True)
+        drew = True
+    return drew
 
 def _draw_reference_trade_plan(
     draw: ImageDraw.ImageDraw,
@@ -7473,46 +7496,18 @@ def _draw_reference_trade_plan(
     dashed alternatives; neither is treated as active.
     """
     plan = _resolve_reference_trade_plan(analysis)
-    if str(analysis.get("draw_mode") or "watch") == "watch" and _reference_dual_preview_needed(analysis):
-        if _draw_reference_dual_watch_paths(
-            draw, analysis, price_y, plot, candle_right, font,
-            origin_entry=float(plan["entry"]) if plan else None,
-        ):
-            return
+    draw_mode = str(analysis.get("draw_mode") or "watch")
     if not plan:
         _draw_reference_dual_watch_paths(draw, analysis, price_y, plot, candle_right, font)
         return
     lifecycle = _reference_trade_lifecycle(analysis, plan)
     state = str(lifecycle.get("state") or "none")
-    if state not in {"active", "conditional"}:
-        # Keep the completed/invalidated plan as a *reference* only, exactly as
-        # in the approved second image. Never reactivate it. In WATCH mode, show
-        # the two conditional paths from the historical Entry when valid.
-        if _draw_reference_dual_watch_paths(
-            draw, analysis, price_y, plot, candle_right, font,
-            origin_entry=float(plan["entry"]),
-        ):
-            return
-        # If there are no two-sided watch details, draw a muted historical
-        # Break→Retest→Continuation path from the old Entry to its real target.
-        left, top, right, bottom = plot
-        entry = float(plan["entry"])
-        targets = [float(v) for v in (plan.get("targets") or [plan.get("target")]) if _number(v) is not None]
-        if not targets:
-            return
-        x1 = max(candle_right + 24, left + int((right - left) * 0.72))
-        x2 = right - 205
-        if x2 <= x1 + 70:
-            return
-        ey, ty = price_y(entry), price_y(targets[-1])
-        bx = x1 + (x2 - x1) // 3
-        rx = x1 + (x2 - x1) * 2 // 3
-        by = int(round(ey + (ty - ey) * 0.34))
-        ry = int(round(ey + (ty - ey) * 0.10))
-        old_color = (55, 61, 67, 175)
-        draw.ellipse((x1 - 5, ey - 5, x1 + 5, ey + 5), fill=old_color)
-        _recon_arrow(draw, [(x1, ey), (bx, by), (rx, ry), (x2, ty)], old_color, width=2, dashed=True)
-        draw.text((x1 + 10, ey - 8), "OLD ENTRY · WAIT NEW M5 TRIGGER", font=font, fill=(154, 101, 28, 220), anchor="ls")
+
+    # V7.8 keeps WATCH/RE-EVALUATE clean: no historical Entry/Stop/TP overlay
+    # and no conditional execution box.  The two BUY/SELL trigger previews are
+    # the only trade paths until an execution is actually confirmed.
+    if draw_mode != "confirmed" or state != "active":
+        _draw_reference_dual_watch_paths(draw, analysis, price_y, plot, candle_right, font)
         return
 
     left, top, right, bottom = plot
@@ -7537,7 +7532,7 @@ def _draw_reference_trade_plan(
     # Leave a clean lane for the exact right-axis cards while reserving enough
     # room for projected candles and the bent scenario arrow.
     x1 = max(candle_right + 24, left + int((right - left) * 0.72))
-    x2 = right - 205
+    x2 = right - 270
     if x2 - x1 < 118:
         x1 = max(candle_right + 14, x2 - 142)
     if x2 <= x1 + 82:
@@ -7602,8 +7597,6 @@ def _draw_reference_trade_plan(
     # Stage names are kept in the Expected Candle Sequence inset underneath
     # their projected candles.  Leaving the main price path unlabeled prevents
     # BREAK/RETEST text from covering real OHLC.
-    if not confirmed:
-        draw.text((x1, min(bottom - 8, max(top + 12, ey + 24))), "WAIT NEW M5 TRIGGER", font=font, fill=(184, 118, 30, 215), anchor="la")
 
 def _draw_reference_price_axis_and_cards(
     draw: ImageDraw.ImageDraw,
@@ -7613,8 +7606,14 @@ def _draw_reference_price_axis_and_cards(
     price_max: float,
     plot: tuple[int, int, int, int],
     font,
+    candle_right: int | None = None,
 ) -> None:
-    """OHLC-derived price axis plus exact price cards with horizontal collision lanes."""
+    """V7.8 right-lane cards with vertical auto-repel and exact connectors.
+
+    WATCH/RE-EVALUATE shows only CURRENT + BUY IF + SELL IF.  Confirmed trades
+    show ENTRY + STOP + TP1/2/3 (+ CURRENT).  Card text may move vertically to
+    avoid collisions, but every connector starts at the exact real price Y.
+    """
     left, top, right, bottom = plot
     tick_color = (92, 98, 104, 230)
     line_color = (150, 155, 160, 100)
@@ -7631,91 +7630,103 @@ def _draw_reference_price_axis_and_cards(
     plan = _resolve_reference_trade_plan(analysis)
     lifecycle = _reference_trade_lifecycle(analysis, plan) if plan else {"state": "none"}
     state = str(lifecycle.get("state") or "none")
-    cards: list[tuple[str, float, tuple[int,int,int,int]]] = []
-    if plan and state == "active":
+    draw_mode = str(analysis.get("draw_mode") or "watch")
+    confirmed = bool(plan) and state == "active" and draw_mode == "confirmed"
+    cards: list[tuple[str, float, tuple[int,int,int,int], int]] = []
+
+    if confirmed and plan:
         cards.extend([
-            ("ENTRY", float(plan["entry"]), (36, 147, 85, 242)),
-            ("STOP", float(plan["stop"]), (201, 62, 70, 242)),
+            ("ENTRY", float(plan["entry"]), (36, 147, 85, 242), 1),
+            ("STOP", float(plan["stop"]), (201, 62, 70, 242), 0),
         ])
         target_colors = [(45, 164, 95, 242), (31, 144, 83, 242), (20, 119, 72, 242)]
         for i, value in enumerate((plan.get("targets") or [plan.get("target")])[:3], start=1):
             number = _number(value)
             if number is not None:
-                cards.append((f"TP{i}", float(number), target_colors[i-1]))
-    elif plan and state == "conditional":
-        cards.extend([
-            ("ENTRY IF", float(plan["entry"]), (36, 147, 85, 242)),
-            ("CANCEL", float(plan["stop"]), (201, 62, 70, 242)),
-        ])
-        target_colors = [(45, 164, 95, 226), (31, 144, 83, 226), (20, 119, 72, 226)]
-        for i, value in enumerate((plan.get("targets") or [plan.get("target")])[:3], start=1):
-            number = _number(value)
-            if number is not None:
-                cards.append((f"TP{i}", float(number), target_colors[i-1]))
-    elif plan and state in {"target_hit", "invalidated", "expired"}:
-        # Reference-only levels: visible for re-evaluation, never active. This
-        # matches the approved second image and keeps the user oriented when an
-        # old plan has completed or failed.
-        cards.extend([
-            ("ENTRY", float(plan["entry"]), (42, 116, 184, 232)),
-            ("STOP", float(plan["stop"]), (201, 62, 70, 232)),
-        ])
-        target_colors = [(45, 164, 95, 232), (31, 144, 83, 232), (20, 119, 72, 232)]
-        for i, value in enumerate((plan.get("targets") or [plan.get("target")])[:3], start=1):
-            number = _number(value)
-            if number is not None:
-                cards.append((f"TP{i}", float(number), target_colors[i-1]))
-
-    if _reference_dual_preview_needed(analysis):
+                cards.append((f"TP{i}", float(number), target_colors[i-1], 2 + i))
+    else:
+        # Any non-confirmed state is visually a WATCH state.  Never duplicate a
+        # conditional Entry/CANCEL/TP plan next to BUY/SELL triggers.
         buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
         sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
         buy_trigger = _number(buy.get("trigger_price"))
         sell_trigger = _number(sell.get("trigger_price"))
-        buy_score = max(0, min(100, int(buy.get("score") or 0)))
-        sell_score = max(0, min(100, int(sell.get("score") or 0)))
+        buy_score = max(0, min(100, int(buy.get("score") or analysis.get("buy_probability") or 0)))
+        sell_score = max(0, min(100, int(sell.get("score") or analysis.get("sell_probability") or 0)))
         if buy_trigger is not None:
-            cards.append((f"BUY {buy_score}% IF", float(buy_trigger), (94, 49, 181, 235)))
+            cards.append((f"BUY {buy_score}% IF", float(buy_trigger), (94, 49, 181, 235), 1))
         if sell_trigger is not None:
-            cards.append((f"SELL {sell_score}% IF", float(sell_trigger), (42, 47, 52, 238)))
+            cards.append((f"SELL {sell_score}% IF", float(sell_trigger), (42, 47, 52, 238), 2))
 
     current = _number(analysis.get("current_price"))
     if current is None:
         current = _number(analysis.get("visual_current_price"))
     if current is not None and price_min <= float(current) <= price_max:
-        current_y = price_y(float(current))
-        _dash_line(draw, (left, current_y), (right, current_y), (62, 112, 112, 145), width=1, dash=5, gap=4)
-        if not plan or abs(float(current) - float(plan["entry"])) > max(0.02, (price_max-price_min)*0.002):
-            cards.append(("CURRENT", float(current), (55, 61, 67, 238)))
+        exact_current_y = price_y(float(current))
+        _dash_line(draw, (left, exact_current_y), (right, exact_current_y), (62, 112, 112, 145), width=1, dash=5, gap=4)
+        cards.append(("CURRENT", float(current), (55, 61, 67, 238), 0))
 
-    # Y stays exact. If labels are close, only the X lane changes.  V7.6 uses
-    # three horizontal lanes and checks collisions in every lane so BUY/SELL,
-    # Entry/TP and Current cards cannot overwrite one another.
-    lanes = [right - 14, right - 252, right - 490]
-    placed: list[tuple[int, int]] = []  # (y, lane)
-    for label, price, color in cards:
-        if not (price_min <= price <= price_max):
-            continue
-        y = price_y(price)
-        lane = 0
-        for candidate in range(len(lanes)):
-            if not any(abs(y - py) < 34 and pl == candidate for py, pl in placed):
-                lane = candidate
-                break
-        else:
-            # Keep the price Y exact; reuse the least crowded lane only when
-            # all three are occupied at almost the same level.
-            lane = min(range(len(lanes)), key=lambda cand: sum(1 for py, pl in placed if pl == cand and abs(y - py) < 46))
-        card_right = lanes[lane]
+    visible = []
+    for label, price, color, priority in cards:
+        if price_min <= price <= price_max:
+            visible.append({
+                "label": label,
+                "price": price,
+                "color": color,
+                "priority": priority,
+                "exact_y": int(price_y(price)),
+            })
+    if not visible:
+        return
+
+    # One dedicated card corridor to the right of real candles.  This makes the
+    # market geometry readable even when several levels share nearly the same Y.
+    candle_right = int(candle_right if candle_right is not None else left + (right-left) * 0.80)
+    corridor_left = max(candle_right + 26, right - 360)
+    card_right = right - 14
+    card_max_w = max(188, min(248, card_right - corridor_left))
+    min_gap = 40
+    half_h = 16
+
+    # Stable auto-repel: sort by exact price Y, push downward, then shift the
+    # entire stack upward if it exceeds the bottom and repair once upward.
+    visible.sort(key=lambda item: (item["exact_y"], item["priority"]))
+    for i, item in enumerate(visible):
+        desired = max(top + half_h + 4, min(bottom - half_h - 4, item["exact_y"]))
+        if i:
+            desired = max(desired, visible[i-1]["display_y"] + min_gap)
+        item["display_y"] = desired
+    overflow = visible[-1]["display_y"] - (bottom - half_h - 4)
+    if overflow > 0:
+        for item in visible:
+            item["display_y"] -= overflow
+    for i in range(len(visible)-2, -1, -1):
+        max_y = visible[i+1]["display_y"] - min_gap
+        visible[i]["display_y"] = min(visible[i]["display_y"], max_y)
+    underflow = (top + half_h + 4) - visible[0]["display_y"]
+    if underflow > 0:
+        for item in visible:
+            item["display_y"] += underflow
+
+    for item in visible:
+        label, price, color = item["label"], item["price"], item["color"]
+        exact_y, display_y = int(item["exact_y"]), int(round(item["display_y"]))
         card_text = f"{label} {_fmt_axis_price(price)}"
         tb = draw.textbbox((0, 0), card_text, font=font)
         text_w = max(1, tb[2] - tb[0])
-        card_w = max(174, min(228, text_w + 22))
+        card_w = max(176, min(card_max_w, text_w + 22))
         card_left = card_right - card_w
-        draw.line((card_right, y, right + 3, y), fill=(color[0], color[1], color[2], 150), width=1)
-        draw.rounded_rectangle((card_left, y - 16, card_right, y + 16), radius=6, fill=color)
-        draw.text((card_right - 9, y), card_text, font=font, fill=(255,255,255,255), anchor="rm")
-        placed.append((y, lane))
 
+        # Exact price anchor -> small elbow -> displaced card.  Price geometry
+        # never moves; only the label box does.
+        anchor_x = min(card_left - 12, max(candle_right + 8, corridor_left - 16))
+        connector = (color[0], color[1], color[2], 125)
+        draw.line((anchor_x, exact_y, card_left - 8, exact_y), fill=connector, width=1)
+        if display_y != exact_y:
+            draw.line((card_left - 8, exact_y, card_left - 8, display_y), fill=connector, width=1)
+        draw.line((card_left - 8, display_y, card_left, display_y), fill=connector, width=1)
+        draw.rounded_rectangle((card_left, display_y - half_h, card_right, display_y + half_h), radius=6, fill=color)
+        draw.text((card_right - 9, display_y), card_text, font=font, fill=(255,255,255,255), anchor="rm")
 
 def _draw_reference_legend(
     draw: ImageDraw.ImageDraw,
@@ -7774,7 +7785,7 @@ def _draw_reference_legend(
             elif kind == "box":
                 draw.rectangle((icon_x - 9, icon_y - 7, icon_x + 13, icon_y + 7), fill=(231, 174, 116, 60), outline=color, width=1)
             elif kind == "box_blue":
-                draw.rectangle((icon_x - 9, icon_y - 7, icon_x + 13, icon_y + 7), fill=(114, 173, 219, 48), outline=color, width=1)
+                draw.rectangle((icon_x - 9, icon_y - 7, icon_x + 13, icon_y + 7), fill=(114, 173, 219, 34), outline=color, width=1)
             else:
                 _recon_arrow(draw, [(icon_x - 10, icon_y), (icon_x + 12, icon_y)], color, width=2, dashed=True)
             tx = x + 30
@@ -8154,7 +8165,7 @@ def _render_reconstructed_market_chart(
     analysis: dict[str, Any],
     chart_background_path: str | os.PathLike[str] | None = None,
 ) -> bytes:
-    """V7.7 clean chart: market geometry only; explanations live in the app UI."""
+    """V7.8 full chart: one clear visual model everywhere in the app UI."""
     scene = _build_reference_visual_scene(analysis)
     width, height = int(scene["canvas"]["width"]), int(scene["canvas"]["height"])
     palette = _reconstructed_palette(analysis)
@@ -8164,7 +8175,7 @@ def _render_reconstructed_market_chart(
     if not candles:
         out = io.BytesIO(); image.convert("RGB").save(out, format="PNG"); return out.getvalue()
 
-    # V7.7: the PNG is a chart, not a report sheet.  Rules, legend and plan
+    # V7.8: the PNG is one full chart, not a report sheet. Rules, legend and plan
     # summaries are rendered as real HTML UI outside the image.  This gives
     # the candles substantially more vertical room and removes report boxes.
     margin_l, margin_r, margin_t, margin_b = 24, 215, 100, 72
@@ -8192,7 +8203,7 @@ def _render_reconstructed_market_chart(
     history_ratio = 1.0 - future_ratio if template_id else 0.92
     candle_right = int(left + (right - left) * history_ratio)
     slot = (candle_right - left) / max(1, len(candles))
-    body_w = max(4, min(10, int(slot * 0.64)))
+    body_w = max(8, min(18, int(slot * 0.72)))
     candle_x: list[int] = []
     for i, candle in enumerate(candles):
         x = int(round(left + slot * (i + 0.5)))
@@ -8213,7 +8224,7 @@ def _render_reconstructed_market_chart(
 
     f_title = _font(30, True, True)
     f_sub = _font(15, True, True)
-    f_label = _font(16, True, True)
+    f_label = _font(14, True, True)
     draw.text((left, 20), "XAUUSD · M5", font=f_title, fill=palette["text"], anchor="la")
     # Fine divider used by the approved reference header.
     draw.line((325, 16, 325, 60), fill=(88, 93, 98, 145), width=1)
@@ -8278,8 +8289,8 @@ def _render_reconstructed_market_chart(
     else:
         # Keep rejection visible to logs/data, not as chart clutter.
         pass
-    _draw_reference_price_axis_and_cards(draw, analysis, price_y, price_min, price_max, plot, f_label)
-    # V7.7 deliberately does not paint Expected-Sequence, Arrow-Rules, Legend
+    _draw_reference_price_axis_and_cards(draw, analysis, price_y, price_min, price_max, plot, f_label, candle_right)
+    # V7.8 deliberately does not paint Expected-Sequence, Arrow-Rules, Legend
     # or Trade-Plan report boxes into the PNG.  Those belong to the app UI.
 
     out = io.BytesIO()

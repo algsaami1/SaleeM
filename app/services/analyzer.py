@@ -969,7 +969,7 @@ def _prepare_analysis_image(image_path: Path) -> tuple[Path, dict[str, Any]]:
         "original_chart_immutable": True,
         "educational_overlay_mode": True,
         "educational_reference_style": "reference_sheet_v2",
-        "smc_real_chart_style_version": "v7.7",
+        "smc_real_chart_style_version": "v7.8",
         "smc_real_chart_numeric_source": "market_ohlc_deterministic",
         "reference_library_rule_count": reference_rule_count(),
     })
@@ -5241,10 +5241,10 @@ def _analyze(path: Path) -> dict[str, Any]:
             matched_end = len(alignment_market) - 1
         matched_end = max(0, min(len(alignment_market) - 1, matched_end))
         try:
-            context_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
+            context_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "36"))
         except ValueError:
-            context_count = 42
-        context_count = max(len(matched_segment), max(30, min(60, context_count)))
+            context_count = 36
+        context_count = max(len(matched_segment), max(32, min(40, context_count)))
         context_start = max(0, matched_end - context_count + 1)
         render_context = alignment_market[context_start:matched_end + 1]
         if len(render_context) < len(matched_segment):
@@ -5260,10 +5260,10 @@ def _analyze(path: Path) -> dict[str, Any]:
         # every zone. Use a real 36–42 candle M5 context even when the phone
         # screenshot cannot be fingerprint-matched.
         try:
-            fallback_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
+            fallback_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "36"))
         except ValueError:
-            fallback_count = 42
-        fallback_count = max(30, min(60, fallback_count))
+            fallback_count = 36
+        fallback_count = max(32, min(40, fallback_count))
         projected["render_candles"] = copy.deepcopy(normalized_market[-fallback_count:])
         projected["render_candle_source"] = "recent_real_m5_reference_context_fallback"
         projected["render_visible_candle_count"] = len(projected["render_candles"])
@@ -5343,17 +5343,19 @@ def analyze_chart_image(
         analysis["render_visible_candle_count"] = len(analysis["render_candles"])
     else:
         try:
-            default_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "42"))
+            default_count = int(os.getenv("SALEEM_REFERENCE_CONTEXT_CANDLES", "36"))
         except ValueError:
-            default_count = 42
-        analysis["render_visible_candle_count"] = max(30, min(60, default_count))
+            default_count = 36
+        analysis["render_visible_candle_count"] = max(32, min(40, default_count))
     analysis["force_landscape_output"] = bool(visual_meta.get("force_landscape_output"))
     analysis["output_chart_orientation"] = "landscape" if rebuild_landscape else "source"
     analysis["uploaded_chart_role"] = "visual_calibration_reference"
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.7"
+    analysis["smc_real_chart_style_version"] = "v7.8"
+    analysis["render_profile"] = "full_only"
+    analysis["compact_chart_enabled"] = False
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
     analysis["arrow_rules_version"] = "v2"
     analysis["arrow_rules"] = {
@@ -5373,7 +5375,7 @@ def analyze_chart_image(
         "axis_cards": ["ENTRY", "STOP", "CANCEL", "TP1", "TP2", "TP3", "CURRENT", "BUY IF", "SELL IF"],
     }
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
-    analysis["visual_overlay_clarity_mode"] = "reference_sheet_v2_rectangular_ohlc"
+    analysis["visual_overlay_clarity_mode"] = "v7.8_full_visual_clarity"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
