@@ -811,4 +811,20 @@
     window.setTimeout(() => chartPanHint?.classList.add('hidden'), 5200);
   }
 
+
+  // V8.0: expire a static M5 result when a newer candle should have closed.
+  // This uses no market-data credits and prevents stale guidance on screen.
+  const decisionTerminal = document.querySelector('.saleem-terminal[data-decision-valid-until-ms]');
+  const staleWarning = document.getElementById('m5-stale-warning');
+  if (decisionTerminal) {
+    const validUntil = Number(decisionTerminal.dataset.decisionValidUntilMs || 0);
+    const applyDecisionFreshness = () => {
+      if (!validUntil || Date.now() <= validUntil) return;
+      decisionTerminal.classList.add('m5-result-stale');
+      if (staleWarning) staleWarning.hidden = false;
+    };
+    applyDecisionFreshness();
+    window.setInterval(applyDecisionFreshness, 15000);
+  }
+
 })();

@@ -40,7 +40,7 @@ def test_v78_analyzer_marks_full_only_profile():
     source = Path('app/services/analyzer.py').read_text()
     assert 'analysis["render_profile"] = "full_only"' in source
     assert 'analysis["compact_chart_enabled"] = False' in source
-    assert 'analysis["smc_real_chart_style_version"] = "v7.9"' in source
+    assert ('analysis["smc_real_chart_style_version"] = "v7.9"' in source or 'analysis["smc_real_chart_style_version"] = "v8.0"' in source)
 
 
 def test_v78_watch_cards_do_not_add_conditional_entry_targets():
@@ -66,7 +66,7 @@ def test_v78_card_layout_has_auto_repel_and_connectors():
 def test_v78_watch_paths_are_compact_and_score_weighted():
     source = Path('app/engine/renderer.py').read_text()
     body = source[source.index('def _draw_reference_dual_watch_paths'):source.index('def _draw_reference_trade_plan')]
-    assert 'strongest = "buy" if buy_score >= sell_score else "sell"' in body
+    assert ('strongest = "buy" if buy_score >= sell_score else "sell"' in body or 'strongest = action_side if action_side in {"buy", "sell"}' in body)
     assert 'max_vertical = 118' in body
     assert 'entry = _number(scenario.get("trigger_price"))' in body
     assert 'origin_entry' in body  # kept only as ignored compatibility arg

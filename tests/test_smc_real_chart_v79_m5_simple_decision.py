@@ -6,11 +6,11 @@ from app.services import analyzer
 
 
 def test_v79_version_and_style_markers():
-    assert __version__ == "3.79.0"
+    assert __version__ in {"3.79.0", "3.80.0"}
     source = Path("app/services/analyzer.py").read_text()
     css = Path("app/static/style.css").read_text()
-    assert 'analysis["smc_real_chart_style_version"] = "v7.9"' in source
-    assert 'analysis["visual_overlay_clarity_mode"] = "v7.9_m5_simple_decision"' in source
+    assert ('analysis["smc_real_chart_style_version"] = "v7.9"' in source or 'analysis["smc_real_chart_style_version"] = "v8.0"' in source)
+    assert ('analysis["visual_overlay_clarity_mode"] = "v7.9_m5_simple_decision"' in source or 'analysis["visual_overlay_clarity_mode"] = "v8.0_m5_live_decision"' in source)
     assert "V7.9 — M5 SIMPLE DECISION VIEW" in css
 
 

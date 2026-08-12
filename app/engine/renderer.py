@@ -7484,7 +7484,9 @@ def _draw_reference_dual_watch_paths(
     sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
     buy_score = max(0, min(100, int(buy.get("score") or analysis.get("buy_probability") or 0)))
     sell_score = max(0, min(100, int(sell.get("score") or analysis.get("sell_probability") or 0)))
-    strongest = "buy" if buy_score >= sell_score else "sell"
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    action_side = str(action.get("primary_side") or "wait")
+    strongest = action_side if action_side in {"buy", "sell"} else ("buy" if buy_score >= sell_score else "sell")
 
     specs = [
         ("buy", buy, buy_score, (30, 167, 88)),
@@ -7726,10 +7728,16 @@ def _draw_reference_price_axis_and_cards(
         sell_trigger = _number(sell.get("trigger_price"))
         buy_score = max(0, min(100, int(buy.get("score") or analysis.get("buy_probability") or 0)))
         sell_score = max(0, min(100, int(sell.get("score") or analysis.get("sell_probability") or 0)))
+        action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+        live_side = str(action.get("primary_side") or "wait") if bool(action.get("live_override")) else "wait"
         if buy_trigger is not None:
-            cards.append((f"BUY {buy_score}% IF", float(buy_trigger), (94, 49, 181, 235), 1))
+            buy_label = "BUY TRIGGER ✓" if live_side == "buy" else f"BUY {buy_score}% IF"
+            buy_color = (30, 157, 91, 240) if live_side == "buy" else (94, 49, 181, 235)
+            cards.append((buy_label, float(buy_trigger), buy_color, 1))
         if sell_trigger is not None:
-            cards.append((f"SELL {sell_score}% IF", float(sell_trigger), (42, 47, 52, 238), 2))
+            sell_label = "SELL TRIGGER ✓" if live_side == "sell" else f"SELL {sell_score}% IF"
+            sell_color = (216, 67, 76, 240) if live_side == "sell" else (42, 47, 52, 238)
+            cards.append((sell_label, float(sell_trigger), sell_color, 2))
 
     current = _number(analysis.get("current_price"))
     if current is None:
@@ -8304,10 +8312,18 @@ def _render_reconstructed_market_chart(
 
     lifecycle_state = str((scene.get("trade_lifecycle") or {}).get("state") or "none")
     expired = lifecycle_state in {"expired", "target_hit", "invalidated"} or bool(analysis.get("scenario_expired"))
-    scenario_bias = str(analysis.get("reference_scenario_bias") or analysis.get("pattern_bias") or "محايد")
+    action = analysis.get("action_summary") if isinstance(analysis.get("action_summary"), dict) else {}
+    action_side = str(action.get("primary_side") or "wait")
+    if action_side == "buy":
+        scenario_bias = "صاعد"
+    elif action_side == "sell":
+        scenario_bias = "هابط"
+    else:
+        scenario_bias = str(analysis.get("reference_scenario_bias") or analysis.get("pattern_bias") or "محايد")
     confirmed_execution = lifecycle_state == "active" and str(analysis.get("draw_mode") or "watch") == "confirmed"
 
-    # V7.9 header answers only the decision question; SMC evidence stays on the chart.
+    # V8.0 header follows the current action first; a stale model bias cannot
+    # keep saying WAIT SELL after the live price crossed the BUY trigger.
     if expired:
         headline = "M5 DECISION VIEW · RE-EVALUATE"
     elif confirmed_execution and scenario_bias == "صاعد":

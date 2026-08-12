@@ -160,19 +160,29 @@
     {% set m5targets = result.m5_target_landmarks or [] %}
     {% set next_station = m5view.get('next_station') or {} %}
 
-    <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM">
+    {% set m5_action_class = 'buy' if action_primary == 'buy' else 'sell' if action_primary == 'sell' else 'watch' %}
+    <section class="saleem-terminal" aria-label="واجهة نتيجة SaleeM" data-decision-valid-until-ms="{{ result.decision_valid_until_epoch_ms or '' }}" data-live-refresh="{{ result.live_m5_refresh_status or 'unknown' }}">
+      <section class="m5-stale-warning" id="m5-stale-warning" hidden aria-live="assertive">
+        <div><b>انتهت صلاحية قراءة M5</b><span>أغلقت شمعة جديدة بعد هذه النتيجة. لا تعتمد الاتجاه القديم قبل تحديث التحليل.</span></div>
+        <a href="/">تحديث التحليل</a>
+      </section>
       <header class="terminal-header m5-terminal-header">
         <a class="terminal-brand" href="/" aria-label="SaleeM"><b>SaleeM</b><small>XAUUSD / M5</small></a>
         <div class="terminal-state state-{{ trade_type_class }}"><strong>{{ trade_type_label }}</strong><span aria-hidden="true">◉</span></div>
-        <div class="terminal-update"><span>آخر تحديث M5</span><b>{{ result.analysis_last_closed_m5_time or '—' }}</b></div>
+        <div class="terminal-update"><span>آخر تحديث M5</span><b>{{ result.live_m5_candle_time or result.analysis_last_closed_m5_time or '—' }}</b></div>
         <a class="terminal-new" href="/" aria-label="تحليل صورة جديدة">＋</a>
       </header>
 
-      <section class="m5-decision-hero state-{{ trade_type_class }}" aria-label="قرار M5 الآن">
+      <section class="m5-decision-hero state-{{ m5_action_class }}" aria-label="قرار M5 الآن">
         <div class="m5-decision-copy">
           <small>قرار M5 الآن</small>
           <h1>{{ action_title }}</h1>
           <p>{{ action_instruction }}</p>
+          <div class="m5-live-meta">
+            <span>السعر عند التحليل <b dir="ltr">{% if m5view.get('live_price') %}{{ '%.2f'|format(m5view.get('live_price')) }}{% else %}—{% endif %}</b></span>
+            <span>حركة M5 الآن <b>{{ m5view.get('live_direction') or result.current_movement or 'غير واضح' }} · {{ m5view.get('live_strength') or result.current_movement_strength or 'ضعيف' }}</b></span>
+            <span class="{% if result.live_m5_refresh_status == 'fresh' %}is-fresh{% else %}is-warning{% endif %}">{{ 'محدث قبل إخراج النتيجة' if result.live_m5_refresh_status == 'fresh' else 'تعذر التحديث النهائي — راقب وقت النتيجة' }}</span>
+          </div>
         </div>
         <div class="m5-decision-strength">
           <span>الأفضلية</span>
@@ -185,7 +195,7 @@
         <span>المحطة التالية</span>
         {% if next_station and next_station.get('price') %}
           <b dir="ltr">{{ next_station.get('label') }} · {{ '%.2f'|format(next_station.get('price')) }}</b>
-          <small>{% if next_station.get('strength') %}قوة {{ next_station.get('strength')|int }}٪ · {% endif %}هدف تقريبي من قمة/قاع حقيقي</small>
+          <small>{% if next_station.get('strength') %}قوة {{ next_station.get('strength')|int }}٪ · {% endif %}المحطة التالية أمام حركة السعر الحالية</small>
         {% else %}
           <b>لا توجد قمة/قاع واضحة بعد</b>
           <small>يبقى القرار مراقبة حتى تظهر محطة M5 حقيقية.</small>
@@ -193,9 +203,9 @@
       </section>
 
       <div class="m5-quick-grid" aria-label="قراءة M5 السريعة">
-        <article><span>الاتجاه</span><b class="{% if m5view.get('direction') == 'صاعد' %}tone-green{% elif m5view.get('direction') == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ m5view.get('direction') or result.current_movement or 'غير واضح' }}</b></article>
+        <article><span>الهيكل السابق</span><b class="{% if m5view.get('structure_direction') == 'صاعد' %}tone-green{% elif m5view.get('structure_direction') == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ m5view.get('structure_direction') or result.direction or 'غير واضح' }}</b><small>لا يعني دخولًا وحده</small></article>
+        <article class="m5-live-movement"><span>M5 الآن</span><b class="{% if m5view.get('live_direction') == 'صاعد' %}tone-green{% elif m5view.get('live_direction') == 'هابط' %}tone-red{% else %}tone-blue{% endif %}">{{ m5view.get('live_direction') or result.current_movement or 'غير واضح' }}</b><small>{{ m5view.get('live_strength') or result.current_movement_strength or 'ضعيف' }}</small></article>
         <article><span>الموقع</span><b class="tone-gold">{{ m5view.get('location') or 'بين دعم ومقاومة' }}</b>{% if m5view.get('location_price') %}<small dir="ltr">{{ '%.2f'|format(m5view.get('location_price')) }}</small>{% endif %}</article>
-        <article><span>السلوك</span><b class="tone-purple">{{ m5view.get('behavior') or result.pattern_type or 'متابعة' }}</b></article>
         <article><span>التأكيد</span><b class="tone-orange">{{ 'مفعّل' if action_confirmed else 'إغلاق M5' }}</b><small>{{ action_badge }}</small></article>
       </div>
 

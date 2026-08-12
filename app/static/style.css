@@ -1733,3 +1733,19 @@ body[data-has-result="true"] .v77-trade-plan{display:none!important}
   .m5-target-head{display:block}.m5-target-head>small{display:block;margin-top:4px;text-align:right}
   .m5-target-grid{gap:5px}.m5-target-grid article{padding:7px 4px}.m5-target-grid b{font-size:10px}.m5-target-grid small{font-size:6.2px}
 }
+
+
+/* =====================================================================
+   V8.0 — M5 LIVE DECISION LOGIC
+   Fresh quote gate + live trigger override + stale-result safety guard.
+   ===================================================================== */
+.m5-live-meta{display:flex;flex-wrap:wrap;gap:5px 10px;margin-top:7px;color:#89a1b9;font-size:7.5px}
+.m5-live-meta span{display:inline-flex;gap:4px;align-items:center}
+.m5-live-meta b{color:#edf5fb;font-size:8px}
+.m5-live-meta .is-fresh{color:#4bd18a}.m5-live-meta .is-warning{color:#f0ad4e}
+.m5-live-movement{box-shadow:inset 0 0 0 1px rgba(67,143,255,.15)}
+.m5-stale-warning{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 9px;padding:10px 12px;border:1px solid #a45e20;border-radius:13px;background:#2c1b09;color:#fff3dc}
+.m5-stale-warning[hidden]{display:none!important}.m5-stale-warning div{min-width:0}.m5-stale-warning b,.m5-stale-warning span{display:block}.m5-stale-warning b{font-size:11px;color:#ffbd68}.m5-stale-warning span{margin-top:2px;font-size:8px;line-height:1.6;color:#e4c59f}.m5-stale-warning a{flex:0 0 auto;padding:7px 10px;border-radius:9px;background:#f0a33c;color:#15100a;text-decoration:none;font-size:8px;font-weight:900}
+.saleem-terminal.m5-result-stale .m5-decision-hero,.saleem-terminal.m5-result-stale .m5-next-station,.saleem-terminal.m5-result-stale .m5-trigger-strip,.saleem-terminal.m5-result-stale .m5-target-stations{opacity:.43;filter:saturate(.55)}
+.saleem-terminal.m5-result-stale .m5-trigger-strip{pointer-events:none}
+@media(max-width:640px){.m5-live-meta{display:grid;grid-template-columns:1fr;font-size:6.8px}.m5-stale-warning{align-items:flex-start}.m5-stale-warning span{font-size:7px}}

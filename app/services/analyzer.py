@@ -11,7 +11,7 @@ import statistics
 import threading
 import time
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -3454,6 +3454,53 @@ def _build_action_summary(analysis: dict[str, Any]) -> dict[str, Any]:
             "is_confirmed": False,
         }
 
+    live_override = analysis.get("live_trigger_override") if isinstance(analysis.get("live_trigger_override"), dict) else {}
+    if bool(live_override.get("active")):
+        side = str(live_override.get("side") or "wait")
+        current = _number(live_override.get("current")) or _number(analysis.get("current_price"))
+        strength = max(0, min(100, int(live_override.get("strength") or 0)))
+        if side == "buy":
+            trigger = _number(live_override.get("trigger"))
+            sell = analysis.get("sell_scenario_details") if isinstance(analysis.get("sell_scenario_details"), dict) else {}
+            cancel = None
+            instruction = (
+                f"السعر الآن {float(current):.2f} فوق {float(trigger):.2f}؛ انتظر إغلاق M5 وثبات/إعادة اختبار قبل الشراء"
+                if current is not None and trigger is not None
+                else "تم تجاوز شرط الصعود؛ انتظر إغلاق M5 قبل الشراء"
+            )
+            return {
+                "code": "watch_buy_live", "title": "مراقبة شراء", "badge": "تم تجاوز شرط الصعود",
+                "instruction": instruction,
+                "reason": str(live_override.get("reason") or "الحركة الحية أبطلت توجيه البيع السابق."),
+                "trigger": round(float(trigger), 2) if trigger is not None else None, "target": None,
+                "cancel": round(float(cancel), 2) if cancel is not None else None,
+                "strength": strength, "primary_side": "buy", "is_confirmed": False, "live_override": True,
+            }
+        if side == "sell":
+            trigger = _number(live_override.get("trigger"))
+            buy = analysis.get("buy_scenario_details") if isinstance(analysis.get("buy_scenario_details"), dict) else {}
+            cancel = None
+            instruction = (
+                f"السعر الآن {float(current):.2f} تحت {float(trigger):.2f}؛ انتظر إغلاق M5 وثبات/إعادة اختبار قبل البيع"
+                if current is not None and trigger is not None
+                else "تم تجاوز شرط الهبوط؛ انتظر إغلاق M5 قبل البيع"
+            )
+            return {
+                "code": "watch_sell_live", "title": "مراقبة بيع", "badge": "تم تجاوز شرط الهبوط",
+                "instruction": instruction,
+                "reason": str(live_override.get("reason") or "الحركة الحية أبطلت توجيه الشراء السابق."),
+                "trigger": round(float(trigger), 2) if trigger is not None else None, "target": None,
+                "cancel": round(float(cancel), 2) if cancel is not None else None,
+                "strength": strength, "primary_side": "sell", "is_confirmed": False, "live_override": True,
+            }
+        return {
+            "code": "live_re_evaluate", "title": "مراقبة — إعادة تقييم", "badge": "حركة M5 تغيّرت",
+            "instruction": "لا تدخل الآن؛ انتظر إغلاق M5 جديد ثم أعد تقييم الاتجاه",
+            "reason": str(live_override.get("reason") or "الحركة الحية تعاكس القراءة السابقة."),
+            "trigger": None, "target": None, "cancel": None, "strength": strength,
+            "primary_side": "wait", "is_confirmed": False, "live_override": True,
+        }
+
     if bool(analysis.get("scenario_expired")):
         current = _number(analysis.get("current_price"))
         resistance = _nearest_level_price(analysis.get("resistance_levels"), float(current or 0.0), side="resistance") if current is not None else None
@@ -3663,11 +3710,18 @@ def _build_m5_target_landmarks(analysis: dict[str, Any]) -> list[dict[str, Any]]
         sell_score = int(sell.get("score") or analysis.get("sell_probability") or 0)
         side = "buy" if buy_score >= sell_score else "sell"
 
-    reference = _number(action.get("trigger"))
-    if reference is None:
-        reference = _number(analysis.get("current_price")) or _number(analysis.get("market_last_close"))
-    if reference is None:
+    trigger_reference = _number(action.get("trigger"))
+    current_reference = _number(analysis.get("current_price")) or _number(analysis.get("market_last_close"))
+    if current_reference is None and trigger_reference is None:
         return []
+    if current_reference is None:
+        reference = float(trigger_reference)
+    elif trigger_reference is None:
+        reference = float(current_reference)
+    elif side == "buy":
+        reference = max(float(current_reference), float(trigger_reference))
+    else:
+        reference = min(float(current_reference), float(trigger_reference))
 
     kind = "peak" if side == "buy" else "trough"
     candidates = _structural_candidates(analysis, kind=kind, reference_price=float(reference))
@@ -3741,7 +3795,11 @@ def _build_m5_decision_view(analysis: dict[str, Any]) -> dict[str, Any]:
     landmarks = _build_m5_target_landmarks(analysis)
     next_station = landmarks[0] if landmarks else None
     return {
-        "direction": str(analysis.get("current_movement") or analysis.get("direction") or "غير واضح"),
+        "direction": str(analysis.get("live_m5_direction") or analysis.get("current_movement") or "غير واضح"),
+        "structure_direction": str(analysis.get("direction") or analysis.get("higher_timeframe_direction") or "غير واضح"),
+        "live_direction": str(analysis.get("live_m5_direction") or analysis.get("current_movement") or "غير واضح"),
+        "live_strength": str(analysis.get("live_m5_strength") or analysis.get("current_movement_strength") or "ضعيف"),
+        "live_price": round(float(current), 2) if current is not None else None,
         "location": location_label,
         "location_price": round(float(location_price), 2) if location_price is not None else None,
         "location_strength": location_strength,
@@ -3874,6 +3932,205 @@ def _entry_activation_state(
         "movement": movement,
         "closed_m5_confirmed": bool(candle_confirmation),
     }
+
+def _apply_final_live_m5_snapshot(
+    analysis: dict[str, Any],
+    market_data: dict[str, Any],
+) -> dict[str, Any]:
+    """Reconcile the closed-candle analysis with the freshest M5 tape.
+
+    Structure still comes from closed candles. The forming M5 candle may only
+    park or redirect an older WATCH instruction when price has already crossed
+    the opposite trigger; it can never confirm a trade by itself.
+    """
+    result = copy.deepcopy(analysis)
+    frames = market_data.get("frames") if isinstance(market_data, dict) else None
+    raw_m5 = frames.get("M5") if isinstance(frames, dict) else None
+    if not isinstance(raw_m5, list) or not raw_m5:
+        result["live_m5_refresh_status"] = "unavailable"
+        return result
+
+    try:
+        live_candles = _normalize_candles(raw_m5)
+    except RuntimeError:
+        result["live_m5_refresh_status"] = "unavailable"
+        return result
+    if not live_candles:
+        result["live_m5_refresh_status"] = "unavailable"
+        return result
+
+    previous_current = _number(result.get("current_price"))
+    previous_buy = result.get("buy_scenario_details") if isinstance(result.get("buy_scenario_details"), dict) else {}
+    previous_sell = result.get("sell_scenario_details") if isinstance(result.get("sell_scenario_details"), dict) else {}
+    previous_buy_trigger = _number(previous_buy.get("trigger_price"))
+    previous_sell_trigger = _number(previous_sell.get("trigger_price"))
+
+    live_price = float(live_candles[-1]["close"])
+    live_time = str(live_candles[-1].get("time") or "")
+    result["current_price"] = round(live_price, 2)
+    result["provider_live_price"] = round(live_price, 3)
+    result["provider_reference_price"] = round(live_price, 3)
+    result["current_price_source"] = "market_live_final_m5"
+    result["current_price_reference_locked"] = False
+    result["live_m5_price"] = round(live_price, 2)
+    result["live_m5_candle_time"] = live_time
+    result["live_m5_refresh_status"] = "fresh"
+    result["live_m5_refresh_fetched_at"] = str(market_data.get("fetched_at") or "")
+    result["live_m5_price_change_since_analysis"] = (
+        round(live_price - float(previous_current), 2) if previous_current is not None else None
+    )
+
+    render_count = max(32, min(40, int(result.get("render_visible_candle_count") or 36)))
+    result["render_candles"] = copy.deepcopy(live_candles[-render_count:])
+    result["render_candle_source"] = "final_fresh_m5_with_forming_candle"
+    result["render_visible_candle_count"] = len(result["render_candles"])
+
+    market_context = {
+        "timezone": market_data.get("timezone") or result.get("market_timezone") or "Asia/Muscat",
+        "fetched_at": market_data.get("fetched_at"),
+        "latest_candle_time": market_data.get("latest_candle_time") or live_time,
+        "frames": {"M5": raw_m5},
+    }
+    closed_rows = _closed_frame_candles("M5", raw_m5, market_context=market_context)
+    fresh_closed: list[dict[str, Any]] = []
+    if closed_rows:
+        try:
+            fresh_closed = _normalize_candles(closed_rows)
+        except RuntimeError:
+            fresh_closed = []
+    if fresh_closed:
+        result["candles"] = copy.deepcopy(fresh_closed)
+        last_closed_time = str(fresh_closed[-1].get("time") or "")
+        if last_closed_time:
+            result["analysis_last_closed_m5_time"] = last_closed_time
+            result["market_m5_latest_candle_time"] = last_closed_time
+        closed_move = _current_m5_movement(fresh_closed)
+        result["current_movement"] = str(closed_move.get("direction") or result.get("current_movement") or "غير واضح")
+        result["current_movement_strength"] = str(closed_move.get("strength") or result.get("current_movement_strength") or "ضعيف")
+        frames_state = copy.deepcopy(result.get("frame_directions") if isinstance(result.get("frame_directions"), dict) else {})
+        frames_state["M5"] = {
+            "direction": result["current_movement"],
+            "reason": "آخر شموع M5 المغلقة بعد التحديث النهائي",
+        }
+        result["frame_directions"] = frames_state
+
+    live_move = _current_m5_movement(live_candles)
+    result["live_m5_direction"] = str(live_move.get("direction") or "غير واضح")
+    result["live_m5_strength"] = str(live_move.get("strength") or "ضعيف")
+    result["live_m5_movement_score"] = float(live_move.get("score") or 0.0)
+
+    result = _enrich_dual_scenarios(result)
+    buy = result.get("buy_scenario_details") if isinstance(result.get("buy_scenario_details"), dict) else {}
+    sell = result.get("sell_scenario_details") if isinstance(result.get("sell_scenario_details"), dict) else {}
+    buy_trigger = previous_buy_trigger if previous_buy_trigger is not None else _number(buy.get("trigger_price"))
+    sell_trigger = previous_sell_trigger if previous_sell_trigger is not None else _number(sell.get("trigger_price"))
+
+    try:
+        atr = max(0.05, _atr(fresh_closed or live_candles))
+    except Exception:
+        atr = 1.0
+    buffer = max(0.05, min(0.60, atr * 0.08))
+    buy_crossed = bool(buy_trigger is not None and live_price > float(buy_trigger) + buffer)
+    sell_crossed = bool(sell_trigger is not None and live_price < float(sell_trigger) - buffer)
+
+    override: dict[str, Any] = {"active": False}
+    if buy_crossed and not sell_crossed:
+        score = max(55, int(buy.get("score") or result.get("buy_probability") or 0))
+        if result.get("live_m5_direction") == "صاعد":
+            score = min(88, score + 8)
+        override = {
+            "active": True,
+            "side": "buy",
+            "trigger": round(float(buy_trigger), 2),
+            "current": round(live_price, 2),
+            "strength": score,
+            "reason": "السعر الحي تجاوز شرط الشراء؛ لا يبقى توجيه البيع السابق صالحًا حتى إغلاق M5 جديد.",
+        }
+    elif sell_crossed and not buy_crossed:
+        score = max(55, int(sell.get("score") or result.get("sell_probability") or 0))
+        if result.get("live_m5_direction") == "هابط":
+            score = min(88, score + 8)
+        override = {
+            "active": True,
+            "side": "sell",
+            "trigger": round(float(sell_trigger), 2),
+            "current": round(live_price, 2),
+            "strength": score,
+            "reason": "السعر الحي تجاوز شرط البيع؛ لا يبقى توجيه الشراء السابق صالحًا حتى إغلاق M5 جديد.",
+        }
+    else:
+        structure_direction = str(result.get("direction") or "غير واضح")
+        live_direction = str(result.get("live_m5_direction") or "غير واضح")
+        opposing = (
+            (structure_direction == "هابط" and live_direction == "صاعد")
+            or (structure_direction == "صاعد" and live_direction == "هابط")
+        )
+        if opposing and abs(float(result.get("live_m5_movement_score") or 0.0)) >= 0.70:
+            override = {
+                "active": True,
+                "side": "wait",
+                "trigger": None,
+                "current": round(live_price, 2),
+                "strength": max(int(buy.get("score") or 0), int(sell.get("score") or 0)),
+                "reason": "حركة M5 الحية تعاكس الهيكل السابق؛ أوقف التوجيه الاتجاهي حتى الإغلاق التالي.",
+            }
+    result["live_trigger_override"] = override
+    result["live_trigger_buffer"] = round(buffer, 3)
+
+    if bool(override.get("active")):
+        result["draw_mode"] = "watch"
+        result["trade_side"] = "مراقبة"
+        result["confirmation_status"] = "مراقبة"
+        result["show_targets_as_active"] = False
+
+    return _stamp_m5_decision_validity(result)
+
+
+def _stamp_m5_decision_validity(result: dict[str, Any]) -> dict[str, Any]:
+    """Attach a client-side expiry time for a static M5 result."""
+    last_closed_text = str(result.get("analysis_last_closed_m5_time") or "")
+    last_closed_utc = _parse_market_candle_time(
+        last_closed_text,
+        str(result.get("market_timezone") or "Asia/Muscat"),
+    )
+    now = datetime.now(timezone.utc)
+    if last_closed_utc is not None:
+        valid_until = last_closed_utc + timedelta(minutes=10, seconds=15)
+    else:
+        valid_until = now + timedelta(minutes=5)
+    result["decision_valid_until_epoch_ms"] = int(valid_until.timestamp() * 1000)
+    result["decision_valid_until_utc"] = valid_until.isoformat()
+    result["decision_generated_at_epoch_ms"] = int(now.timestamp() * 1000)
+    return result
+
+
+def _refresh_final_live_m5(analysis: dict[str, Any]) -> dict[str, Any]:
+    """Spend one final M5 request to prevent a stale final instruction."""
+    if str(os.getenv("SALEEM_FINAL_M5_REFRESH", "1")).strip().lower() in {"0", "false", "off", "no"}:
+        result = copy.deepcopy(analysis)
+        result["live_m5_refresh_status"] = "disabled"
+        return _stamp_m5_decision_validity(result)
+    try:
+        live_data = fetch_market_data({"M5": 200}, force_refresh=True)
+    except MarketDataError as exc:
+        result = copy.deepcopy(analysis)
+        result["live_m5_refresh_status"] = "failed"
+        result["live_m5_refresh_warning"] = str(exc)[:180]
+        result["live_trigger_override"] = {
+            "active": True,
+            "side": "wait",
+            "trigger": None,
+            "current": _number(result.get("current_price")),
+            "strength": 0,
+            "reason": "تعذر التحديث النهائي لسعر M5؛ أوقف SaleeM التوجيه الاتجاهي حتى تتوفر قراءة حديثة.",
+        }
+        result["draw_mode"] = "watch"
+        result["trade_side"] = "مراقبة"
+        result["confirmation_status"] = "مراقبة"
+        result["show_targets_as_active"] = False
+        return _stamp_m5_decision_validity(result)
+    return _apply_final_live_m5_snapshot(analysis, live_data)
+
 
 def _closed_m5_confirmation(candles: list[dict[str, Any]], direction: str) -> bool:
     """Require actual closed-M5 continuation, sweep or rejection evidence."""
@@ -5427,10 +5684,12 @@ def analyze_chart_image(
     analysis = _analyze(prepared_image_path)
     manual_price_applied = _apply_manual_visual_calibration(analysis, manual_calibration)
     if manual_price_applied:
-        # Side scenarios depend on the effective current location, so rebuild
-        # only those deterministic current-state cards after an explicit user
-        # price lock. The closed-candle market decision itself remains intact.
+        # Manual input is visual metadata only; side plans remain market based.
         analysis = _enrich_dual_scenarios(analysis)
+
+    # V8.0 final live gate: refresh M5 immediately before building the result.
+    # The forming candle may park/redirect WATCH, but cannot confirm a trade.
+    analysis = _refresh_final_live_m5(analysis)
 
     # The image axis is no longer part of SaleeM calibration. The generated
     # reference-sheet chart gets its entire vertical scale from real OHLC plus
@@ -5460,7 +5719,7 @@ def analyze_chart_image(
     analysis["ohlc_source"] = "market_provider_primary"
     analysis["educational_overlay_mode"] = True
     analysis["educational_reference_style"] = "reference_sheet_v2"
-    analysis["smc_real_chart_style_version"] = "v7.9"
+    analysis["smc_real_chart_style_version"] = "v8.0"
     analysis["render_profile"] = "full_only"
     analysis["compact_chart_enabled"] = False
     analysis["smc_real_chart_numeric_source"] = "market_ohlc_plus_trusted_chart_current_price"
@@ -5482,7 +5741,7 @@ def analyze_chart_image(
         "axis_cards": ["ENTRY", "STOP", "CANCEL", "TP1", "TP2", "TP3", "CURRENT", "BUY IF", "SELL IF"],
     }
     analysis["reference_library_rule_count"] = int(visual_meta.get("reference_library_rule_count") or reference_rule_count())
-    analysis["visual_overlay_clarity_mode"] = "v7.9_m5_simple_decision"
+    analysis["visual_overlay_clarity_mode"] = "v8.0_m5_live_decision"
     analysis["original_chart_immutable"] = True
 
     analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
