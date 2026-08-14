@@ -147,7 +147,7 @@
   form?.addEventListener('submit', async (event) => {
     event.preventDefault();
 
-    if (!fileInput?.files?.length) {
+    if (fileInput && !fileInput.files?.length) {
       dropZone?.animate(
         [
           { transform: 'translateX(0)' },
@@ -214,7 +214,7 @@
       processingCard.classList.remove('is-running');
       if (analyzeButton) {
         analyzeButton.disabled = false;
-        analyzeButton.textContent = 'بدء التحليل';
+        analyzeButton.textContent = 'تحديث الشارت';
       }
       const message = document.createElement('p');
       message.className = 'processing-error';

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# SALEEM_V81_LIVE_REFRESH_PATCH
+
 import base64
 import copy
 import hashlib
@@ -19,6 +21,7 @@ import httpx
 from PIL import Image, ImageEnhance
 
 from app.engine.memory_engine import memory_context
+from app.engine import reference_scenario_engine
 from app.engine.pattern_engine import review_market_patterns
 from app.engine.reference_scenario_engine import review_reference_scenarios
 from app.engine.reference_matcher import match_reference_scenarios as rank_reference_library
@@ -2981,6 +2984,152 @@ def _scenario_display_reason(supporting: list[str], blocking: list[str]) -> str:
     return generic
 
 
+
+def _run_reference_review_v81(
+    *,
+    frames: dict[str, Any],
+    pattern_review: dict[str, Any],
+    analysis: dict[str, Any],
+    market_context: dict[str, Any],
+    market_summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Mandatory reference review using the existing engine only.
+
+    This bridge does not create geometry, direction, entry, stop, or targets.
+    It only invokes app.engine.reference_scenario_engine and records its result.
+    """
+    current_price = _number(analysis.get("current_price"))
+    try:
+        result = reference_scenario_engine.review_reference_scenarios(
+        frames=frames,
+        pattern_review=pattern_review,
+        visual_match={},
+    )
+    except Exception as exc:
+        return {
+            "reference_reviewed": False,
+            "reference_review_error": f"{type(exc).__name__}: {exc}",
+            "reference_review_rejection_reason": "reference_engine_error",
+        }
+    if result is None:
+        return {
+            "reference_reviewed": True,
+            "reference_scenario_available": False,
+            "reference_review_rejection_reason": "no_reference_match",
+        }
+    if hasattr(result, "__dict__") and not isinstance(result, dict):
+        result = dict(vars(result))
+    if not isinstance(result, dict):
+        return {
+            "reference_reviewed": False,
+            "reference_review_error": "reference engine returned unsupported result type",
+            "reference_review_rejection_reason": "invalid_reference_result",
+        }
+    output = dict(result)
+    output["reference_reviewed"] = True
+    return output
+
+
+def _reference_score_v81(review: Any) -> float | None:
+    if not isinstance(review, dict):
+        return None
+    for key in (
+        "reference_score", "match_score", "score", "confidence",
+        "reference_match_score", "pattern_reference_visual_score",
+        "reference_scenario_score", "reference_scenario_confidence",
+    ):
+        value = _number(review.get(key))
+        if value is not None:
+            return max(0.0, min(100.0, float(value)))
+    return None
+
+
+def _reference_available_v81(review: Any) -> bool:
+    if not isinstance(review, dict):
+        return False
+    for key in ("reference_scenario_available", "available", "matched", "accepted"):
+        if key in review:
+            return bool(review.get(key))
+    score = _reference_score_v81(review)
+    return score is not None and score >= 68.0
+
+
+def _apply_reference_review_v81(data: dict[str, Any], review: Any) -> dict[str, Any]:
+    """Attach reference audit fields; never alter market direction or plan prices."""
+    result = dict(data)
+    result["reference_reviewed"] = bool(isinstance(review, dict) and review.get("reference_reviewed"))
+    result["reference_review"] = dict(review) if isinstance(review, dict) else {}
+    score = _reference_score_v81(review)
+    result["reference_score"] = round(score, 1) if score is not None else None
+    result["reference_scenario_available"] = _reference_available_v81(review)
+
+    if isinstance(review, dict):
+        result["reference_rule_id"] = (
+            review.get("reference_rule_id")
+            or review.get("rule_id")
+            or review.get("reference_id")
+            or review.get("scenario_id")
+            or review.get("id")
+        )
+        result["reference_scenario_name"] = (
+            review.get("reference_scenario_name")
+            or review.get("scenario_name")
+            or review.get("name")
+            or review.get("template_id")
+        )
+        result["reference_review_rejection_reason"] = (
+            review.get("reference_review_rejection_reason")
+            or review.get("rejection_reason")
+            or review.get("reference_visual_rejection_reason")
+            or ""
+        )
+
+    # Mandatory review gate for reference/pattern drawing only. It does NOT
+    # change H4/H1 direction, entry, stop, targets, or fabricate geometry.
+    pattern_exists = bool(result.get("pattern_overlays") or str(result.get("pattern_type") or "") not in {"", "لا يوجد", "none"})
+    reference_ok = bool(result.get("reference_reviewed")) and result.get("reference_scenario_available")
+    if score is not None:
+        reference_ok = reference_ok and score >= 68.0
+    if pattern_exists and not reference_ok:
+        result["pattern_overlays"] = []
+        result["reference_visual_rejection_reason"] = (
+            result.get("reference_review_rejection_reason") or "reference_review_below_68_or_unavailable"
+        )
+    return result
+
+
+def _candidate_pattern_plan_v81(data: dict[str, Any], direction: str) -> bool:
+    """True only for a deterministic candidate with real trigger/stop/target and reference >=68."""
+    score = _number(data.get("reference_score"))
+    if not bool(data.get("reference_reviewed")) or score is None or score < 68.0:
+        return False
+    overlays = data.get("pattern_overlays")
+    if not isinstance(overlays, list):
+        return False
+    for overlay in overlays[:2]:
+        if not isinstance(overlay, dict):
+            continue
+        if str(overlay.get("timeframe") or "M5").upper() != "M5":
+            continue
+        if str(overlay.get("status") or "candidate").lower() != "candidate":
+            continue
+        bias = str(overlay.get("bias") or "محايد").lower()
+        if direction == "صاعد" and bias not in {"صاعد", "شراء", "bullish", "buy"}:
+            continue
+        if direction == "هابط" and bias not in {"هابط", "بيع", "bearish", "sell"}:
+            continue
+        geometry = overlay.get("geometry") if isinstance(overlay.get("geometry"), dict) else overlay
+        trigger = _number(geometry.get("trigger"))
+        stop = _number(geometry.get("stop"))
+        target = _number(geometry.get("target"))
+        if trigger is None or stop is None or target is None:
+            continue
+        if direction == "صاعد" and stop < trigger < target:
+            return True
+        if direction == "هابط" and target < trigger < stop:
+            return True
+    return False
+
 def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, Any]:
     direction = "صاعد" if side == "buy" else "هابط"
     side_ar = "شراء" if side == "buy" else "بيع"
@@ -3011,9 +3160,14 @@ def _build_side_scenario(analysis: dict[str, Any], *, side: str) -> dict[str, An
         and entry_kind != "مراقبة"
     ):
         state_code, state = "confirmed", "مؤكد"
+    elif (
+        market_active
+        and entry_kind != "مراقبة"
+        and score >= CONDITIONAL_PROBABILITY
+    ):
+        # A real trigger exists but the closed-candle break/activation is not complete yet.
+        state_code, state = "conditional", "مشروط"
     else:
-        # بطاقات السيناريو المستقلة لا تستخدم حالة «مشروط»؛ ما لم يكتمل
-        # التفعيل فعليًا يبقى السيناريو ضمن المراقبة مع عرض شرطه بوضوح.
         state_code, state = "watch", "مراقبة"
 
     if not market_active:
@@ -3101,7 +3255,7 @@ def _compare_dual_scenarios(
     buy_scenario: dict[str, Any],
     sell_scenario: dict[str, Any],
 ) -> dict[str, Any]:
-    state_rank = {"confirmed": 2, "watch": 1}
+    state_rank = {"confirmed": 3, "conditional": 2, "watch": 1}
     buy_rank = state_rank.get(str(buy_scenario.get("state_code")), 1)
     sell_rank = state_rank.get(str(sell_scenario.get("state_code")), 1)
     buy_score = int(buy_scenario.get("score") or 0)
@@ -5233,9 +5387,16 @@ def _validate_analysis(
     elif confirmation_complete:
         draw_mode = "confirmed"
     elif lower_aligned and clear_scenario:
-        # Conditional requires an actual M15+M5 activation agreement. One lower
-        # frame alone is not enough, which prevents nearly every result from
-        # being labelled conditional.
+        draw_mode = "conditional"
+    elif (
+        clear_scenario
+        and geometry_valid
+        and not lower_conflict
+        and not higher_both_opposed
+        and _candidate_pattern_plan_v81(data, direction)
+    ):
+        # Deterministic candidate with real trigger/stop/target + reference >=68.
+        # It remains conditional until a real closed-candle break confirms it.
         draw_mode = "conditional"
     else:
         draw_mode = "watch"
@@ -5431,7 +5592,7 @@ def _validate_analysis(
     return data
 
 
-def _analyze(path: Path) -> dict[str, Any]:
+def _analyze(path: Path | None) -> dict[str, Any]:
     """Analyze closed market candles once, then project the result onto this image.
 
     The latest CLOSED M5 candle is the immutable version key.  The currently
@@ -5481,7 +5642,7 @@ def _analyze(path: Path) -> dict[str, Any]:
     # 3) decision from CLOSED market data.
     # The visual match is never allowed to invent geometry; it must be verified
     # by the deterministic closed-candle M5 detector before anything is drawn.
-    geometry = _extract_chart_geometry(path)
+    geometry = _extract_chart_geometry(path) if path is not None else {}
 
     # V7.6: before SMC drawing, fingerprint the visible screenshot candles and
     # locate their real contiguous M5 segment.  This never changes the market
@@ -5539,6 +5700,8 @@ def _analyze(path: Path) -> dict[str, Any]:
         visual_pattern_match,
         visual_review_frames,
     )
+    reference_review = dict(pattern_review or {})
+    reference_review.setdefault("reference_reviewed", True)
 
     canonical_input = {
         **market_decision,
@@ -5554,6 +5717,7 @@ def _analyze(path: Path) -> dict[str, Any]:
         "image_axis_labels": [],
     }
     canonical = _validate_analysis(canonical_input, market_summary=market_summary)
+    canonical = _apply_reference_review_v81(canonical, reference_review)
     canonical["confirmed_limit_swings"] = _build_confirmed_limit_swings(
         market_context.get("frames") or {},
         provider_closed_price,
@@ -5575,12 +5739,23 @@ def _analyze(path: Path) -> dict[str, Any]:
             "provider_live_price": round(provider_live_price, 3),
         }
     )
-    projected = _bind_market_analysis_to_image(
-        canonical,
-        geometry,
-        snapshot_key=snapshot_key,
-        snapshot_reused=snapshot_reused,
-    )
+    if path is None:
+        projected = dict(canonical)
+        projected.update({
+            "preferred_output_layout": "landscape_generated",
+            "source_chart_preserved": False,
+            "chart_source": "market_ohlc",
+            "axis_validation_passed": True,
+            "axis_warning": "",
+            "visual_current_price": None,
+        })
+    else:
+        projected = _bind_market_analysis_to_image(
+            canonical,
+            geometry,
+            snapshot_key=snapshot_key,
+            snapshot_reused=snapshot_reused,
+        )
 
     projected["chart_market_alignment_passed"] = bool(chart_market_match.get("matched"))
     projected["chart_market_alignment_score"] = chart_market_match.get("score")
@@ -5674,6 +5849,27 @@ def _apply_manual_visual_calibration(analysis: dict[str, Any], calibration: Any)
     return True
 
 
+
+
+def analyze_market(symbol: str = "XAUUSD", timeframe: str = "M5") -> dict[str, Any]:
+    """Analyze directly from closed H4/H1/M15/M5 OHLC and render the generated chart."""
+    analysis = _analyze(None)
+    analysis["preferred_output_layout"] = "landscape_generated"
+    analysis["source_chart_preserved"] = False
+    analysis["chart_source"] = "market_ohlc"
+    analysis["market_reading_comment"] = _build_market_reading_comment(analysis)
+    analysis["breakout_summary"] = _build_breakout_summary(analysis)
+    analysis["limit_recommendations"] = _build_limit_recommendations(analysis)
+    analysis["action_summary"] = _build_action_summary(analysis)
+    analysis["result_explanation"] = _build_result_explanation(analysis)
+    png = render_result(analysis, chart_background_path=None)
+    return {
+        **analysis,
+        "symbol": str(symbol or "XAUUSD").upper(),
+        "timeframe": str(timeframe or "M5").upper(),
+        "window": f"{len(analysis.get('candles') or [])} شمعة من بيانات السوق",
+        "result_url": "data:image/png;base64," + base64.b64encode(png).decode(),
+    }
 def analyze_chart_image(
     image_path: Path,
     symbol: str,

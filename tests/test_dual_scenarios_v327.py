@@ -132,9 +132,9 @@ def test_probable_peak_and_trough_are_exposed_for_later_design():
     assert result["most_probable_trough"]["price"] < result["current_price"]
 
 
-def test_dual_decision_stays_monitoring_when_no_side_is_confirmed():
+def test_dual_cards_can_be_conditional_while_overall_decision_waits_for_confirmation():
     result = _enrich_dual_scenarios(_analysis())
 
-    assert result["buy_scenario_details"]["state"] == "مراقبة"
+    assert result["buy_scenario_details"]["state"] == "مشروط"
     assert result["dual_scenario_decision"]["label"] == "القرار الآن: مراقبة"
     assert "سيناريو الشراء" not in result["dual_scenario_decision"]["label"]

@@ -21,53 +21,17 @@
     </header>
 
     {% if not result %}
-    <section class="card upload-card">
+    <section class="card upload-card live-refresh-card">
       <div class="upload-heading">
         <div>
-          <span class="eyebrow">تحليل SaleeM الذكي</span>
-          <h1>حلّل شارت الذهب بوضوح</h1>
-          <p>ارفع صورة الشارت كما هي من الهاتف، رأسية أو أفقية. يكفي أن تظهر الشموع والسعر الحالي بوضوح؛ SaleeM يعيد بناء الشارت من OHLC الحقيقي ويطبق عليه أقرب نموذج مرجعي.</p>
+          <span class="eyebrow">تحليل مباشر من السوق</span>
+          <h1>شارت الذهب المباشر</h1>
+          <p>SaleeM يعتمد على شموع H4 / H1 / M15 / M5 المغلقة. لا تحتاج إلى رفع صورة شارت.</p>
         </div>
-        <button class="help-button" id="capture-help-button" type="button" aria-haspopup="dialog" aria-controls="capture-help-modal">كيف ألتقط الصورة؟</button>
       </div>
 
-      <form id="analysis-form" action="/analyze" method="post" enctype="multipart/form-data">
-        <label class="drop-zone upload-chart-box" id="drop-zone" for="image-input" aria-label="مربع الشارت المرفوع">
-          <input id="image-input" type="file" name="image" accept="image/png,image/jpeg,image/webp" required>
-          <img id="upload-chart-preview" class="upload-chart-preview" alt="معاينة الشارت المرفوع داخل مربع الشارت" hidden>
-          <span class="upload-chart-placeholder" id="upload-chart-placeholder">
-            <span class="upload-cloud" aria-hidden="true">
-              <svg viewBox="0 0 64 54" role="img"><path d="M19 45h27a13 13 0 0 0 1.9-25.8A17 17 0 0 0 15.7 17 14 14 0 0 0 19 45Z"/><path class="arrow" d="M32 37V19m0 0-7 7m7-7 7 7"/></svg>
-            </span>
-            <strong>ضع الشارت هنا</strong>
-            <small>صورة رأسية أو أفقية واضحة تظهر فيها الشموع والسعر الحالي</small>
-            <span class="primary-button">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
-              اختيار صورة الشارت
-            </span>
-            <span class="file-name" id="file-name">لم يتم اختيار صورة</span>
-          </span>
-          <span class="upload-chart-change" id="upload-chart-change" hidden>تغيير الشارت</span>
-        </label>
-
-        <p class="upload-orientation-note" id="upload-orientation-note" aria-live="polite">
-
-          تُقبل الصورة الرأسية أو الأفقية. الصورة مرجع للسعر الحالي فقط، والنتيجة تُبنى من شموع السوق الحقيقية.
-
-        </p>
-
-        <section class="current-price-reference-fields" aria-label="تثبيت السعر الحالي اختياريًا">
-          <div class="current-price-reference-title">
-            <b>السعر الحالي</b>
-            <small>اختياري — استخدمه فقط إذا أردت تثبيت السعر الظاهر في الصورة. لا يغيّر قرار التحليل.</small>
-          </div>
-          <label><span>السعر الحالي الظاهر</span><input type="number" step="any" inputmode="decimal" name="current_price_ref" placeholder="4344.81"></label>
-        </section>
-
-        <button class="analyze-button analysis-progress-button" id="analyze-button" type="submit" style="--p:0%">
-          <span id="analysis-button-text">بدء التحليل</span>
-          <strong id="analysis-inline-percent" hidden>0%</strong>
-        </button>
+      <form id="analysis-form" action="/refresh" method="post">
+        <button class="analyze-button" id="analyze-button" type="submit">تحديث الشارت</button>
       </form>
     </section>
 
@@ -79,26 +43,26 @@
         </svg>
         <div class="progress-inner">
           <strong id="progress-value">0%</strong>
-          <span>جاري المعالجة</span>
+          <span>جاري التحليل</span>
         </div>
         <span class="progress-moving-dot" aria-hidden="true"></span>
       </div>
       <div class="processing-copy">
         <h2>جاري التحليل...</h2>
         <div class="steps" id="processing-steps">
-          <span class="current">قراءة صورة الشارت</span>
-          <span>مزامنة بيانات السوق</span>
-          <span>تحديد الاتجاه والدخول</span>
-          <span>توليد النتيجة النهائية</span>
+          <span class="current">جلب بيانات السوق</span>
+          <span>تحليل H4 و H1</span>
+          <span>فحص M15 و M5</span>
+          <span>مراجعة النماذج والذاكرة المرجعية</span>
+          <span>تجهيز الشارت والسيناريو</span>
         </div>
       </div>
     </section>
 
-    <section class="home-secondary status-palette" aria-label="حالات التحليل المعتمدة">
-      <span class="status-buy"><i aria-hidden="true">↗</i><b>شراء</b><small>إشارة إيجابية</small></span>
-      <span class="status-sell"><i aria-hidden="true">↘</i><b>بيع</b><small>إشارة سلبية</small></span>
-      <span class="status-watch"><i aria-hidden="true">◉</i><b>مراقبة</b><small>انتظار ومتابعة</small></span>
-      <span class="status-conditional"><i aria-hidden="true">⌛</i><b>مشروط</b><small>يتطلب تفعيلًا</small></span>
+    <section class="home-secondary" aria-label="مميزات التطبيق">
+      <span>OHLC مغلق</span>
+      <span>مراجعة مرجعية</span>
+      <span>مشروط / مؤكد / مراقبة</span>
     </section>
     {% endif %}
 

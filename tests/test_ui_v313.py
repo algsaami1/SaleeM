@@ -15,15 +15,16 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_processing_steps_have_the_approved_order():
     html = (ROOT / "app" / "templates" / "index.html").read_text(encoding="utf-8")
     steps = [
-        "قراءة صورة الشارت",
-        "مزامنة بيانات السوق",
-        "تحديد الاتجاه والدخول",
-        "توليد النتيجة النهائية",
+        "جلب بيانات السوق",
+        "تحليل H4 و H1",
+        "فحص M15 و M5",
+        "مراجعة النماذج والذاكرة المرجعية",
+        "تجهيز الشارت والسيناريو",
     ]
     positions = [html.index(step) for step in steps]
     assert positions == sorted(positions)
     assert "تمت المتابعة تلقائيًا" not in html
-    assert "اكتملت قراءة الصورة" in html
+    assert "مراجعة النماذج والذاكرة المرجعية" in html
     assert "result.market_reading_comment" in html
 
 

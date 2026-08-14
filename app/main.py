@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app import __version__
 from app.services.analyzer import analyze_chart_image, load_final_spec
+from app.services.analyzer import analyze_market
 from app.services.feedback_store import FeedbackStore
 from app.services.mailer import delivery_provider, email_configured, owner_email, send_note_email
 from app.services.market_data import market_status_snapshot
@@ -254,6 +255,31 @@ async def submit_note(payload: NotePayload):
         message = "تم حفظ الملاحظة، لكن تعذر إرسال البريد. افتح Railway Logs لمعرفة سبب الرفض."
     return JSONResponse({"ok": True, "message": message, "emailed": was_emailed})
 
+
+
+@app.post("/refresh", response_class=HTMLResponse)
+async def refresh_chart(request: Request):
+    """Primary v8.1 flow: market OHLC -> analysis -> generated chart, no upload required."""
+    try:
+        result = await run_in_threadpool(analyze_market, "XAUUSD", "M5")
+        try:
+            system_status_store.record_analysis()
+        except Exception:
+            logging.exception("SaleeM analysis counter failed; request will continue")
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            page_context(request, result=result),
+        )
+    except Exception as exc:
+        logging.exception("SaleeM live market analysis failed")
+        message = str(exc).strip() or "تعذر تحليل بيانات السوق حاليًا."
+        return templates.TemplateResponse(
+            request,
+            "index.html",
+            page_context(request, error=message, axis_retry=False),
+            status_code=500,
+        )
 
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(
