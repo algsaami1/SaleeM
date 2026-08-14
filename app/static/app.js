@@ -828,3 +828,221 @@
   }
 
 })();
+// SALEEM_V81_RESULT_CHART_CARDS_ADDON
+(() => {
+  const q = (s, root = document) => root.querySelector(s);
+  const qa = (s, root = document) => [...root.querySelectorAll(s)];
+
+  const textOf = (el) => (el?.textContent || '').replace(/\s+/g, ' ').trim();
+
+  const smallestPanelContaining = (needle, excluded = '') => {
+    const nodes = qa('article, section, div')
+      .filter((el) => !excluded || !el.closest(excluded))
+      .filter((el) => textOf(el).includes(needle));
+    nodes.sort((a, b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length);
+    return nodes[0] || null;
+  };
+
+  const firstPrice = (text) => {
+    const match = String(text || '').match(/\b(\d{4}(?:\.\d{1,2})?)\b/);
+    return match ? match[1] : 'غير متوفر';
+  };
+
+  const probability = (text) => {
+    const match = String(text || '').match(/(\d{1,3}(?:\.\d+)?)\s*[%٪]/);
+    if (!match) return null;
+    const n = Math.max(0, Math.min(100, Number(match[1])));
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const statusLabel = () => {
+    const body = textOf(document.body);
+    if (body.includes('مشروط شراء')) return 'مشروط شراء';
+    if (body.includes('مشروط بيع')) return 'مشروط بيع';
+    if (body.includes('مؤكد')) return 'مؤكد';
+    return 'مراقبة';
+  };
+
+  const nearbyExactValue = (label, root = document) => {
+    const candidates = qa('article, section, div, p, span, strong', root)
+      .filter((el) => textOf(el).includes(label));
+    for (const el of candidates) {
+      const t = textOf(el);
+      const idx = t.indexOf(label);
+      const after = idx >= 0 ? t.slice(idx + label.length) : t;
+      const p = firstPrice(after);
+      if (p !== 'غير متوفر') return p;
+    }
+    return 'غير متوفر';
+  };
+
+  const targetValue = (sideText) => {
+    const t = String(sideText || '');
+    const match = t.match(/TP1\s*(\d{4}(?:\.\d{1,2})?)/i);
+    return match ? `TP1 ${match[1]}` : 'لا يوجد Target هندسي موثوق';
+  };
+
+  const chartHostFor = (image) => {
+    if (!image) return null;
+    const candidates = [
+      image.closest('.chart-card'),
+      image.closest('.terminal-chart-card'),
+      image.closest('.result-chart'),
+      image.closest('.chart-container'),
+      image.closest('figure'),
+      image.parentElement,
+    ].filter(Boolean);
+    return candidates.find((el) => !textOf(el).includes('قرار M5 الآن')) || image.parentElement;
+  };
+
+  const findFullscreen = (root) => {
+    const local = qa('button, a', root || document).find((el) => textOf(el).includes('عرض كامل'));
+    if (local) return local;
+    return qa('button, a').find((el) => textOf(el).includes('عرض كامل')) || null;
+  };
+
+  const ensureChartStage = () => {
+    const image = q('#result-image');
+    if (!image) return null;
+
+    let stage = q('.v81r-chart-stage');
+    if (stage) return stage;
+
+    const oldHost = chartHostFor(image);
+    stage = document.createElement('section');
+    stage.className = 'v81r-chart-stage';
+    stage.setAttribute('aria-label', 'الشارت M5');
+    stage.innerHTML = `
+      <div class="v81r-chart-head">
+        <h3>الشارت M5</h3>
+        <span class="v81r-chart-symbol">XAUUSD • M5</span>
+      </div>
+      <div class="v81r-chart-tools"></div>
+      <div class="v81r-chart-air" aria-hidden="true"></div>
+      <div class="v81r-chart-media"></div>`;
+
+    if (oldHost?.parentElement) oldHost.insertAdjacentElement('beforebegin', stage);
+    else (q('main') || document.body).appendChild(stage);
+
+    const tools = q('.v81r-chart-tools', stage);
+    const media = q('.v81r-chart-media', stage);
+    const full = findFullscreen(oldHost);
+    if (full && tools) tools.appendChild(full);
+    if (media) media.appendChild(image);
+
+    // Only hide the old empty shell after its real chart image has been moved.
+    if (oldHost && oldHost !== image && oldHost !== stage && !oldHost.contains(image)) {
+      oldHost.classList.add('v81r-legacy-chart-shell-hidden');
+    }
+
+    return stage;
+  };
+
+  const buildResultCard = (side, source) => {
+    if (!source) return null;
+    const raw = textOf(source);
+    const isBuy = side === 'buy';
+    const price = firstPrice(raw);
+    const prob = probability(raw);
+    const title = isBuy ? 'نتيجة الشراء' : 'نتيجة البيع';
+    const signal = isBuy ? 'BUY IF' : 'SELL IF';
+    const stop = nearbyExactValue('Stop / إلغاء', source) !== 'غير متوفر'
+      ? nearbyExactValue('Stop / إلغاء', source)
+      : nearbyExactValue('إلغاء / Stop', source);
+    const target = targetValue(raw);
+
+    const card = document.createElement('article');
+    card.className = `v81r-side-card ${isBuy ? 'v81r-buy-card' : 'v81r-sell-card'}`;
+    card.innerHTML = `
+      <div class="v81r-side-head">
+        <h3>${title}</h3>
+        <span class="v81r-state-pill">${statusLabel()}</span>
+      </div>
+      <div class="v81r-trigger">
+        <span>${signal}</span>
+        <strong>${price}</strong>
+      </div>
+      <div class="v81r-plan-row"><span>إلغاء / Stop</span><strong>${stop}</strong></div>
+      <div class="v81r-target-copy">${target}</div>
+      <p class="v81r-reason">${target.startsWith('TP1') ? 'الهدف معروض من بيانات النتيجة الحالية.' : 'لن يصنع SaleeM هدفًا هندسيًا غير متوفر في النتيجة الحالية.'}</p>
+      ${prob === null ? '' : `
+        <div class="v81r-prob">
+          <span>الترجيح ${prob.toFixed(1)}%</span>
+          <div class="v81r-prob-bar" style="--v81r-prob:${prob}%"><i></i></div>
+        </div>`}`;
+    return card;
+  };
+
+  const ensureResultCards = (stage) => {
+    if (!stage || q('.v81r-results-grid')) return;
+    const buySource = smallestPanelContaining('شراء إذا', '.v81r-results-grid');
+    const sellSource = smallestPanelContaining('بيع إذا', '.v81r-results-grid');
+    if (!buySource && !sellSource) return;
+
+    const grid = document.createElement('section');
+    grid.className = 'v81r-results-grid';
+    grid.setAttribute('aria-label', 'نتائج الشراء والبيع');
+
+    const buy = buildResultCard('buy', buySource);
+    const sell = buildResultCard('sell', sellSource);
+    if (buy) grid.appendChild(buy);
+    if (sell) grid.appendChild(sell);
+    stage.insertAdjacentElement('afterend', grid);
+
+    // Preserve the original elements in DOM/code but hide only the duplicated visual cards.
+    [buySource, sellSource].filter(Boolean).forEach((el) => el.classList.add('v81r-legacy-side-hidden'));
+  };
+
+  const openExistingRules = () => {
+    const button = qa('button, summary, a').find((el) => textOf(el).includes('عرض القواعد'));
+    if (button) {
+      try { button.click(); } catch (_) {}
+      return;
+    }
+    const details = qa('details').find((el) => textOf(el).includes('القواعد'));
+    if (details) details.open = true;
+  };
+
+  const ensureRulesCard = () => {
+    if (q('.v81r-rules-card')) return;
+    const source = smallestPanelContaining('القواعد التي بُنيت عليها النتيجة', '.v81r-rules-card');
+    const sourceText = textOf(source || document.body);
+    const okMatch = sourceText.match(/(\d+)\s*متحقق/);
+    const waitMatch = sourceText.match(/(\d+)\s*(?:انتظار|قيد الانتظار)/);
+
+    const card = document.createElement('section');
+    card.className = 'v81r-rules-card';
+    card.innerHTML = `
+      <h3>القواعد التي بُنيت عليها النتيجة</h3>
+      <div class="v81r-rules-stats">
+        <span class="v81r-rule-chip ok">${okMatch ? `✓ ${okMatch[1]} متحقق` : '✓ مراجعة القواعد'}</span>
+        <span class="v81r-rule-chip wait">${waitMatch ? `! ${waitMatch[1]} انتظار` : '! حالات الانتظار حسب النتيجة'}</span>
+      </div>
+      <button class="v81r-rules-button" type="button">عرض القواعد</button>`;
+    q('.v81r-results-grid')?.insertAdjacentElement('afterend', card);
+    q('.v81r-rules-button', card)?.addEventListener('click', openExistingRules);
+  };
+
+  const apply = () => {
+    const stage = ensureChartStage();
+    if (!stage) return false;
+    ensureResultCards(stage);
+    ensureRulesCard();
+    return true;
+  };
+
+  const boot = () => {
+    if (apply()) return;
+    const observer = new MutationObserver(() => {
+      if (apply()) observer.disconnect();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    [120, 400, 900, 1800, 3200].forEach((ms) => setTimeout(() => {
+      if (apply()) observer.disconnect();
+    }, ms));
+    setTimeout(() => observer.disconnect(), 6000);
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  else boot();
+})();
