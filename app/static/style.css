@@ -2334,3 +2334,185 @@ body[data-has-result="true"] .v77-trade-plan{display:none!important}
 @media (max-width: 360px) {
   .v81r-results-grid { grid-template-columns: 1fr; }
 }
+
+/* SALEEM_V81_WIDE_RESULT_RULE_LINK_POLISH
+   Additive visual refinement only.
+   Keeps every existing V8.1 UI/analysis feature and does not remove analyzer/renderer logic. */
+:root {
+  --v81p-page: #f4f7fb;
+  --v81p-card: rgba(255,255,255,.94);
+  --v81p-text: #152033;
+  --v81p-muted: #748396;
+  --v81p-blue: #3478f6;
+  --v81p-green: #15975e;
+  --v81p-red: #d94b55;
+  --v81p-orange: #ef8728;
+  --v81p-line: rgba(94,129,171,.18);
+}
+
+/* The main analysis-result panel is slightly wider and lighter. */
+.v81p-wide-decision {
+  width: calc(100% + 12px) !important;
+  max-width: calc(100vw - 18px) !important;
+  margin-inline: -6px !important;
+  box-sizing: border-box !important;
+  border-radius: 24px !important;
+  border: 1px solid rgba(52,120,246,.24) !important;
+  background:
+    linear-gradient(135deg, rgba(52,120,246,.075), rgba(255,255,255,.96) 54%, rgba(21,151,94,.035)) !important;
+  box-shadow: 0 10px 30px rgba(32,55,80,.055) !important;
+  color: var(--v81p-text) !important;
+  overflow: hidden !important;
+}
+.v81p-wide-decision :is(h1,h2,h3,h4,p,span,strong,small) {
+  text-shadow: none !important;
+}
+.v81p-decision-title { color: var(--v81p-blue) !important; }
+.v81p-decision-live { color: var(--v81p-green) !important; font-weight: 850 !important; }
+.v81p-decision-muted { color: var(--v81p-muted) !important; }
+.v81p-preference-box {
+  background: rgba(52,120,246,.055) !important;
+  border: 1px solid rgba(52,120,246,.18) !important;
+  color: var(--v81p-text) !important;
+  border-radius: 18px !important;
+}
+.v81p-preference-box :is(h1,h2,h3,strong,b) { color: var(--v81p-blue) !important; }
+
+/* Next-station / four summary cards are coordinated, not removed. */
+.v81p-next-station {
+  width: 100% !important;
+  box-sizing: border-box !important;
+  background: rgba(52,120,246,.055) !important;
+  border: 1px solid rgba(52,120,246,.16) !important;
+  color: var(--v81p-text) !important;
+  border-radius: 18px !important;
+  box-shadow: none !important;
+}
+.v81p-next-station :is(p,span,small) { color: var(--v81p-muted) !important; }
+.v81p-next-station :is(h1,h2,h3,h4,strong,b) { color: var(--v81p-text) !important; }
+
+.v81p-mini-card {
+  background: rgba(255,255,255,.78) !important;
+  border: 1px solid var(--v81p-line) !important;
+  color: var(--v81p-text) !important;
+  box-shadow: 0 4px 14px rgba(31,42,55,.025) !important;
+}
+.v81p-mini-card :is(p,span,small) { color: var(--v81p-muted) !important; }
+.v81p-mini-card-blue :is(strong,b,h1,h2,h3,h4) { color: var(--v81p-blue) !important; }
+.v81p-mini-card-orange :is(strong,b,h1,h2,h3,h4) { color: var(--v81p-orange) !important; }
+.v81p-mini-card-green :is(strong,b,h1,h2,h3,h4) { color: var(--v81p-green) !important; }
+
+/* Compact bridge between the analysis decision and the chart.
+   It only mirrors existing result/rule text; it does not calculate a new decision. */
+.v81p-logic-strip {
+  direction: rtl;
+  width: calc(100% + 8px);
+  margin: 10px -4px 6px;
+  padding: 11px 13px;
+  box-sizing: border-box;
+  border-radius: 18px;
+  border: 1px solid rgba(52,120,246,.15);
+  background: linear-gradient(90deg, rgba(52,120,246,.045), rgba(255,255,255,.94), rgba(21,151,94,.035));
+  display: grid;
+  gap: 8px;
+}
+.v81p-logic-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.v81p-logic-head strong {
+  color: var(--v81p-text);
+  font-size: clamp(14px, 3.7vw, 18px);
+}
+.v81p-logic-head span {
+  color: var(--v81p-muted);
+  font-size: clamp(11px, 2.9vw, 14px);
+}
+.v81p-logic-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.v81p-logic-chip {
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.8);
+  border: 1px solid rgba(110,135,165,.16);
+  color: #4b596a;
+  font-size: clamp(11px, 2.9vw, 14px);
+  font-weight: 750;
+}
+.v81p-logic-chip.state { color: var(--v81p-blue); border-color: rgba(52,120,246,.18); background: rgba(52,120,246,.055); }
+.v81p-logic-chip.ok { color: var(--v81p-green); border-color: rgba(21,151,94,.17); background: rgba(21,151,94,.055); }
+.v81p-logic-chip.wait { color: #b66c16; border-color: rgba(239,135,40,.18); background: rgba(239,135,40,.06); }
+
+/* The approved chart box stays spacious, but is a little wider and more dominant. */
+.v81r-chart-stage {
+  width: calc(100% + 12px) !important;
+  max-width: calc(100vw - 18px) !important;
+  margin-inline: -6px !important;
+  padding: 13px !important;
+  border-color: rgba(91,121,153,.18) !important;
+  box-shadow: 0 10px 30px rgba(32,55,80,.045) !important;
+}
+.v81r-chart-head h3 { font-size: clamp(20px, 4.8vw, 26px) !important; }
+.v81r-chart-symbol { font-size: clamp(13px, 3.4vw, 17px) !important; }
+.v81r-chart-air { min-height: clamp(116px, 23vw, 190px) !important; }
+.v81r-chart-media #result-image,
+.v81r-chart-media img#result-image {
+  width: 100% !important;
+  border-radius: 12px !important;
+}
+
+/* Buy/Sell cards remain side by side, slightly wider, with calmer typography. */
+.v81r-results-grid {
+  width: calc(100% + 8px) !important;
+  margin-inline: -4px !important;
+  gap: 9px !important;
+}
+.v81r-side-card { padding: 12px !important; border-radius: 19px !important; }
+.v81r-side-head h3 { font-size: clamp(19px, 4.8vw, 25px) !important; }
+.v81r-trigger { padding: 10px 8px !important; }
+.v81r-trigger strong { font-size: clamp(25px, 6vw, 33px) !important; }
+.v81r-target-copy { font-size: clamp(12px, 3.25vw, 16px) !important; }
+.v81r-reason { font-size: clamp(11px, 3vw, 15px) !important; }
+
+.v81p-readiness {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 12px;
+  border: 1px solid rgba(239,135,40,.18);
+  background: rgba(239,135,40,.055);
+  color: #a9651b;
+  font-size: clamp(11px, 2.9vw, 14px);
+  font-weight: 800;
+  line-height: 1.35;
+}
+.v81p-execution-note {
+  direction: rtl;
+  margin: -2px 0 10px;
+  padding: 8px 11px;
+  border-radius: 13px;
+  background: rgba(52,120,246,.05);
+  border: 1px solid rgba(52,120,246,.13);
+  color: #607086;
+  font-size: clamp(11px, 3vw, 14px);
+  line-height: 1.45;
+}
+.v81r-rules-card {
+  width: calc(100% + 4px) !important;
+  margin-inline: -2px !important;
+  padding: 13px 14px !important;
+}
+.v81r-rules-card h3 { font-size: clamp(18px, 4.6vw, 24px) !important; }
+
+/* Consistent mobile typography during browser zoom/text scaling. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+@media (max-width: 520px) {
+  .v81p-wide-decision,
+  .v81r-chart-stage { max-width: calc(100vw - 12px) !important; }
+  .v81p-wide-decision { margin-inline: -4px !important; width: calc(100% + 8px) !important; }
+  .v81r-chart-stage { margin-inline: -4px !important; width: calc(100% + 8px) !important; }
+  .v81p-logic-strip { width: 100%; margin-inline: 0; }
+  .v81r-results-grid { width: 100% !important; margin-inline: 0 !important; }
+}
+

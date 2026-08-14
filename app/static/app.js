@@ -1046,3 +1046,161 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
   else boot();
 })();
+
+// SALEEM_V81_WIDE_RESULT_RULE_LINK_POLISH
+(() => {
+  const q = (s, root = document) => root.querySelector(s);
+  const qa = (s, root = document) => [...root.querySelectorAll(s)];
+  const tx = (el) => (el?.textContent || '').replace(/\s+/g, ' ').trim();
+
+  const smallestContaining = (needle, root = document, exclude = '') => {
+    const nodes = qa('article,section,div', root)
+      .filter((el) => (!exclude || !el.closest(exclude)) && tx(el).includes(needle));
+    nodes.sort((a,b) => a.querySelectorAll('*').length - b.querySelectorAll('*').length);
+    return nodes[0] || null;
+  };
+
+  const leafContaining = (needle, root = document) => {
+    return qa('h1,h2,h3,h4,p,span,strong,b,small', root)
+      .filter((el) => tx(el).includes(needle))
+      .sort((a,b) => a.children.length - b.children.length)[0] || null;
+  };
+
+  const decorateDecision = () => {
+    const decisionText = leafContaining('قرار M5 الآن') || leafContaining('قرار الـ M5 الآن');
+    if (!decisionText) return null;
+    let box = decisionText.closest('article,section,div');
+    for (let i = 0; box && i < 5; i++, box = box.parentElement) {
+      const t = tx(box);
+      if (t.includes('الأفضلية') && (t.includes('لا دخول الآن') || t.includes('مشروط'))) break;
+    }
+    if (!box) return null;
+    box.classList.add('v81p-wide-decision');
+
+    const title = leafContaining('لا دخول الآن', box) || leafContaining('مشروط', box);
+    title?.classList.add('v81p-decision-title');
+    leafContaining('السوق مباشر', box)?.classList.add('v81p-decision-live');
+    qa('p,span,small', box).forEach((el) => {
+      if (!el.classList.contains('v81p-decision-live')) el.classList.add('v81p-decision-muted');
+    });
+    const pref = smallestContaining('الأفضلية', box);
+    pref?.classList.add('v81p-preference-box');
+    return box;
+  };
+
+  const decorateSummaryCards = () => {
+    const next = smallestContaining('المحطة التالية');
+    next?.classList.add('v81p-next-station');
+
+    [
+      ['M5 الآن', 'blue'],
+      ['الهيكل السابق', 'green'],
+      ['التأكيد', 'orange'],
+      ['الموقع', 'orange'],
+    ].forEach(([needle, tone]) => {
+      const card = smallestContaining(needle);
+      if (!card || card.closest('.v81r-chart-stage') || card.closest('.v81r-results-grid')) return;
+      card.classList.add('v81p-mini-card', `v81p-mini-card-${tone}`);
+    });
+  };
+
+  const shortValue = (needle) => {
+    const el = smallestContaining(needle);
+    if (!el) return '';
+    let s = tx(el).replace(needle, '').replace(/\s+/g, ' ').trim();
+    return s.slice(0, 52);
+  };
+
+  const status = () => {
+    const body = tx(document.body);
+    if (body.includes('مشروط شراء')) return 'مشروط شراء';
+    if (body.includes('مشروط بيع')) return 'مشروط بيع';
+    if (body.includes('مؤكد')) return 'مؤكد';
+    return 'مراقبة';
+  };
+
+  const existingRuleCounts = () => {
+    const src = smallestContaining('القواعد التي بُنيت عليها النتيجة');
+    const s = tx(src || document.body);
+    const ok = s.match(/(\d+)\s*متحقق/);
+    const wait = s.match(/(\d+)\s*(?:انتظار|قيد الانتظار)/);
+    return { ok: ok ? ok[1] : '', wait: wait ? wait[1] : '' };
+  };
+
+  const ensureLogicStrip = () => {
+    if (q('.v81p-logic-strip')) return;
+    const chart = q('.v81r-chart-stage');
+    if (!chart) return;
+    const counts = existingRuleCounts();
+    const chips = [];
+    chips.push(`<span class="v81p-logic-chip state">الحالة: ${status()}</span>`);
+    const m5 = shortValue('M5 الآن');
+    const structure = shortValue('الهيكل السابق');
+    const confirm = shortValue('التأكيد');
+    if (m5) chips.push(`<span class="v81p-logic-chip">M5: ${m5}</span>`);
+    if (structure) chips.push(`<span class="v81p-logic-chip">الهيكل: ${structure}</span>`);
+    if (confirm) chips.push(`<span class="v81p-logic-chip wait">التأكيد: ${confirm}</span>`);
+    if (counts.ok) chips.push(`<span class="v81p-logic-chip ok">${counts.ok} قاعدة متحققة</span>`);
+    if (counts.wait) chips.push(`<span class="v81p-logic-chip wait">${counts.wait} انتظار</span>`);
+
+    const strip = document.createElement('section');
+    strip.className = 'v81p-logic-strip';
+    strip.setAttribute('aria-label', 'ربط النتيجة بالقواعد');
+    strip.innerHTML = `
+      <div class="v81p-logic-head">
+        <strong>ملخص سبب النتيجة</strong>
+        <span>من القواعد والبيانات الظاهرة نفسها</span>
+      </div>
+      <div class="v81p-logic-chips">${chips.join('')}</div>`;
+    chart.insertAdjacentElement('beforebegin', strip);
+  };
+
+  const decorateReadiness = () => {
+    const cards = qa('.v81r-side-card');
+    if (!cards.length) return;
+    let needsNote = false;
+    cards.forEach((card) => {
+      if (q('.v81p-readiness', card)) return;
+      const s = tx(card);
+      const missingStop = /Stop|إلغاء/.test(s) && s.includes('غير متوفر');
+      const missingTarget = s.includes('لا يوجد Target هندسي موثوق');
+      if (!missingStop && !missingTarget) return;
+      needsNote = true;
+      const note = document.createElement('div');
+      note.className = 'v81p-readiness';
+      note.textContent = missingStop
+        ? 'الخطة غير مكتملة: لا يوجد Stop / إلغاء صالح في النتيجة الحالية.'
+        : 'الهدف الهندسي غير متوفر؛ تبقى الخطة انتظارًا ولا يُنشأ هدف افتراضي.';
+      const prob = q('.v81r-prob', card);
+      (prob || card).insertAdjacentElement(prob ? 'beforebegin' : 'beforeend', note);
+    });
+
+    if (needsNote && !q('.v81p-execution-note')) {
+      const grid = q('.v81r-results-grid');
+      if (!grid) return;
+      const note = document.createElement('div');
+      note.className = 'v81p-execution-note';
+      note.textContent = 'الترجيح يشرح السيناريو ولا يساوي تنفيذًا مؤكدًا؛ التنفيذ يبقى مرتبطًا بـ Trigger وStop/Cancel وTarget صالح وبوابات القواعد.';
+      grid.insertAdjacentElement('afterend', note);
+    }
+  };
+
+  const apply = () => {
+    decorateDecision();
+    decorateSummaryCards();
+    ensureLogicStrip();
+    decorateReadiness();
+  };
+
+  const boot = () => {
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    [250, 700, 1400, 2600].forEach((ms) => setTimeout(apply, ms));
+    setTimeout(() => observer.disconnect(), 7000);
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  else boot();
+})();
+
