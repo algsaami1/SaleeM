@@ -1204,3 +1204,49 @@
   else boot();
 })();
 
+// SALEEM_V81_COMPACT_TEXT_CHART_TOOLBAR
+(() => {
+  const q = (s, root = document) => root.querySelector(s);
+  const qa = (s, root = document) => [...root.querySelectorAll(s)];
+
+  // The user explicitly requested deleting only the "ملخص سبب النتيجة" box.
+  const removeRejectedSummary = () => {
+    qa('.v81p-logic-strip').forEach((el) => el.remove());
+  };
+
+  const ensureChartToolbar = () => {
+    const tools = q('.v81r-chart-tools');
+    if (!tools) return;
+
+    const full = qa('button,a', tools).find((el) => (el.textContent || '').includes('عرض كامل'));
+    if (full) {
+      full.classList.add('v81c-fullscreen-action');
+      if (!full.getAttribute('aria-label')) full.setAttribute('aria-label', 'عرض الشارت كامل');
+    }
+
+    let note = q('.v81c-chart-refresh-note', tools);
+    if (!note) {
+      note = document.createElement('span');
+      note.className = 'v81c-chart-refresh-note';
+      note.innerHTML = '<strong>↻ تحديث الشارت</strong> — يظهر آخر شارت مع نتيجة التحليل الحالية';
+      tools.appendChild(note);
+    }
+  };
+
+  const apply = () => {
+    removeRejectedSummary();
+    ensureChartToolbar();
+  };
+
+  const boot = () => {
+    apply();
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    [180, 450, 900, 1600, 2800, 4500].forEach((ms) => setTimeout(apply, ms));
+    setTimeout(() => observer.disconnect(), 8000);
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot, { once: true });
+  else boot();
+})();
+
