@@ -21,83 +21,22 @@
     </header>
 
     {% if not result %}
-    <!-- SALEEM_V81_HOME_REFINED_FROM_REFERENCE -->
-    <section class="v81-home-shell" aria-label="واجهة SaleeM الرئيسية">
-      <header class="v81-home-header card">
-        <div class="v81-brand-wrap">
-          <div class="v81-brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 64 64" role="img" focusable="false">
-              <path d="M12 17 31 6l21 11v30L31 58 12 47Z" fill="none" stroke="currentColor" stroke-width="5" stroke-linejoin="round"/>
-              <path d="M23 38V22m9 27V15m9 23V25" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
-              <rect x="19" y="28" width="8" height="8" rx="1.5" fill="currentColor"/>
-              <rect x="28" y="22" width="8" height="12" rx="1.5" fill="currentColor"/>
-              <rect x="37" y="30" width="8" height="7" rx="1.5" fill="currentColor"/>
-            </svg>
-          </div>
-          <div class="v81-brand-copy">
-            <strong>SaleeM</strong>
-            <span>تحليل ذكي لشارت الذهب</span>
-          </div>
+    <!-- SALEEM_V81_HOME_VISIBLE_FIX -->
+    <section class="card upload-card live-refresh-card">
+      <div class="upload-heading">
+        <div>
+          <span class="eyebrow">تحليل مباشر من السوق</span>
+          <h1>شارت الذهب المباشر</h1>
+          <p>SaleeM يعتمد على شموع H4 / H1 / M15 / M5 المغلقة. لا تحتاج إلى رفع صورة شارت.</p>
         </div>
+      </div>
 
-        <div class="v81-market-pill" aria-label="السوق والفريم">
-          <span>XAUUSD</span>
-          <b>M5</b>
-        </div>
-
-        <div class="v81-last-candle" aria-live="polite">
-          <span class="v81-live-dot" aria-hidden="true"></span>
-          <span>آخر شمعة M5 مغلقة:</span>
-          <strong>{{ result_timestamp if result_timestamp else '—' }}</strong>
-        </div>
-      </header>
-
-      <section class="v81-launch-card card">
-        <p class="v81-launch-copy">
-          حلّل السوق مباشرة باستخدام الشموع المغلقة
-          <strong>H4 / H1 / M15 / M5</strong>
-        </p>
-
-        <form id="analysis-form" action="/refresh" method="post" class="v81-launch-form">
-          <button class="v81-start-analysis analyze-button" id="analyze-button" type="submit">
-            <span class="v81-start-icon" aria-hidden="true">
-              <svg viewBox="0 0 48 48" focusable="false">
-                <path d="M9 34V22m7 12V14m7 20V18m7 16V11" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
-                <circle cx="33.5" cy="31.5" r="7.5" fill="none" stroke="currentColor" stroke-width="3.2"/>
-                <path d="m39 37 5 5" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/>
-              </svg>
-            </span>
-            <span>ابدأ التحليل</span>
-          </button>
-
-          <button class="v81-refresh-secondary" type="submit" aria-label="تحديث الشارت">
-            <span aria-hidden="true">↻</span>
-            <span>تحديث الشارت</span>
-          </button>
-        </form>
-
-        <div class="v81-stage-strip" aria-label="مراحل التحليل">
-          <div class="v81-stage is-active">
-            <span class="v81-stage-icon" aria-hidden="true">▤</span>
-            <span>جلب البيانات</span>
-          </div>
-          <div class="v81-stage">
-            <span class="v81-stage-icon" aria-hidden="true">◷</span>
-            <span>H4 / H1</span>
-          </div>
-          <div class="v81-stage">
-            <span class="v81-stage-icon" aria-hidden="true">≋</span>
-            <span>M15 / M5</span>
-          </div>
-          <div class="v81-stage">
-            <span class="v81-stage-icon" aria-hidden="true">▱</span>
-            <span>المراجعة المرجعية</span>
-          </div>
-        </div>
-      </section>
+      <form id="analysis-form" action="/refresh" method="post">
+        <button class="analyze-button" id="analyze-button" type="submit">تحديث الشارت</button>
+      </form>
     </section>
 
-    <section class="card processing-card v81-processing-card" id="processing-card" hidden aria-live="polite">
+    <section class="card processing-card" id="processing-card" hidden aria-live="polite">
       <div class="progress-ring" id="progress-ring">
         <svg class="progress-svg" viewBox="0 0 180 180" aria-hidden="true">
           <circle class="progress-track" cx="90" cy="90" r="76"></circle>
@@ -119,6 +58,12 @@
           <span>تجهيز الشارت والسيناريو</span>
         </div>
       </div>
+    </section>
+
+    <section class="home-secondary" aria-label="مميزات التطبيق">
+      <span>OHLC مغلق</span>
+      <span>مراجعة مرجعية</span>
+      <span>مشروط / مؤكد / مراقبة</span>
     </section>
     {% endif %}
 

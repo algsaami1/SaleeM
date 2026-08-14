@@ -2028,3 +2028,21 @@ body[data-has-result="true"] .v77-trade-plan{display:none!important}
   .v81-stage { font-size: 11px; }
 }
 
+/* SALEEM_V81_HOME_VISIBLE_FIX: keep the primary V8.1 home action visible. */
+.live-refresh-card {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+.live-refresh-card #analysis-form {
+  display: block !important;
+}
+.live-refresh-card .analyze-button {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 54px;
+  width: min(100%, 360px);
+  margin-inline: auto;
+}
+
